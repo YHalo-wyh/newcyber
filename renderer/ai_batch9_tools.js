@@ -32,7 +32,15 @@
 
   function findingCards(findings=[]) {
     if (!findings.length) return '<div class="result-empty">当前输入没有形成高价值 finding。</div>';
-    return findings.map((f)=>`<div class="finding ${esc(f.severity||'info')}"><span>${esc(f.severity||'info')}</span><div><b>${esc(f.title||f.id)}</b><small>${esc(f.id||'')}</small><p>${esc(f.meaning||f.message||'')}</p>${f.evidence ? `<pre>${esc(typeof f.evidence==='string'?f.evidence:JSON.stringify(f.evidence,null,2))}</pre>`:''}${f.fix ? `<details><summary>修复与回归</summary><p><b>位置：</b>${esc(f.fix.target||'—')}</p><p><b>修复：</b>${esc(f.fix.action||'—')}</p><p><b>回归：</b>${esc(f.fix.regression||'—')}</p></details>`:''}</div></div>`).join('');
+    return findings.map((f)=>`<div class="finding ${esc(f.severity||'info')}"><span>${esc(f.severity||'info')}</span><div><b>${esc(f.title||f.id)}</b><small>${esc(f.id||'')}${f.line?` · line ${esc(f.line)}`:''}</small><p>${esc(f.meaning||f.message||'')}</p>${f.evidence ? `<pre>${esc(Array.isArray(f.evidence)?f.evidence.join('\n'):typeof f.evidence==='string'?f.evidence:JSON.stringify(f.evidence,null,2))}</pre>`:''}${f.fix ? `<details><summary>修复与回归</summary><p><b>位置：</b>${esc(f.fix.target||'—')}</p><p><b>修复：</b>${esc(f.fix.action||'—')}</p><p><b>回归：</b>${esc(f.fix.regression||'—')}</p></details>`:''}</div></div>`).join('');
+  }
+
+  function aiSourceResult(r) {
+    const surfaces=r.surfaces||{};
+    return `<div class="surface-row">${Object.entries(surfaces).map(([k,v])=>`<span class="surface ${v?'on':''}">${esc(k)}</span>`).join('')}</div>
+      ${findingCards(r.findings||[])}
+      ${r.remediationSummary ? `<p class="notice"><b>修复闭环：</b>${r.remediationSummary.actionable||0} 个 finding 有最小修复建议，${r.remediationSummary.regressions||0} 个有回归条件。</p>`:''}
+      ${r.hints?.length?`<div class="hint-list">${r.hints.map(x=>`<p>${esc(x)}</p>`).join('')}</div>`:''}`;
   }
 
   function adversarialResult(r) {
@@ -80,6 +88,7 @@
   }
 
   renderResult = function batch9RenderResult(tool,result) {
+    if (tool==='ai-source-scan') return aiSourceResult(result);
     if (tool==='ai-adversarial-audit') return adversarialResult(result);
     if (tool==='ai-privacy-audit') return privacyResult(result);
     if (tool==='ai-dataset-security') return datasetResult(result);
