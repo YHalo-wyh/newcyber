@@ -8,6 +8,7 @@ const { verifyMavlinkSignatureInput } = require('./mavlink_signing');
 const { analyzeEvmRuntime } = require('./evm_runtime_batch4');
 const { autoDecode } = require('./auto_decode');
 const { decryptCryptoContext } = require('./context_crypto');
+const { searchKnowledge, knowledgeStats } = require('../knowledge');
 
 function runTool(tool, payload = {}) {
   if (tool === 'can-analyze') return analyzeCanAdvanced(payload.input);
@@ -20,6 +21,10 @@ function runTool(tool, payload = {}) {
   if (tool === 'evm-disasm') return analyzeEvmRuntime(payload.input);
   if (tool === 'auto-decode') return autoDecode(payload.input, { maxDepth: payload.maxDepth });
   if (tool === 'context-crypto') return decryptCryptoContext(payload.input);
+  if (tool === 'knowledge-search') return {
+    results: searchKnowledge(payload.input, payload.domain || null, { track: payload.track, limit: payload.limit }),
+    stats: knowledgeStats()
+  };
   if (tool === 'solana-source-scan') return auditSolanaAnchor(payload.input) || { language: 'unknown', findings: [], notes: ['未检测到 Anchor/Solana Rust 特征。'] };
   return toolbox.runTool(tool, payload);
 }
