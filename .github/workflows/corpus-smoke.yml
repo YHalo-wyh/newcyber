@@ -32,7 +32,8 @@ jobs:
             /tmp/newcyber-corpus/web3 \
             /tmp/newcyber-corpus/udsctf \
             /tmp/newcyber-corpus/su_easyllm \
-            /tmp/newcyber-corpus/suctf_solana/programs/checkin/src/instructions
+            /tmp/newcyber-corpus/suctf_solana/programs/checkin/src/instructions \
+            /tmp/newcyber-corpus/wqb2025
 
           curl -fL --retry 3 -o /tmp/easy_can.zip 'https://github.com/CTF-Archives/2025-CISCN-Finals/releases/download/v1.0/ctf-easy_can_0472f45fbab6d039d804cd45e60ba30b.zip'
           echo '73d3646f68a589b0cace8379ea55570b32486ba183c0323611bf406b79969f5d  /tmp/easy_can.zip' | sha256sum -c -
@@ -77,6 +78,13 @@ jobs:
           grep -q 'SUCTF2Q25DnchainCheckin11111111111111111111' /tmp/newcyber-corpus/suctf_solana/programs/checkin/src/lib.rs
           grep -q 'seeds = \[b"checkin_state"\]' /tmp/newcyber-corpus/suctf_solana/programs/checkin/src/instructions/checkin.rs
           grep -q 'self.account3.key()' /tmp/newcyber-corpus/suctf_solana/programs/checkin/src/instructions/checkin.rs
+
+          curl -fL --retry 3 -o /tmp/wqb2025.zip \
+            'https://github.com/CTF-Archives/2025-WQB-Quals/releases/download/attachments/attachments.zip'
+          echo 'cd82d6329a56cdbf9a2e2550871bf1dbd254d5ac6c58bb1a5a1ef412e255992d  /tmp/wqb2025.zip' | sha256sum -c -
+          unzip -q /tmp/wqb2025.zip -d /tmp/newcyber-corpus/wqb2025
+          echo '=== WQB 2025 attachment inventory ==='
+          find /tmp/newcyber-corpus/wqb2025 -maxdepth 6 -type f -printf '%P\t%s bytes\n' | sort
 
           find /tmp/newcyber-corpus -maxdepth 8 -type f -printf '%p\n'
           sha256sum \
