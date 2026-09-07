@@ -85,7 +85,7 @@
       const eventRows = events.slice(0, 100).map((item) => [
         item.frameIndex || '—',
         item.type || '—',
-        item.commandName || item.command || item.device ?? '—',
+        (item.commandName || item.command || item.device) ?? '—',
         item.action || (item.shellCandidate ? 'PX4 shell candidate' : '—'),
         item.dataText || item.text || '—'
       ]);
