@@ -1,5 +1,5 @@
 const zlib = require('zlib');
-const { createBinaryArtifact } = require('./artifacts');
+const { createBinaryArtifact, MAX_ARTIFACT_BYTES } = require('./artifacts');
 
 const MAX_FIRMWARE_BYTES = 512 * 1024 * 1024;
 
@@ -50,6 +50,11 @@ function scanMagic(buffer) {
   return hits.sort((a,b)=>a.offset-b.offset);
 }
 
+function artifactIfFits(name, buffer, provenance, metadata) {
+  if (!Buffer.isBuffer(buffer) || buffer.length > MAX_ARTIFACT_BYTES) return null;
+  return createBinaryArtifact({ name, mediaType:'application/octet-stream', buffer, completeness:'complete', provenance, metadata });
+}
+
 function saneSegment(buffer, name, offset, length, source) {
   if (!Number.isInteger(offset) || !Number.isInteger(length) || offset < 0 || length <= 0) return null;
   if (offset + length > buffer.length) return { name, offset, length, complete:false, source, error:'declared-range-outside-file' };
@@ -58,7 +63,8 @@ function saneSegment(buffer, name, offset, length, source) {
     name, offset, offsetHex:`0x${offset.toString(16)}`, length, endOffset:offset+length, complete:true, source,
     entropy: entropy(data),
     magic: scanMagic(data.subarray(0, Math.min(data.length, 256))).map((x)=>({ ...x, offset:x.offset+offset, offsetHex:`0x${(x.offset+offset).toString(16)}` })),
-    artifact:createBinaryArtifact({ name:`firmware-${name}.bin`, mediaType:'application/octet-stream', buffer:data, completeness:'complete', provenance:[{ source:'firmware-segment', offset, length, parser:source }], metadata:{ kind:'firmware-segment', segment:name, offset, source } })
+    artifact: artifactIfFits(`firmware-${name}.bin`, data, [{ source:'firmware-segment', offset, length, parser:source }], { kind:'firmware-segment', segment:name, offset, source }),
+    exportDeferred: data.length > MAX_ARTIFACT_BYTES ? { reason:'artifact-size-limit', size:data.length, limit:MAX_ARTIFACT_BYTES } : null
   };
 }
 
@@ -83,7 +89,7 @@ function parseTpLink(buffer) {
     saneSegment(buffer,'rootfs',fields.rootfsOffset,fields.rootfsLength,`tplink-v${version}`),
     saneSegment(buffer,'bootloader',fields.bootOffset,fields.bootLength,`tplink-v${version}`)
   ].filter(Boolean);
-  return { vendor:'TP-Link', version, headerPreview:head, fields, segments, notes:['只有偏移与长度同时落在文件范围内才生成可导出的 segment artifact。'] };
+  return { vendor:'TP-Link', version, headerPreview:head, fields, segments, notes:['只有偏移与长度同时落在文件范围内才视为完整 segment；超出 artifact 上限时保留结构证据并建议外部 extractor。'] };
 }
 
 function parseUImage(buffer, offset) {
@@ -91,11 +97,13 @@ function parseUImage(buffer, offset) {
   const dataSize = u32be(buffer, offset + 12);
   const total = 64 + dataSize;
   const complete = offset + total <= buffer.length;
+  const data = complete ? buffer.subarray(offset,offset+total) : null;
   return {
     type:'uImage', offset, offsetHex:`0x${offset.toString(16)}`, headerSize:64, dataSize, totalSize:total, complete,
     loadAddress:u32be(buffer,offset+16), entryPoint:u32be(buffer,offset+20), os:buffer[offset+28], arch:buffer[offset+29], imageType:buffer[offset+30], compression:buffer[offset+31],
     name:buffer.subarray(offset+32,offset+64).toString('latin1').replace(/\0.*$/,'').trim(),
-    artifact:complete ? createBinaryArtifact({ name:'uimage.bin', mediaType:'application/octet-stream', buffer:buffer.subarray(offset,offset+total), completeness:'complete', provenance:[{source:'uimage-header',offset,length:total}], metadata:{kind:'firmware-uimage',offset,dataSize} }) : null
+    artifact:data ? artifactIfFits('uimage.bin', data, [{source:'uimage-header',offset,length:total}], {kind:'firmware-uimage',offset,dataSize}) : null,
+    exportDeferred:data && data.length > MAX_ARTIFACT_BYTES ? { reason:'artifact-size-limit', size:data.length, limit:MAX_ARTIFACT_BYTES } : null
   };
 }
 
@@ -105,9 +113,11 @@ function parseSquashFs(buffer, offset) {
   const blockSize = u32le(buffer, offset + 12);
   const inodes = u32le(buffer, offset + 4);
   const complete = Number.isInteger(bytesUsed) && bytesUsed > 0 && offset + bytesUsed <= buffer.length;
+  const data = complete ? buffer.subarray(offset,offset+bytesUsed) : null;
   return {
     type:'squashfs', offset, offsetHex:`0x${offset.toString(16)}`, bytesUsed, blockSize, inodes, complete,
-    artifact:complete ? createBinaryArtifact({ name:'rootfs.squashfs', mediaType:'application/octet-stream', buffer:buffer.subarray(offset,offset+bytesUsed), completeness:'complete', provenance:[{source:'squashfs-superblock',offset,length:bytesUsed}], metadata:{kind:'squashfs',offset,bytesUsed,blockSize,inodes} }) : null,
+    artifact:data ? artifactIfFits('rootfs.squashfs', data, [{source:'squashfs-superblock',offset,length:bytesUsed}], {kind:'squashfs',offset,bytesUsed,blockSize,inodes}) : null,
+    exportDeferred:data && data.length > MAX_ARTIFACT_BYTES ? { reason:'artifact-size-limit', size:data.length, limit:MAX_ARTIFACT_BYTES } : null,
     extractor:'unsquashfs'
   };
 }
@@ -118,7 +128,8 @@ function tryGunzip(buffer, offset) {
     if (!out.length) return null;
     return {
       type:'gzip-stream', offset, offsetHex:`0x${offset.toString(16)}`, outputSize:out.length, complete:true,
-      artifact:createBinaryArtifact({ name:'gzip-decoded.bin', mediaType:'application/octet-stream', buffer:out, completeness:'complete', provenance:[{source:'gzip',offset}], metadata:{kind:'gzip-decoded',offset} })
+      artifact:artifactIfFits('gzip-decoded.bin', out, [{source:'gzip',offset}], {kind:'gzip-decoded',offset}),
+      exportDeferred:out.length > MAX_ARTIFACT_BYTES ? { reason:'artifact-size-limit', size:out.length, limit:MAX_ARTIFACT_BYTES } : null
     };
   } catch { return null; }
 }
@@ -149,6 +160,7 @@ function analyzeFirmwareBuffer(input, options = {}) {
   if (tplink) findings.push({ severity:'info', id:'firmware-vendor-header', title:`识别 TP-Link 固件头 ${tplink.version}`, evidence:tplink.headerPreview.slice(0,96) });
   if (knownFs) findings.push({ severity:'info', id:'firmware-filesystem', title:'发现嵌入式文件系统候选', evidence:magic.filter((x)=>['squashfs-le','squashfs-be','jffs2-le','ubi','cramfs-le'].includes(x.id)).map((x)=>`${x.name}@${x.offsetHex}`).join(', ') });
   if (!knownFs && highEntropy) findings.push({ severity:'medium', id:'firmware-high-entropy-container', title:'固件主体高熵且未识别常见 rootfs', evidence:'可能是压缩、加密或厂商私有封装；先寻找头部长度/校验/密钥派生代码。' });
+  if (structures.some((x)=>x.exportDeferred)) findings.push({ severity:'info', id:'firmware-large-segment', title:'存在超出内置 artifact 导出上限的大型段', evidence:'结构信息已保留；使用 binwalk/unsquashfs/ubi reader 按 offset 或文件系统提取。' });
   const backends = [
     { tool:'binwalk', purpose:'签名扫描/递归提取', args:['-eM','<firmware>'], preferred:true },
     { tool:'unsquashfs', purpose:'SquashFS 解包', args:['-d','<output>','<squashfs>'], when:'squashfs' },
@@ -167,7 +179,7 @@ function analyzeFirmwareBuffer(input, options = {}) {
     findings,
     backends,
     nextActions:[
-      uniqueArtifacts.some((x)=>x.metadata?.kind==='squashfs') ? '已恢复完整 SquashFS：优先解包 rootfs 后审计 etc/init.d、Web/API、SSH/Telnet、密钥、更新校验与默认配置。' : null,
+      structures.some((x)=>x.type==='squashfs' && x.complete) ? '已定位完整 SquashFS：优先解包 rootfs 后审计 etc/init.d、Web/API、SSH/Telnet、密钥、更新校验与默认配置。' : null,
       magic.some((x)=>x.id==='ubi') ? '检测到 UBI：使用 ubi reader 恢复 volume，再识别 UBIFS/rootfs。' : null,
       magic.some((x)=>x.id==='jffs2-le') ? '检测到 JFFS2：按 erase block/endianness 验证后提取文件树。' : null,
       !knownFs && highEntropy ? '未识别常见文件系统且高熵：优先寻找厂商头、解密脚本、升级程序中的 key/KDF/校验逻辑。' : null
