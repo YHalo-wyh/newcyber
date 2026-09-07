@@ -5,7 +5,7 @@ const { analyzeTabularDataset, evaluateTabularCandidate } = require('./ai_tabula
 const { auditSolanaAnchor } = require('./solana');
 const { analyzeMavlinkAdvanced } = require('./low_altitude_final');
 const { verifyMavlinkSignatureInput } = require('./mavlink_signing');
-const { analyzeEvmRuntime } = require('./evm_runtime');
+const { analyzeEvmRuntime } = require('./evm_runtime_batch4');
 
 function runTool(tool, payload = {}) {
   if (tool === 'can-analyze') return analyzeCanAdvanced(payload.input);
