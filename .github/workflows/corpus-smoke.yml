@@ -5,6 +5,8 @@ on:
     paths:
       - 'src/**'
       - 'scripts/corpus-smoke.js'
+      - 'scripts/domestic-corpus-smoke.js'
+      - 'tests/**'
       - '.github/workflows/corpus-smoke.yml'
   workflow_dispatch:
 
@@ -27,7 +29,10 @@ jobs:
             /tmp/newcyber-corpus/easy_can \
             /tmp/newcyber-corpus/silentweights \
             /tmp/newcyber-corpus/starpwn \
-            /tmp/newcyber-corpus/web3
+            /tmp/newcyber-corpus/web3 \
+            /tmp/newcyber-corpus/udsctf \
+            /tmp/newcyber-corpus/su_easyllm \
+            /tmp/newcyber-corpus/suctf_solana/programs/checkin/src/instructions
 
           curl -fL --retry 3 -o /tmp/easy_can.zip 'https://github.com/CTF-Archives/2025-CISCN-Finals/releases/download/v1.0/ctf-easy_can_0472f45fbab6d039d804cd45e60ba30b.zip'
           echo '73d3646f68a589b0cace8379ea55570b32486ba183c0323611bf406b79969f5d  /tmp/easy_can.zip' | sha256sum -c -
@@ -47,15 +52,53 @@ jobs:
             'https://raw.githubusercontent.com/6boris/awesome-web3-contracts/ade79cc1140f56d7ffa5555012e566735233c6d4/contracts/CTF/Damn-Vulnerable-DeFi/15.ABI-Smuggling.sol'
           grep -q 'calldataload(calldataOffset)' /tmp/newcyber-corpus/web3/15.ABI-Smuggling.sol
 
-          find /tmp/newcyber-corpus -maxdepth 4 -type f -printf '%p\n'
+          curl -fL --retry 3 \
+            -o /tmp/newcyber-corpus/udsctf/README.md \
+            'https://raw.githubusercontent.com/yichen115/UDSCTF/bbc7610bcdea0c21e909f987bcf366a973cbcab1/README.md'
+          grep -q '7DF#0723144000000050' /tmp/newcyber-corpus/udsctf/README.md
+          grep -q 'seed \^ 0xdeadbeef' /tmp/newcyber-corpus/udsctf/README.md
+
+          curl -fL --retry 3 \
+            -o /tmp/newcyber-corpus/su_easyllm/easyLLM.py \
+            'https://raw.githubusercontent.com/team-su/SUCTF-2026/3529e65bed41dfc3f836bdeae95307c92d710692/AI/SU_easyLLM/%E8%A7%A3%E9%A2%98%E8%B5%9B%E6%A8%A1%E6%9D%BF/sourcecode/easyLLM.py'
+          grep -q 'LLM_PASSWORD = call_glm_once()' /tmp/newcyber-corpus/su_easyllm/easyLLM.py
+          grep -q 'KEY = derive_key_from_llm(LLM_PASSWORD' /tmp/newcyber-corpus/su_easyllm/easyLLM.py
+          grep -q 'TEMPERATURE = 0.28' /tmp/newcyber-corpus/su_easyllm/easyLLM.py
+
+          curl -fL --retry 3 \
+            -o /tmp/newcyber-corpus/suctf_solana/Anchor.toml \
+            'https://raw.githubusercontent.com/team-su/SUCTF-2025/c426821886acc6b06e9e48cd1da660f6aca4952b/misc/Onchain_Checkin/attachment/Anchor.toml'
+          curl -fL --retry 3 \
+            -o /tmp/newcyber-corpus/suctf_solana/programs/checkin/src/lib.rs \
+            'https://raw.githubusercontent.com/team-su/SUCTF-2025/c426821886acc6b06e9e48cd1da660f6aca4952b/misc/Onchain_Checkin/attachment/programs/checkin/src/lib.rs'
+          curl -fL --retry 3 \
+            -o /tmp/newcyber-corpus/suctf_solana/programs/checkin/src/instructions/checkin.rs \
+            'https://raw.githubusercontent.com/team-su/SUCTF-2025/c426821886acc6b06e9e48cd1da660f6aca4952b/misc/Onchain_Checkin/attachment/programs/checkin/src/instructions/checkin.rs'
+          grep -q 'SUCTF2Q25DnchainCheckin11111111111111111111' /tmp/newcyber-corpus/suctf_solana/programs/checkin/src/lib.rs
+          grep -q 'seeds = \[b"checkin_state"\]' /tmp/newcyber-corpus/suctf_solana/programs/checkin/src/instructions/checkin.rs
+          grep -q 'self.account3.key()' /tmp/newcyber-corpus/suctf_solana/programs/checkin/src/instructions/checkin.rs
+
+          find /tmp/newcyber-corpus -maxdepth 8 -type f -printf '%p\n'
           sha256sum \
             /tmp/newcyber-corpus/starpwn/eeprom.bin \
-            /tmp/newcyber-corpus/web3/15.ABI-Smuggling.sol
+            /tmp/newcyber-corpus/web3/15.ABI-Smuggling.sol \
+            /tmp/newcyber-corpus/udsctf/README.md \
+            /tmp/newcyber-corpus/su_easyllm/easyLLM.py \
+            /tmp/newcyber-corpus/suctf_solana/Anchor.toml \
+            /tmp/newcyber-corpus/suctf_solana/programs/checkin/src/lib.rs \
+            /tmp/newcyber-corpus/suctf_solana/programs/checkin/src/instructions/checkin.rs
 
-      - name: Run NewCyber against real public corpora
+      - name: Run NewCyber against four-track public corpora
         run: >-
           node scripts/corpus-smoke.js
           /tmp/newcyber-corpus/easy_can
           /tmp/newcyber-corpus/silentweights
           /tmp/newcyber-corpus/starpwn
           /tmp/newcyber-corpus/web3
+
+      - name: Run NewCyber against domestic challenge corpora
+        run: >-
+          node scripts/domestic-corpus-smoke.js
+          /tmp/newcyber-corpus/udsctf
+          /tmp/newcyber-corpus/su_easyllm
+          /tmp/newcyber-corpus/suctf_solana
