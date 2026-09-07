@@ -7,6 +7,10 @@ function evidence(source, index, length = 220) {
   return source.slice(start, Math.min(source.length, index + length)).trim();
 }
 
+function escapeRegExp(value) {
+  return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 function findBlockEnd(code, openBrace) {
   if (openBrace < 0 || code[openBrace] !== '{') return -1;
   let depth = 0;
@@ -41,54 +45,93 @@ function extractFunctions(code) {
   return functions;
 }
 
-function countMethodCalls(body, name) {
-  const re = new RegExp(`\\b${name.replace(/[$]/g, '\\$&')}\\.([A-Za-z_$][\\w$]*)\\s*\\(`, 'g');
+function countMethodCalls(body, expression) {
+  const escaped = escapeRegExp(expression);
+  const re = new RegExp(`\\b${escaped}\\.([A-Za-z_$][\\w$]*)\\s*\\(`, 'g');
   const methods = [];
   let match;
   while ((match = re.exec(body))) methods.push(match[1]);
   return methods;
 }
 
-function hasTrustValidation(body, name) {
-  const escaped = name.replace(/[$]/g, '\\$&');
+function hasTrustValidation(body, expression) {
+  const escaped = escapeRegExp(expression);
   const patterns = [
-    new RegExp(`(?:require|if)\\s*\\([^)]*\\b${escaped}\\b[^)]*(?:trusted|allow|white|registry|approved|known|codehash)`, 'i'),
+    new RegExp(`(?:require|if)\\s*\\([^)]*${escaped}[^)]*(?:trusted|allow|white|registry|approved|known|codehash)`, 'i'),
     new RegExp(`(?:trusted|allowed|whitelist|approved|registry)\\s*\\[\\s*${escaped}\\s*\\]`, 'i'),
-    new RegExp(`extcodehash\\s*\\([^)]*${escaped}`, 'i')
+    new RegExp(`extcodehash\\s*\\([^)]*${escaped}`, 'i'),
+    new RegExp(`${escaped}\\s*==\\s*[A-Za-z_$][\\w$]*(?:TRUSTED|ALLOWED|APPROVED|REGISTRY|MANAGER|FACTORY)[A-Za-z0-9_$]*`, 'i'),
+    new RegExp(`[A-Za-z_$][\\w$]*(?:TRUSTED|ALLOWED|APPROVED|REGISTRY|MANAGER|FACTORY)[A-Za-z0-9_$]*\\s*==\\s*${escaped}`, 'i')
   ];
   return patterns.some((pattern) => pattern.test(body));
+}
+
+function dependencyFinding(source, fn, dependency) {
+  const methods = [...new Set(countMethodCalls(fn.body, dependency.expression))];
+  if (!methods.length) return null;
+  const validated = hasTrustValidation(fn.body, dependency.expression);
+  const assetSensitive = /\b(?:safeTransferFrom|transferFrom|transfer|mint|burn|collect|approve|delegatecall|call)\s*\(/.test(fn.body);
+  const label = dependency.member
+    ? `${dependency.parameter}.${dependency.member}`
+    : dependency.parameter;
+  return {
+    id: 'external-contract-trust-boundary',
+    severity: validated ? 'low' : 'medium',
+    title: validated ? '外部合约依赖参与业务逻辑（存在来源校验迹象）' : '调用者可控外部合约进入业务信任边界',
+    line: lineNumberAt(source, fn.index),
+    evidence: evidence(source, fn.index),
+    message: `${fn.name} 从调用输入取得外部依赖 ${label} 并调用 ${methods.slice(0, 6).join(', ')}。${validated ? '检测到 allowlist/registry/固定地址/codehash 类来源校验迹象，仍需确认校验覆盖真实实现。' : '未发现明显来源约束；攻击者可实现兼容 ABI 伪造返回值或回调行为，需追踪这些结果是否影响资产、价格、权限、池地址或后续调用。'}`,
+    details: {
+      functionName: fn.name,
+      parameter: dependency.parameter,
+      member: dependency.member || null,
+      dependencyExpression: dependency.expression,
+      interfaceType: dependency.type || null,
+      methodCalls: methods,
+      validationEvidence: validated,
+      assetSensitive
+    }
+  };
 }
 
 function auditExternalContractTrust(source, code, functions) {
   const findings = [];
   for (const fn of functions) {
     if (!/\b(?:external|public)\b/.test(fn.modifiers)) continue;
-    const interfaceParams = [];
-    const paramRe = /\b(I[A-Z][A-Za-z0-9_$]*)\s+([A-Za-z_$][\w$]*)/g;
-    let param;
-    while ((param = paramRe.exec(fn.params))) interfaceParams.push({ type: param[1], name: param[2] });
 
-    for (const item of interfaceParams) {
-      const methods = countMethodCalls(fn.body, item.name);
-      if (!methods.length) continue;
-      const validated = hasTrustValidation(fn.body, item.name);
-      const assetSensitive = /\b(?:safeTransferFrom|transferFrom|transfer|mint|burn|collect|approve|delegatecall|call)\s*\(/.test(fn.body);
-      findings.push({
-        id: 'external-contract-trust-boundary',
-        severity: validated ? 'low' : 'medium',
-        title: validated ? '外部接口参数参与业务逻辑（存在来源校验迹象）' : '调用者可控外部接口进入业务信任边界',
-        line: lineNumberAt(source, fn.index),
-        evidence: evidence(source, fn.index),
-        message: `${fn.name} 接收 ${item.type} ${item.name} 并调用 ${[...new Set(methods)].slice(0, 6).join(', ')}。${validated ? '检测到 allowlist/registry/codehash 类校验迹象，仍需确认校验覆盖真实实现。' : '未发现明显 allowlist/registry/codehash 来源约束；攻击者可实现同 ABI 伪造返回值，需追踪这些返回值是否影响资产、价格、权限或后续调用。'}`,
-        details: {
-          functionName: fn.name,
-          parameter: item.name,
-          interfaceType: item.type,
-          methodCalls: [...new Set(methods)],
-          validationEvidence: validated,
-          assetSensitive
-        }
-      });
+    const dependencies = [];
+    const directRe = /\b(I[A-Z][A-Za-z0-9_$]*)\s+(?:(?:calldata|memory|storage)\s+)?([A-Za-z_$][\w$]*)/g;
+    let param;
+    while ((param = directRe.exec(fn.params))) {
+      dependencies.push({ type: param[1], parameter: param[2], expression: param[2], member: null });
+    }
+
+    // Struct/request parameters frequently hide caller-controlled contract fields:
+    //   function lock(LockParams calldata params) external { params.manager.positions(...); }
+    // We do not need to know the struct definition to recognize that a two-hop member
+    // is being invoked as a contract-like dependency.
+    const structParamRe = /\b([A-Z][A-Za-z0-9_$]*)\s+(?:(?:calldata|memory|storage)\s+)?([A-Za-z_$][\w$]*)/g;
+    while ((param = structParamRe.exec(fn.params))) {
+      const type = param[1];
+      const parameter = param[2];
+      const chainRe = new RegExp(`\\b${escapeRegExp(parameter)}\\.([A-Za-z_$][\\w$]*)\\.([A-Za-z_$][\\w$]*)\\s*\\(`, 'g');
+      let chain;
+      while ((chain = chainRe.exec(fn.body))) {
+        dependencies.push({
+          type,
+          parameter,
+          member: chain[1],
+          expression: `${parameter}.${chain[1]}`
+        });
+      }
+    }
+
+    const seen = new Set();
+    for (const dependency of dependencies) {
+      if (seen.has(dependency.expression)) continue;
+      seen.add(dependency.expression);
+      const finding = dependencyFinding(source, fn, dependency);
+      if (finding) findings.push(finding);
     }
   }
   return findings;
@@ -106,7 +149,7 @@ function auditPackedDynamicCollision(source, code, functions) {
     const packedRe = /abi\.encodePacked\s*\(([^;]*)\)/g;
     let packed;
     while ((packed = packedRe.exec(fn.body))) {
-      const used = dynamics.filter((name) => new RegExp(`\\b${name.replace(/[$]/g, '\\$&')}\\b`).test(packed[1]));
+      const used = dynamics.filter((name) => new RegExp(`\\b${escapeRegExp(name)}\\b`).test(packed[1]));
       if (used.length < 2) continue;
       const absoluteIndex = fn.openBrace + 1 + packed.index;
       findings.push({
