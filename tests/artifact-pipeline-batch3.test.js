@@ -18,7 +18,7 @@ test('binary artifact is hash-bound and rejects tampered payload', () => {
 test('UDS complete programming session emits exportable artifact and block provenance', () => {
   const sessions = [
     { canId: '0x7E0', complete: true, payload: '1002' },
-    { canId: '0x7E0', complete: true, payload: '34004400001000000006' },
+    { canId: '0x7E0', complete: true, payload: '3400441000000000000006' },
     { canId: '0x7E0', complete: true, payload: '3601aabbcc' },
     { canId: '0x7E0', complete: true, payload: '3602ddeeff' },
     { canId: '0x7E0', complete: true, payload: '37' }
@@ -34,7 +34,7 @@ test('UDS complete programming session emits exportable artifact and block prove
 
 test('UDS gap keeps evidence but refuses binary artifact', () => {
   const sessions = [
-    { canId: '0x7E0', complete: true, payload: '34004400001000000006' },
+    { canId: '0x7E0', complete: true, payload: '3400441000000000000006' },
     { canId: '0x7E0', complete: true, payload: '3601aabbcc' },
     { canId: '0x7E0', complete: true, payload: '3603ddeeff' },
     { canId: '0x7E0', complete: true, payload: '37' }
