@@ -1,6 +1,6 @@
 # NewCyber
 
-NewCyber 是为线下断网安全竞赛准备的多方向本地工具箱，当前重点服务第二届湾区杯决赛及国内同类赛事的四个方向：
+NewCyber 是面向安全竞赛的多方向分析工作台，当前重点覆盖国内同类赛事中的四个方向：
 
 - 车联网安全
 - 低空经济安全
@@ -9,12 +9,12 @@ NewCyber 是为线下断网安全竞赛准备的多方向本地工具箱，当�
 
 项目默认使用 **比赛模式**：拿到题目后优先选择整个赛题目录，让工具先判断方向、找 Flag 候选、恢复可继续利用的文件/固件，并把下一步压缩成 1～3 个动作。复杂协议字段、模型结构和 EVM 证据默认折叠，需要复核时再展开。
 
-目标不是“一键解题”，而是把比赛中重复、耗时、容易忘的步骤做成确定性离线工具，让只掌握基础原理的使用者也能顺着证据继续做出结果。
+目标不是“一键解题”，而是把比赛中重复、耗时、容易遗漏的分析步骤做成确定性工具，让只掌握基础原理的使用者也能顺着证据继续推进。
 
 ## 比赛模式
 
 1. 选择赛题目录。
-2. NewCyber 离线扫描附件并判断更像车联网、低空、AI 还是区块链。
+2. NewCyber 扫描附件并判断更像车联网、低空、AI 还是区块链。
 3. Flag 候选、高危线索、完整 firmware / FTP 文件 / 自动解码文件优先置顶。
 4. 页面只给最多 3 个下一步动作，例如“验证 Flag”“导出固件去 IDA”“先分析 implementation”。
 5. 卡住时再展开技术细节。
@@ -26,7 +26,7 @@ NewCyber 是为线下断网安全竞赛准备的多方向本地工具箱，当�
 ### 车联网
 
 - CAN/candump 分析：CAN ID、帧数、DLC、平均周期、变化字节、状态跃迁、递增 counter 候选
-- PCAPNG / SocketCAN 只读解析，保留原始包与 CAN 帧映射
+- PCAPNG / SocketCAN 解析，保留原始包与 CAN 帧映射
 - CANopen SDO：对象字典索引、读写请求、expedited / segmented transfer、toggle 与字符串重组
 - ISO-TP 多帧重组
 - UDS 解码：Session、SecurityAccess、DID、ReadMemoryByAddress、TransferData 等常见服务
@@ -35,16 +35,21 @@ NewCyber 是为线下断网安全竞赛准备的多方向本地工具箱，当�
 
 ### 低空经济
 
-- MAVLink v1/v2 原始十六进制流结构解析
-- 常见消息深度解析：HEARTBEAT、COMMAND_LONG、SERIAL_CONTROL、STATUSTEXT、FILE_TRANSFER_PROTOCOL 等
-- 飞控安全事件：ARM/DISARM、`ARM → SERIAL_CONTROL`、sequence gap、未签名 MAVLink2
-- MAVLink2 signing trailer：Link ID、48-bit timestamp、48-bit signature、timestamp rollback 线索
-- MAVLink2 签名离线验证：输入 32-byte key + signed frame，重算 SHA-256/48 并比较 wire signature
-- MAVLink CRC：对已内置的 common.xml 消息子集执行 X.25 + CRC_EXTRA 校验，明确区分 `valid / invalid / unknown-crc-extra`，未知 dialect 不猜
-- MAVLink FTP：session、opcode、request opcode、offset、path/data/error 拆解
-- MAVLink FTP 文件重组：按 remote/session/offset 聚合 ReadFile/BurstReadFile ACK，识别重传、冲突、gap 与 EOF，并只对完整覆盖生成可保存文件 artifact
-- ArduPilot AP_Param EEPROM / StorageKeys：固定结构定位、32-byte signing key 提取与哈希
-- NMEA RMC / GGA：经纬度、速度、高度、卫星数、轨迹范围与累计距离
+低空板块按 **信息侦查 / 协议欺骗 / 拒绝服务 / 注入攻击 / 信息泄露 / 固件攻击** 六类攻击面组织，不再把题型拆成大量孤立按钮。
+
+- **信息侦查**：Wi-Fi/SSID/BSSID/认证方式、端口与服务 banner、PCAP/PCAPNG 嗅探、设备/飞控/RTSP 指纹、消息频率与序列基线
+- **协议欺骗**：姿态、GPS、卫星、VFR_HUD、SYS_STATUS、电池和错误/紧急状态候选；MAVLink telemetry payload 会进入跨消息物理一致性检查
+- **遥测一致性**：解析 `GPS_RAW_INT / GLOBAL_POSITION_INT / ATTITUDE / SYS_STATUS / VFR_HUD`，检查位置跳变隐含速度、GPS 双源差异、姿态跳变与角速度、电池范围、sensor-health、VFR 地速/高度矛盾
+- **拒绝服务与状态阻断**：围栏参数变更、Deauth/Disassociation 日志、GPS offset、flight termination、视频中断、PreArm/阻止起飞、链路洪水等证据归因
+- **控制注入状态机**：解析 `SET_MODE / PARAM_SET / PARAM_VALUE / MISSION_COUNT / MISSION_ITEM / MISSION_ITEM_INT / COMMAND_LONG / COMMAND_ACK`，恢复发送方、参数写入、任务航点、命令与 ACK
+- **高风险控制语义**：地理围栏、failsafe/arming、飞行模式、DO_SET_HOME、DO_FLIGHTTERMINATION、相机/云台、航点上传、多控制源竞争
+- **信息泄露与取证**：飞行日志、参数、Wi-Fi 客户端、FTP、RTSP/RTP/H264/H265 线索；MAVLink FTP 按 remote/session/offset 重组文件
+- **MAVLink v1/v2**：帧结构、sequence、常见消息、CRC X.25 + CRC_EXTRA、MAVLink2 signing trailer、linkId、48-bit timestamp、signature rollback
+- **MAVLink2 签名验证**：输入 32-byte key + signed frame 重算 SHA-256/48；ArduPilot EEPROM / StorageKeys 可恢复 signing key 候选
+- **固件结构分析 / 解包**：识别 TP-Link v1/v2 厂商头、U-Boot uImage、SquashFS、JFFS2、UBI、CramFS、gzip、XZ、ELF、DTB、ZIP 等 magic
+- **固件 segment 恢复**：对有可靠 offset/length 的 kernel/rootfs/bootloader、uImage、SquashFS、gzip 解码结果生成带 SHA-256/provenance 的 artifact；大型段保留结构证据并交给 extractor
+- **固件 extractor backend**：可从工作台调用本机 `binwalk -eM`；SquashFS/JFFS2/UBI 分别给出 `unsquashfs / jefferson / ubireader_extract_files` 路线
+- **赛题题型矩阵**：覆盖 Wi-Fi 破解、端口侦查、数据嗅探、姿态/GPS/电池/状态欺骗、Deauth/GPS offset/终止飞行/阻止起飞、GCS/MAVLink/航点/传感器/云台/机载主机注入、日志/参数/FTP/摄像机泄露和固件攻击面
 
 ### 人工智能安全
 
@@ -54,7 +59,7 @@ NewCyber 是为线下断网安全竞赛准备的多方向本地工具箱，当�
 - 目标输出型生成题：提取 `from_pretrained()` 模型、generation 参数、目标字符串 oracle、输入长度限制并识别确定性 greedy generation
 - 结构化模型数据画像（CSV/TSV）：分位数、均值/标准差、强相关特征、中心样本索引、NaN/Inf 边界
 - 表格模型候选验证：计算 RMS standardized distance、Q05-Q95 主体区间和强相关条件残差，只评估 profile compatibility，不冒充真实模型 anomaly score
-- 高维表格数据自动进入 workspace AI 证据，用于 Isolation Forest / XGBoost / 风控模型题的第一轮离线分析
+- 高维表格数据自动进入 workspace AI 证据，用于 Isolation Forest / XGBoost / 风控模型题的第一轮分析
 - SafeTensors 深度结构审计：校验 dtype、shape、`data_offsets`、实际 byte range、越界、overlap 与长度一致性
 - NumPy NPY 深度审计：解析 descr/shape/fortran_order，校验固定 dtype payload 长度，并把 object dtype / pickle 语义显式标高风险
 - PyTorch ZIP 深度审计：沿用 storage/参数/训练日志证据，并静态解析 `data.pkl` pickle opcode / GLOBAL / STACK_GLOBAL；高风险 global 与普通 `torch.*` 引用分级，不执行 `torch.load` / `pickle.loads`
@@ -63,13 +68,15 @@ NewCyber 是为线下断网安全竞赛准备的多方向本地工具箱，当�
 
 - EVM calldata 拆分，识别常见 ERC-20 selector
 - 32-byte word 的 uint256 / address 候选展示
-- EVM runtime bytecode 离线反汇编
+- EVM runtime bytecode 反汇编
 - runtime dispatcher 恢复：`PUSH4 → EQ → JUMPI` selector 与 jump destination
 - EVM storage/state 证据：SLOAD/SSTORE、直接 slot 与同 basic block 低/中置信候选；不冒充完整符号执行
 - EVM 局部数据流：在单 basic block 内追踪 `CALLDATALOAD → MSTORE/CALLDATACOPY → SLOAD/SSTORE/CALL`，展示 CALL target/value/input 来源，跨 CFG 边界保持 unknown
 - EIP-1167 minimal proxy：只在 canonical runtime 完整匹配时恢复内嵌 implementation 地址
 - EIP-1967 proxy evidence：识别 implementation/admin/beacon 标准 storage slot，并把 slot 的 SLOAD/SSTORE 与 DELEGATECALL / upgrade selector 证据关联；只有 implementation slot 真正流入 DELEGATECALL 才给高置信
 - Solidity 静态规则：tx.origin、delegatecall、低级 call、初始化、ABI smuggling 等
+- Caller-controlled external contract trust：追踪函数参数或 calldata struct 中的外部接口对象，检查其返回值是否进入资产/价格/权限语义，并识别 allowlist/registry/codehash 等来源约束
+- `abi.encodePacked` 多动态参数 collision 证据与链属性弱随机证据
 - Solana / Anchor：Program ID、instruction、PDA seeds、Signer/AccountInfo、Anchor.toml、链上日志线索
 
 ### 通用 / 自动试解
@@ -83,23 +90,19 @@ NewCyber 是为线下断网安全竞赛准备的多方向本地工具箱，当�
 - 解出的完整二进制会生成 SHA-256 绑定 artifact，可直接导出继续解包、IDA/Ghidra 或取证
 - **中间结果一键试解**：任何工具跑出可疑数据后可直接继续，不用手工搬运多轮编码
 - **Workspace 轻量自动试解**：扫描小型文本附件中的明显编码串；解出的 Flag 直接进入比赛模式 Flag 候选，解出的文件进入“可继续利用的产物”
-- 对随机高熵数据不硬猜；AES / DES / 3DES / SM4 / RSA 等强加密若缺少 key、IV、mode 或题目约束，会明确提示需要上下文而不是伪造破解结果
-- 离线知识速查（UDS、MAVLink、AI、EVM）
-- 赛题目录只读扫描：文件类型、字符串、Flag/URL/IP 候选、WAV/PCAP/模型基础检查
+- 上下文强加密试解：从 Python/JS/TS/配置中提取 AES/SM4、mode、key、IV/nonce、tag、ciphertext；缺参数时保持 unknown
+- 结构化赛题知识库：按赛道维护 trigger/evidence/prerequisite/verify/false-positive/action/mutation playbook
+- 泛化样本生成：`generate-generalization-corpus.js` 与 `generate-uav-challenge-corpus.js` 生成语义保持的正例、负例和变异样本
 - Markdown 报告导出
-- 二进制 artifact 导出：主进程保存前重新校验 hex 长度、size、SHA-256 与 completeness，renderer 不直接写文件
+- 二进制 artifact 导出：主进程保存前重新校验 hex 长度、size、SHA-256 与 completeness
 
-## 真题回归 / Corpus
+## 泛化训练 / Corpus
 
-当前 CI 持续使用公开固定版本的真题或附件做回归，包括：
+当前 CI 同时维护三类门禁：
 
-- CISCN Finals：CAN / MQTT 等公开附件
-- UDSCTF：ISO-TP / UDS SecurityAccess / ReadMemory 等
-- USTC Hackergame 2023《小型大语言模型星球》：目标输出型生成题
-- SUCTF：SU_easyLLM、Onchain_Checkin、Onchain_Magician
-- LilCTF 2025《生蚝的宝藏》：真实 EVM runtime selector / storage 证据
-- STARPWN 2026 One to Rule Them All：ArduPilot EEPROM / MAVLink2 signing key
-- 湾区杯等公开附件 corpus
+- **真实公开题回归**：CISCN Finals、UDSCTF、SUCTF、LilCTF、STARPWN、Hackergame 等固定版本 corpus
+- **Semantic Generalization**：随机化 identifier、CAN ID、SYSID/COMPID、编码方式、控制参数与负例，统计正例召回和负例正确拒绝
+- **Holdout Challenge**：使用未针对题名编写规则的真实公开源码/附件验证能力族，例如 Paradigm CTF `token-locker` 的 external-contract trust boundary
 
 真题只用于暴露能力缺口与锁定泛化行为；核心规则不写题名特判。
 
@@ -121,26 +124,30 @@ npm test
 ## 设计原则
 
 1. **Beginner-first UI**：默认只展示方向、成果和下一步；底层证据折叠保留。
-2. **Offline-first**：核心工具不依赖网络。
-3. **Deterministic-first**：能用解析器、规则和明确算法完成的，不交给大模型猜。
-4. **赛道隔离**：车联网、低空、AI、区块链的工具和题目上下文不混在一起。
-5. **不执行不可信附件**：默认只读；模型文件不直接 `pickle.load` / `torch.load`。
-6. **辅助解题，不伪装成自动解题**：启发式结果必须人工确认；未知强加密不假装已经破解。
-7. **Real-corpus driven**：真题推动通用能力，回归锁行为，不为题名写特殊分支。
+2. **Deterministic analysis pipeline**：协议、文件结构、密码和状态机优先使用可复核解析器与明确算法。
+3. **赛道隔离**：车联网、低空、AI、区块链的工具和题目上下文不混在一起。
+4. **不执行不可信附件**：模型、固件和赛题文件以静态解析为主；模型文件不直接 `pickle.load` / `torch.load`。
+5. **辅助解题，不伪装成自动解题**：启发式结果必须人工确认；未知强加密不假装已经破解。
+6. **Real-corpus driven**：真题推动通用能力，回归锁行为，不为题名写特殊分支。
+7. **Semantic generalization gate**：正例换名/换参数后仍应命中，相似负例必须正确拒绝。
 8. **Artifact must be provable**：可保存产物必须绑定 size / SHA-256 / provenance；有 gap 或冲突就保留证据，不伪造完整文件。
 
 ## 代码结构
 
 ```text
-main.js                              Electron 主进程、IPC 与 artifact 保存校验
+main.js                              Electron 主进程、IPC、固件选择/解包与 artifact 保存校验
 preload.js                           渲染层白名单接口
 src/core/artifacts.js                统一二进制 artifact 格式与 SHA-256 校验
 src/core/auto_decode.js              多层自动解码 / 轻量密码尝试 / Flag 与文件头评分
 src/core/finals_analyzer*.js         四赛道 workspace 专项分析与批次扩展
-src/core/finals_analyzer_batch5.js   workspace 可疑字符串自动试解
+src/core/finals_analyzer_batch7.js   低空题型矩阵 / 固件 workspace enrichment
 src/core/vehicle*.js                 CAN / CANopen / ISO-TP / UDS / 刷写恢复
 src/core/uds_programming.js          UDS block map / firmware artifact
 src/core/low_altitude*.js            ArduPilot / MAVLink / signing / FTP
+src/core/uav_challenge_matrix*.js    低空六类攻击面与题型 Playbook 映射
+src/core/uav_telemetry.js             GPS/姿态/SYS_STATUS/VFR_HUD 物理一致性
+src/core/uav_control_flow.js          SET_MODE/PARAM/MISSION/COMMAND/ACK 控制状态机
+src/core/firmware_unpack.js           固件 magic、厂商头、uImage/SquashFS/segment carve
 src/core/mavlink_ftp_reassembly.js   MAVLink FTP 文件块重组与 artifact
 src/core/mavlink_crc.js              MAVLink X.25 / common CRC_EXTRA 校验
 src/core/ai_source.js                AI 源码与生成链审计
@@ -149,21 +156,24 @@ src/core/model.js                    PyTorch ZIP/storage/训练日志基础深�
 src/core/model_artifacts.js          SafeTensors / NPY / pickle opcode-global 结构审计
 src/core/evm_runtime*.js             EVM runtime / dispatcher / storage / 局部 data flow
 src/core/evm_proxy.js                EIP-1167 / EIP-1967 proxy evidence
+src/core/web3_general.js              external trust / packed dynamic / weak randomness
 src/core/solana.js                   Solana / Anchor 审计
+src/knowledge/*                      五类赛道结构化 Challenge Playbook
+scripts/generate-generalization-corpus.js  四赛道/通用语义变异 corpus 生成
+scripts/generate-uav-challenge-corpus.js   低空攻击面语义变异 corpus 生成
 renderer/competition_mode.js         默认比赛模式：成果和下一步优先
+renderer/uav_challenge_tools.js       低空六类分析器与固件工作台 UI
 renderer/auto_decode_tools.js        手动/中间结果一键自动试解 UI
-renderer/batch3_tools.js             Artifact pipeline / AI candidate / EVM data-flow UI
-renderer/batch4_tools.js             模型结构 / EVM proxy / MAVLink CRC UI
 renderer/artifact_tools.js           统一 artifact 保存动作
-renderer/*_tools.js                  各赛道独立 UI 扩展
 .github/workflows/corpus-smoke.yml   公开真题 corpus gate
+.github/workflows/generalization-smoke.yml 泛化 + holdout gate
 ```
 
 ## 下一批优先扩展
 
-- 通用：已知 key/IV 时的 AES / DES / 3DES / SM4 常见 mode 自动配方，以及从上下文自动带入候选 key/IV
+- 低空：TLOG 容器、PX4 ULog / ArduPilot DataFlash 深度时间线；802.11 management frame 与 RTP/RTSP capture 专项解析；自定义 MAVLink dialect CRC_EXTRA 表
+- 固件：TRX/CHK/厂商升级头、UBI/UBIFS/JFFS2 deterministic carve、rootfs 解包后自动服务/密钥/更新链审计
 - 车联网：UDS `dataFormatIdentifier` / 厂商自定义压缩与加密头识别、MQTT 车机协议证据
-- 低空：MAVLink TLOG、PX4 ULog / ArduPilot DataFlash、可加载自定义 dialect CRC_EXTRA 表
-- AI：XGBoost / LightGBM / Isolation Forest 树结构证据、ONNX/GGUF 深度检查、RAG 向量库离线审计
-- 区块链：跨 basic-block CFG evidence、beacon implementation 调用链、Diamond/EIP-2535、DeFi 资产流摘要
-- 通用：artifact 证据包（binary + provenance + report）统一导出、环境自检
+- AI：XGBoost / LightGBM / Isolation Forest 树结构证据、ONNX/GGUF 深度检查、RAG 向量库审计
+- 区块链：跨 basic-block CFG evidence、DeFi 资产流/flash-loan callback 状态机、Diamond/EIP-2535
+- 通用：KDF 派生链、artifact 证据包（binary + provenance + report）统一导出、环境自检
