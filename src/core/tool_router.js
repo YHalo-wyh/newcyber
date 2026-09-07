@@ -6,6 +6,7 @@ const { auditSolanaAnchor } = require('./solana');
 const { analyzeMavlinkAdvanced } = require('./low_altitude_final');
 const { verifyMavlinkSignatureInput } = require('./mavlink_signing');
 const { analyzeEvmRuntime } = require('./evm_runtime_batch4');
+const { autoDecode } = require('./auto_decode');
 
 function runTool(tool, payload = {}) {
   if (tool === 'can-analyze') return analyzeCanAdvanced(payload.input);
@@ -16,6 +17,7 @@ function runTool(tool, payload = {}) {
   if (tool === 'ai-tabular-profile') return analyzeTabularDataset(payload.input);
   if (tool === 'ai-tabular-candidate') return evaluateTabularCandidate(payload.input);
   if (tool === 'evm-disasm') return analyzeEvmRuntime(payload.input);
+  if (tool === 'auto-decode') return autoDecode(payload.input, { maxDepth: payload.maxDepth });
   if (tool === 'solana-source-scan') return auditSolanaAnchor(payload.input) || { language: 'unknown', findings: [], notes: ['未检测到 Anchor/Solana Rust 特征。'] };
   return toolbox.runTool(tool, payload);
 }
