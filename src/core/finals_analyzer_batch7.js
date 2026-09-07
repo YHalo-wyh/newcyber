@@ -1,7 +1,7 @@
 const fsp = require('fs/promises');
 const path = require('path');
 const base = require('./finals_analyzer_batch6');
-const { analyzeFirmwareBuffer } = require('./firmware_unpack');
+const { analyzeFirmwareBuffer } = require('./firmware_workbench');
 const { analyzeUavChallengeEvidence } = require('./uav_challenge_matrix_v3');
 
 const FIRMWARE_EXTENSIONS = new Set(['.bin','.img','.fw','.rom','.trx','.chk','.ubi','.squashfs','.jffs2']);
@@ -30,6 +30,8 @@ function stripArtifacts(result) {
       extractor: x.extractor, error: x.error
     })),
     artifactSummaries: (result.artifacts || []).map((a) => ({ name: a.name, size: a.size, sha256: a.sha256, metadata: a.metadata })),
+    securityStrings: (result.securityStrings || []).slice(0, 120),
+    clueSummary: result.clueSummary || {},
     findings: result.findings,
     backends: result.backends,
     nextActions: result.nextActions
@@ -52,6 +54,16 @@ async function enrichFirmware(rootPath, file) {
       file: file.path,
       count: 1,
       evidence: [summary.vendor ? `${summary.vendor.vendor} ${summary.vendor.version}` : null, ...summary.magic.slice(0, 6).map((x) => `${x.name}@${x.offsetHex}`)].filter(Boolean).join(', ')
+    });
+  }
+  if ((summary.clueSummary.credential || 0) + (summary.clueSummary.secret || 0) > 0) {
+    file.findings.push({
+      id: `firmware-sensitive-strings:${file.path}`,
+      severity: 'medium',
+      title: '固件中存在凭据/密钥相关线索',
+      file: file.path,
+      count: (summary.clueSummary.credential || 0) + (summary.clueSummary.secret || 0),
+      evidence: summary.securityStrings.filter((x) => ['credential','secret'].includes(x.kind)).slice(0, 8).map((x) => `${x.offsetHex}:${x.text}`).join(' | ')
     });
   }
   return true;
@@ -130,6 +142,7 @@ function buildUavSection(analysis) {
       lines.push(`### 固件：\`${file.path}\``, '');
       if (fw.vendor) lines.push(`- 厂商头：${fw.vendor.vendor} ${fw.vendor.version}`);
       if (fw.magic?.length) lines.push(`- 结构：${fw.magic.slice(0, 10).map((x) => `${x.name}@${x.offsetHex}`).join(', ')}`);
+      if (Object.keys(fw.clueSummary || {}).length) lines.push(`- 固件线索：${Object.entries(fw.clueSummary).map(([k,v]) => `${k}=${v}`).join(', ')}`);
       for (const action of fw.nextActions || []) lines.push(`- 下一步：${action}`);
       lines.push('');
     }
