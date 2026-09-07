@@ -75,6 +75,57 @@ function extractParameterNames(pickleStrings) {
   return [...new Set(matches)];
 }
 
+function shannonEntropy(buffer) {
+  if (!buffer?.length) return 0;
+  const counts = new Uint32Array(256);
+  for (const byte of buffer) counts[byte] += 1;
+  let result = 0;
+  for (const count of counts) {
+    if (!count) continue;
+    const p = count / buffer.length;
+    result -= p * Math.log2(p);
+  }
+  return Number(result.toFixed(3));
+}
+
+function embeddedFormat(buffer) {
+  if (!buffer?.length) return null;
+  const hex = buffer.subarray(0, 16).toString('hex');
+  if (hex.startsWith('89504e470d0a1a0a')) return 'PNG';
+  if (hex.startsWith('ffd8ff')) return 'JPEG';
+  if (hex.startsWith('504b0304')) return 'ZIP';
+  if (hex.startsWith('25504446')) return 'PDF';
+  if (hex.startsWith('7f454c46')) return 'ELF';
+  if (hex.startsWith('4d5a')) return 'PE';
+  if (hex.startsWith('52494646')) return 'RIFF';
+  return null;
+}
+
+function scanStoragePayload(buffer, name) {
+  if (!buffer) return null;
+  const strings = printableStrings(buffer, 5).slice(0, 120);
+  const joined = strings.join('\n');
+  const flags = [...new Set(joined.match(/(?:flag|ctf|wqb|FLAG|CTF|WQB)\{[^}\r\n]{1,200}\}/g) || [])].slice(0, 20);
+  const decodedCandidates = [];
+  for (const value of strings) {
+    if (value.length < 24 || value.length > 4096 || value.length % 4 || !/^[A-Za-z0-9+/]+={0,2}$/.test(value)) continue;
+    try {
+      const decoded = Buffer.from(value, 'base64').toString('utf8');
+      if (/^[\x09\x0a\x0d\x20-\x7e]{4,}$/.test(decoded)) decodedCandidates.push(decoded.slice(0, 500));
+    } catch {}
+  }
+  const noteworthyStrings = strings.filter((value) => /flag|ctf|wqb|secret|token|hidden|payload|adapter/i.test(value)).slice(0, 30);
+  return {
+    name,
+    bytes: buffer.length,
+    entropy: shannonEntropy(buffer),
+    embeddedFormat: embeddedFormat(buffer),
+    flags,
+    noteworthyStrings,
+    decodedCandidates: [...new Set(decodedCandidates)].slice(0, 20)
+  };
+}
+
 function inspectPytorchZip(buffer) {
   const zip = parseZipCentralDirectory(buffer);
   if (!zip) return null;
@@ -88,9 +139,15 @@ function inspectPytorchZip(buffer) {
   const dataPkl = dataPklEntry ? extractZipEntry(buffer, dataPklEntry) : null;
   const pickleStrings = printableStrings(dataPkl, 3).slice(0, 500);
   const parameterNames = extractParameterNames(pickleStrings);
-  const storageEntries = entries
+  const storageEntriesRaw = zip.entries
     .filter((entry) => /(^|\/)data\/\d+$/i.test(entry.name))
     .sort((a, b) => Number(a.name.match(/(\d+)$/)?.[1] || 0) - Number(b.name.match(/(\d+)$/)?.[1] || 0));
+  const storageEntries = storageEntriesRaw.map((entry) => ({
+    name: entry.name,
+    compression: entry.compression,
+    compressedSize: entry.compressedSize,
+    uncompressedSize: entry.uncompressedSize
+  }));
   const unusualNames = entries.filter((entry) => !/(^|\/)(data\.pkl|byteorder|version|\.data\/serialization_id|data\/\d+)$/i.test(entry.name));
 
   const storageSizes = storageEntries.map((entry) => entry.uncompressedSize).sort((a, b) => b - a);
@@ -99,6 +156,9 @@ function inspectPytorchZip(buffer) {
     storageOutliers.push(...storageEntries.filter((entry) => entry.uncompressedSize === storageSizes[0]));
   }
 
+  const storageScans = storageEntriesRaw.map((entry) => scanStoragePayload(extractZipEntry(buffer, entry), entry.name)).filter(Boolean);
+  const payloadEvidence = storageScans.filter((item) => item.flags.length || item.embeddedFormat || item.noteworthyStrings.length || item.decodedCandidates.length);
+
   return {
     format: 'PyTorch ZIP',
     entryCount: entries.length,
@@ -106,11 +166,13 @@ function inspectPytorchZip(buffer) {
     storageCount: storageEntries.length,
     storageEntries,
     storageOutliers,
+    storageScans,
+    payloadEvidence,
     parameterNames,
     pickleStrings,
     unusualNames,
     notes: [
-      '仅解析 ZIP 中央目录并读取 data.pkl 字节，不执行 pickle / torch.load。',
+      '仅解析 ZIP 中央目录、data.pkl 与 tensor storage 原始字节，不执行 pickle / torch.load。',
       'storage 数量、尺寸与训练日志/预期架构不一致时，应优先检查是否存在隐藏参数、适配器或附加数据。'
     ]
   };
@@ -167,6 +229,12 @@ function auditPytorchAgainstTrainingLog(inspection, trainingLog = '') {
     message: `发现异常大的 tensor storage：${inspection.storageOutliers.map((item) => `${item.name} (${item.uncompressedSize} bytes)`).join(', ')}`,
     evidence: inspection.storageOutliers
   });
+  if (inspection.payloadEvidence?.length) findings.push({
+    severity: 'high',
+    type: 'storage-payload-evidence',
+    message: `tensor storage 中发现可疑载荷证据：${inspection.payloadEvidence.map((item) => item.name).join(', ')}`,
+    evidence: inspection.payloadEvidence
+  });
   if (baselineBytes && exportedBytes && exportedBytes > baselineBytes) findings.push({
     severity: 'medium',
     type: 'checkpoint-size-growth',
@@ -181,6 +249,7 @@ function auditPytorchAgainstTrainingLog(inspection, trainingLog = '') {
     parameterStorageMap,
     suspiciousMappings,
     storageOutliers: inspection.storageOutliers || [],
+    payloadEvidence: inspection.payloadEvidence || [],
     baselineBytes,
     exportedBytes,
     findings
@@ -193,5 +262,7 @@ module.exports = {
   inspectPytorchZip,
   printableStrings,
   extractParameterNames,
+  scanStoragePayload,
+  shannonEntropy,
   auditPytorchAgainstTrainingLog
 };
