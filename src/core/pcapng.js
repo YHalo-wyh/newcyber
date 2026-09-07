@@ -1,4 +1,4 @@
-const { analyzeCanAdvanced } = require('./vehicle');
+const { analyzeCanAdvanced } = require('./vehicle_final');
 
 const LINKTYPE_CAN_SOCKETCAN = 227;
 
