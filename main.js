@@ -65,7 +65,7 @@ function registerIpc() {
     const result = await dialog.showSaveDialog(win, {
       title: '导出二进制产物',
       defaultPath: decoded.name,
-      filters: [{ name: 'Binary artifact', extensions: [path.extname(decoded.name).replace(/^\./, '') || 'bin'] }
+      filters: [{ name: 'Binary artifact', extensions: [path.extname(decoded.name).replace(/^\./, '') || 'bin'] }]
     });
     if (result.canceled || !result.filePath) return null;
     await fs.writeFile(result.filePath, decoded.buffer);
