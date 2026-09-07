@@ -2,6 +2,7 @@ const fs = require('fs/promises');
 const path = require('path');
 const { scanWorkspace } = require('../src/core/analyzer');
 const { parsePcapng } = require('../src/core/pcapng');
+const { inspectPytorchZip } = require('../src/core/model');
 
 async function summarize(label, root) {
   const analysis = await scanWorkspace(path.resolve(root));
@@ -51,6 +52,34 @@ async function testEasyCan(root, analysis) {
   }
 }
 
+async function testSilentWeights(root, analysis) {
+  const aiScore = analysis.categories.find((item) => item.name === 'AI / ML')?.score || 0;
+  if (aiScore <= 0) throw new Error('SilentWeights: AI / ML classification did not trigger');
+  const model = analysis.files.find((file) => ['.pth', '.pt'].includes(file.extension));
+  if (!model) throw new Error('SilentWeights: PyTorch model artifact not found');
+
+  const modelBuffer = await fs.readFile(path.join(root, model.path));
+  const inspection = inspectPytorchZip(modelBuffer);
+  if (!inspection) throw new Error('SilentWeights: PyTorch ZIP inspection failed');
+
+  const readmePath = path.join(root, 'README.txt');
+  const logPath = path.join(root, 'training.log');
+  const [readme, trainingLog] = await Promise.all([
+    fs.readFile(readmePath, 'utf8'),
+    fs.readFile(logPath, 'utf8')
+  ]);
+
+  console.log('\n=== SILENTWEIGHTS SAFE MODEL CHECK ===');
+  console.log('README.txt:\n' + readme.trim());
+  console.log('\ntraining.log:\n' + trainingLog.trim());
+  console.log('\nPyTorch ZIP inspection:\n' + JSON.stringify(inspection, null, 2));
+
+  if (!inspection.entries.some((entry) => /data\.pkl$/i.test(entry.name))) {
+    throw new Error('SilentWeights: data.pkl was not found');
+  }
+  if (!inspection.storageCount) throw new Error('SilentWeights: tensor storage entries were not found');
+}
+
 async function main() {
   const easyCan = process.argv[2];
   const silentWeights = process.argv[3];
@@ -60,12 +89,7 @@ async function main() {
   const ai = await summarize('WQB-2026-SilentWeights', silentWeights);
 
   await testEasyCan(path.resolve(easyCan), vehicle);
-
-  const aiScore = ai.categories.find((item) => item.name === 'AI / ML')?.score || 0;
-  if (aiScore <= 0) throw new Error('SilentWeights: AI / ML classification did not trigger');
-  const model = ai.files.find((file) => ['.pth', '.pt', '.safetensors', '.onnx'].includes(file.extension));
-  if (!model) throw new Error('SilentWeights: model artifact not found');
-  if (!model.metadata) throw new Error('SilentWeights: model artifact was not structurally inspected');
+  await testSilentWeights(path.resolve(silentWeights), ai);
 
   console.log('\nCorpus smoke assertions passed.');
 }
