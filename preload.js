@@ -8,5 +8,8 @@ contextBridge.exposeInMainWorld('newcyber', {
   saveArtifact: (artifact) => ipcRenderer.invoke('artifact:save', artifact),
   chooseAndAnalyzeFirmware: () => ipcRenderer.invoke('firmware:choose-analyze'),
   extractFirmwareWithBinwalk: (filePath) => ipcRenderer.invoke('firmware:extract-binwalk', filePath),
+  getAiBackendStatus: () => ipcRenderer.invoke('ai:backend-status'),
+  chooseAndScanAiModel: () => ipcRenderer.invoke('ai:model-choose-scan'),
+  rescanAiModel: (filePath) => ipcRenderer.invoke('ai:model-rescan', filePath),
   runTool: (tool, payload) => ipcRenderer.invoke('toolbox:run', tool, payload)
 });
