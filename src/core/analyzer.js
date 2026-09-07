@@ -2,12 +2,16 @@ const fsp = require('fs/promises');
 const path = require('path');
 const crypto = require('crypto');
 const { analyzeKnownFormat } = require('./formats');
+const { parsePcapng } = require('./pcapng');
+const { inspectPytorchZip } = require('./model');
 
 const LIMITS = {
   maxFiles: 6000,
   hashBytes: 32 * 1024 * 1024,
   previewBytes: 256 * 1024,
-  stringsBytes: 2 * 1024 * 1024
+  stringsBytes: 2 * 1024 * 1024,
+  structuredBytes: 64 * 1024 * 1024,
+  correlationTextBytes: 1024 * 1024
 };
 
 const IGNORED_DIRS = new Set(['.git', 'node_modules', '.venv', 'venv', '__pycache__', 'dist', 'build']);
@@ -148,6 +152,19 @@ async function readHead(filePath, size) {
   }
 }
 
+async function structuredMetadata(filePath, stat, head, type, ext) {
+  let buffer = head;
+  if ((type === 'PCAPNG 流量' || ['.pt', '.pth'].includes(ext)) && stat.size <= LIMITS.structuredBytes && head.length !== stat.size) {
+    buffer = await fsp.readFile(filePath);
+  }
+  if (type === 'PCAPNG 流量') return parsePcapng(buffer);
+  if (['.pt', '.pth'].includes(ext)) {
+    const pytorch = inspectPytorchZip(buffer);
+    if (pytorch) return { ...pytorch, safeModelInspection: true };
+  }
+  return analyzeKnownFormat(buffer, type, ext);
+}
+
 async function analyzeFile(rootPath, filePath, categoryScores) {
   const stat = await fsp.stat(filePath);
   const relativePath = path.relative(rootPath, filePath);
@@ -159,7 +176,7 @@ async function analyzeFile(rootPath, filePath, categoryScores) {
   const signals = extractSignals(text, relativePath);
   const hashBuffer = stat.size <= LIMITS.hashBytes ? await fsp.readFile(filePath) : head;
   const sha256 = crypto.createHash('sha256').update(hashBuffer).digest('hex');
-  const metadata = analyzeKnownFormat(head, type, ext);
+  const metadata = await structuredMetadata(filePath, stat, head, type, ext);
   return {
     path: relativePath,
     name: path.basename(filePath),
@@ -178,13 +195,72 @@ async function analyzeFile(rootPath, filePath, categoryScores) {
   };
 }
 
-function recommendations(categories, files, findings) {
+async function deriveWorkspaceInsights(root, files) {
+  const findings = [];
+  const insights = [];
+
+  for (const file of files) {
+    const can = file.metadata?.can;
+    if (!can?.ids?.length) continue;
+    const signal188 = can.ids.find((item) => item.id === '0x188');
+    const rightTransition = signal188?.transitions?.find((event) => event.changes?.some((change) => change.byteIndex === 0 && (change.setBits & 0x02) === 0x02));
+    if (rightTransition) {
+      insights.push({
+        kind: 'can-state-transition',
+        title: 'CAN 0x188 首次置位 0x02',
+        file: file.path,
+        frameIndex: rightTransition.frameIndex,
+        packetIndex: rightTransition.packetIndex,
+        timestamp: rightTransition.timestamp,
+        payload: rightTransition.payload,
+        rawFrameHex: rightTransition.rawFrameHex,
+        evidence: `frame=${rightTransition.frameIndex}, payload=${rightTransition.payload}, raw=${rightTransition.rawFrameHex || 'n/a'}`
+      });
+    }
+  }
+
+  const textFiles = files.filter((file) => ['.txt', '.log', '.md'].includes(file.extension) && file.size <= LIMITS.correlationTextBytes);
+  const textChunks = [];
+  for (const file of textFiles) {
+    try {
+      const content = await fsp.readFile(path.join(root, file.path), 'utf8');
+      textChunks.push({ file: file.path, content, lower: content.toLowerCase() });
+    } catch {}
+  }
+  const deniesAdapter = textChunks.find((item) => /no\s+(?:extra\s+)?adapter|without\s+(?:an\s+)?adapter|未(?:使用|加载).{0,20}adapter|没有.{0,20}adapter/i.test(item.content));
+  const modelWithAdapter = files.find((file) => ['.pt', '.pth'].includes(file.extension) && file.metadata?.pickleStrings?.some((value) => /adapter/i.test(value)));
+  if (deniesAdapter && modelWithAdapter) {
+    const adapterNames = modelWithAdapter.metadata.pickleStrings.filter((value) => /adapter/i.test(value)).slice(0, 8);
+    findings.push({
+      id: `model-log-contradiction:${modelWithAdapter.path}`,
+      severity: 'high',
+      title: '模型结构与训练记录矛盾：发现额外 Adapter 参数',
+      file: modelWithAdapter.path,
+      count: adapterNames.length || 1,
+      evidence: `${deniesAdapter.file} 声明未使用 adapter；模型出现 ${adapterNames.join(', ')}`
+    });
+    insights.push({
+      kind: 'model-log-contradiction',
+      title: '训练记录否认 Adapter，但 checkpoint 中存在 Adapter',
+      file: modelWithAdapter.path,
+      relatedFile: deniesAdapter.file,
+      names: adapterNames,
+      storageCount: modelWithAdapter.metadata.storageCount,
+      largestStorages: [...(modelWithAdapter.metadata.storageEntries || [])].sort((a, b) => b.uncompressedSize - a.uncompressedSize).slice(0, 3)
+    });
+  }
+
+  return { findings, insights };
+}
+
+function recommendations(categories, files, findings, insights = []) {
   const top = categories.filter((item) => item.score > 0).slice(0, 3).map((item) => item.name);
   const items = ['先固定原始附件哈希，所有解包和修改都在副本中进行。'];
   if (top.includes('AI / ML')) items.push('模型文件按不可信工件处理：先检查结构和元数据，避免直接 pickle/torch.load。');
   if (top.includes('取证 / 流量')) items.push('按时间线关联流量、日志和业务动作；音频题优先查看频谱、分段长度与重复模式。');
   if (findings.some((item) => item.title.includes('命令拼接'))) items.push('优先核对语音识别、模型输出等不可信文本是否进入 shell 命令。');
-  if (files.some((file) => file.type === 'PCAP 流量')) items.push('对 PCAP 建立会话清单，并将可疑请求与服务端代码位置互相印证。');
+  if (files.some((file) => file.type === 'PCAP 流量' || file.type === 'PCAPNG 流量')) items.push('对 PCAP/PCAPNG 建立会话或总线事件清单，并将状态跃迁与题目业务动作互相印证。');
+  if (insights.some((item) => item.kind === 'model-log-contradiction')) items.push('优先检查 checkpoint 中训练记录未声明的参数/adapter，并对异常 storage 做字节级提取与编码识别。');
   return items;
 }
 
@@ -209,12 +285,13 @@ async function scanWorkspace(rootPath) {
     .map(([name, score]) => ({ name, score }))
     .sort((a, b) => b.score - a.score || a.name.localeCompare(b.name));
   const severityOrder = { high: 0, medium: 1, low: 2 };
-  const findings = files.flatMap((file) => file.findings).sort((a, b) => severityOrder[a.severity] - severityOrder[b.severity]);
+  const derived = await deriveWorkspaceInsights(root, files);
+  const findings = [...files.flatMap((file) => file.findings), ...derived.findings].sort((a, b) => severityOrder[a.severity] - severityOrder[b.severity]);
   const flags = files.flatMap((file) => file.flags.map((value) => ({ value, file: file.path })));
   const urls = [...new Set(files.flatMap((file) => file.urls))];
   const ips = [...new Set(files.flatMap((file) => file.ips))];
   return {
-    version: 1,
+    version: 2,
     scannedAt: new Date().toISOString(),
     workspacePath: root,
     workspaceName: path.basename(root),
@@ -223,13 +300,15 @@ async function scanWorkspace(rootPath) {
       files: files.length,
       bytes: files.reduce((sum, file) => sum + file.size, 0),
       findings: findings.length,
-      flags: flags.length
+      flags: flags.length,
+      insights: derived.insights.length
     },
     categories,
     files,
     findings,
+    insights: derived.insights,
     candidates: { flags, urls, ips },
-    recommendations: recommendations(categories, files, findings)
+    recommendations: recommendations(categories, files, findings, derived.insights)
   };
 }
 
@@ -261,7 +340,11 @@ function buildMarkdownReport(analysis, notes = '') {
     '',
     '## 关键发现',
     '',
-    ...(analysis.findings.length ? analysis.findings.map((item) => `- **${item.severity.toUpperCase()}** ${item.title} — \`${item.file}\`（${item.count} 处）`) : ['- 静态扫描未发现明显高风险模式。']),
+    ...(analysis.findings.length ? analysis.findings.map((item) => `- **${item.severity.toUpperCase()}** ${item.title} — \`${item.file}\`（${item.count} 处）${item.evidence ? `：${item.evidence}` : ''}`) : ['- 静态扫描未发现明显高风险模式。']),
+    '',
+    '## 确定性洞察',
+    '',
+    ...((analysis.insights || []).length ? analysis.insights.map((item) => `- **${item.title}** — \`${item.file}\`${item.evidence ? `：${item.evidence}` : ''}`) : ['- 暂无。']),
     '',
     '## Flag 候选',
     '',
