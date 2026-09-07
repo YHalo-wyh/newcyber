@@ -55,20 +55,24 @@ function auditAiChallengeSource(input) {
   }
 
   // Real-challenge pattern: speech/LLM output is interpolated into a shell command.
-  // This keeps the rule generic: the variable may be named transcription, transcript,
-  // recognized_text, model_output, etc. and the sink may be asyncio/subprocess/os.system.
+  // Cover both direct sink interpolation and the common one-hop form:
+  //   cmd = f"...{transcription}"; create_subprocess_shell(cmd)
   const aiTextSource = firstMatch(source, /\b(?:transcription|transcript|recognized_text|recognised_text|speech_text|asr_(?:text|output)|whisper_(?:text|output)|llm_(?:out|output)|model_(?:out|output)|response_text)\b/i);
   const shellSink = firstMatch(source, /(?:asyncio\.create_subprocess_shell\s*\(|subprocess\.(?:run|Popen|call|check_output)\s*\([^\r\n]{0,500}shell\s*=\s*True|os\.system\s*\()/is);
-  const shellInterpolation = firstMatch(source, /(?:create_subprocess_shell|os\.system|subprocess\.(?:run|Popen|call|check_output))[\s\S]{0,700}(?:\{\s*(?:transcription|transcript|recognized_text|recognised_text|speech_text|asr_(?:text|output)|whisper_(?:text|output)|llm_(?:out|output)|model_(?:out|output)|response_text)\s*\}|\+\s*(?:transcription|transcript|recognized_text|recognised_text|speech_text|asr_(?:text|output)|whisper_(?:text|output)|llm_(?:out|output)|model_(?:out|output)|response_text)|%\s*(?:transcription|transcript|recognized_text|recognised_text|speech_text|asr_(?:text|output)|whisper_(?:text|output)|llm_(?:out|output)|model_(?:out|output)|response_text))/is);
-  if (aiTextSource && shellSink && shellInterpolation) {
-    const anchor = Math.min(aiTextSource.index, shellSink.index, shellInterpolation.index);
+  const directShellFlow = firstMatch(source, /(?:create_subprocess_shell|os\.system|subprocess\.(?:run|Popen|call|check_output))[\s\S]{0,700}(?:\{\s*(?:transcription|transcript|recognized_text|recognised_text|speech_text|asr_(?:text|output)|whisper_(?:text|output)|llm_(?:out|output)|model_(?:out|output)|response_text)\s*\}|\+\s*(?:transcription|transcript|recognized_text|recognised_text|speech_text|asr_(?:text|output)|whisper_(?:text|output)|llm_(?:out|output)|model_(?:out|output)|response_text)|%\s*(?:transcription|transcript|recognized_text|recognised_text|speech_text|asr_(?:text|output)|whisper_(?:text|output)|llm_(?:out|output)|model_(?:out|output)|response_text))/is);
+  const aiInterpolation = firstMatch(source, /(?:f["'`][^\r\n]{0,600}\{\s*(?:transcription|transcript|recognized_text|recognised_text|speech_text|asr_(?:text|output)|whisper_(?:text|output)|llm_(?:out|output)|model_(?:out|output)|response_text)\s*\}[^\r\n]*["'`]|["'`][^\r\n]{0,500}["'`]\s*\+\s*(?:transcription|transcript|recognized_text|recognised_text|speech_text|asr_(?:text|output)|whisper_(?:text|output)|llm_(?:out|output)|model_(?:out|output)|response_text)|(?:transcription|transcript|recognized_text|recognised_text|speech_text|asr_(?:text|output)|whisper_(?:text|output)|llm_(?:out|output)|model_(?:out|output)|response_text)\s*\+\s*["'`])/is);
+  const oneHopShellFlow = Boolean(aiInterpolation && shellSink && aiInterpolation.index < shellSink.index && shellSink.index - aiInterpolation.index <= 1200);
+
+  if (aiTextSource && shellSink && (directShellFlow || oneHopShellFlow)) {
+    const evidenceAnchor = directShellFlow || aiInterpolation;
+    const anchor = Math.min(aiTextSource.index, shellSink.index, evidenceAnchor.index);
     findings.push({
       severity: 'high',
       id: 'ai-output-shell-injection',
       title: 'AI / ASR 输出直接进入 Shell 命令',
       count: 1,
       line: lineNumberAt(source, anchor),
-      evidence: [lineEvidence(source, aiTextSource.index), lineEvidence(source, shellSink.index, 320)],
+      evidence: [lineEvidence(source, aiTextSource.index), lineEvidence(source, evidenceAnchor.index, 260), lineEvidence(source, shellSink.index, 260)],
       message: '检测到模型/语音识别文本被拼接进 Shell sink。若攻击者可影响模型输入或生成结果，应按命令注入链处理；优先改为无 shell 的 argv 调用，并对跨模型边界的数据保持不可信标记。'
     });
   }
