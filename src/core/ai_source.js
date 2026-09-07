@@ -16,6 +16,57 @@ function firstMatch(source, regex) {
   return match ? { index: match.index, text: match[0] } : null;
 }
 
+function extractGenerationChallenge(source) {
+  const modelIds = [...source.matchAll(/(?:AutoModelForCausalLM|AutoTokenizer|AutoModel)\.from_pretrained\s*\(\s*["']([^"']+)["']/g)]
+    .map((match) => match[1]);
+  const generationCall = firstMatch(source, /\b[A-Za-z_$][\w$]*\.generate\s*\([\s\S]{0,1400}?\)/m);
+  const generation = {};
+  if (generationCall) {
+    const parseNumber = (name) => {
+      const match = generationCall.text.match(new RegExp(`\\b${name}\\s*=\\s*([0-9]+(?:\\.[0-9]+)?)`, 'i'));
+      return match ? Number(match[1]) : null;
+    };
+    const parseBool = (name) => {
+      const match = generationCall.text.match(new RegExp(`\\b${name}\\s*=\\s*(True|False|true|false)`, 'i'));
+      return match ? match[1].toLowerCase() === 'true' : null;
+    };
+    generation.maxNewTokens = parseNumber('max_new_tokens');
+    generation.numBeams = parseNumber('num_beams');
+    generation.temperature = parseNumber('temperature');
+    generation.topP = parseNumber('top_p');
+    generation.doSample = parseBool('do_sample');
+  }
+
+  const inputLimits = [...source.matchAll(/len\s*\(\s*(?:message|prompt|input|user_input)\s*\)\s*(?:>|>=)\s*(\d+)/gi)]
+    .map((match) => Number(match[1]))
+    .filter(Number.isFinite);
+
+  const targets = [];
+  const lines = source.split(/\r?\n/);
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (!/^\s*if\b/.test(line) || !/\bin\s+(?:response|model_output_text|output)\b/.test(line)) continue;
+    const literal = line.match(/["']([^"'\r\n]{1,160})["']\s+in\s+(?:response|model_output_text|output)\b/i);
+    if (!literal) continue;
+    const limit = line.match(/len\s*\(\s*(?:message|prompt|input|user_input)\s*\)\s*<=\s*(\d+)/i);
+    targets.push({
+      target: literal[1],
+      inputMaxLength: limit ? Number(limit[1]) : null,
+      line: index + 1
+    });
+  }
+
+  if (!generationCall || !targets.length) return null;
+  return {
+    models: [...new Set(modelIds)],
+    generation,
+    globalInputMaxLength: inputLimits.length ? Math.min(...inputLimits) : null,
+    targets,
+    deterministicGreedy: generation.numBeams === 1 && generation.doSample !== true && generation.temperature == null,
+    strategy: 'constrained-output-search'
+  };
+}
+
 function auditAiChallengeSource(input) {
   const source = String(input || '');
   const base = scanAiSource(source);
@@ -77,6 +128,20 @@ function auditAiChallengeSource(input) {
     });
   }
 
+  const generationChallenge = extractGenerationChallenge(source);
+  if (generationChallenge) {
+    const anchor = firstMatch(source, /def\s+check_response\s*\(|\.generate\s*\(/i);
+    findings.push({
+      severity: 'info',
+      id: 'target-output-oracle',
+      title: '模型输出存在明确判题 Oracle',
+      count: generationChallenge.targets.length,
+      line: anchor ? lineNumberAt(source, anchor.index) : 1,
+      evidence: generationChallenge.targets.map((item) => `${item.target}${item.inputMaxLength == null ? '' : ` (input<=${item.inputMaxLength})`}`),
+      message: '检测到模型生成结果通过目标字符串直接判题。优先固定模型与 generation 参数，再评估 prompt search、爬山/退火或 adversarial suffix，而不是按普通聊天型 Prompt Injection 处理。'
+    });
+  }
+
   const temperatureValues = [...source.matchAll(/(?:TEMPERATURE\s*=\s*|["']temperature["']\s*:\s*)([0-9]+(?:\.[0-9]+)?)/gi)]
     .map((match) => Number(match[1]))
     .filter(Number.isFinite);
@@ -96,12 +161,14 @@ function auditAiChallengeSource(input) {
     ...base,
     findings,
     llmCrypto,
+    generationChallenge,
     hints: [
       ...(base.hints || []),
       '若模型输出参与密钥/令牌生成，优先记录 model、prompt、temperature、输出格式约束，并寻找可验证候选的 padding/格式/签名 oracle。',
-      '模型/ASR 输出不是可信数据：一旦进入 subprocess shell、os.system 或 shell=True，应优先按命令注入数据流审计。'
+      '模型/ASR 输出不是可信数据：一旦进入 subprocess shell、os.system 或 shell=True，应优先按命令注入数据流审计。',
+      ...(generationChallenge ? ['若判题逻辑直接检查目标输出字符串，先确认生成是否确定性，再选择约束搜索/后缀优化；不要把补全模型误当成指令模型。'] : [])
     ]
   };
 }
 
-module.exports = { auditAiChallengeSource };
+module.exports = { auditAiChallengeSource, extractGenerationChallenge };
