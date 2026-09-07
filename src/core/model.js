@@ -69,6 +69,12 @@ function printableStrings(buffer, minLength = 4) {
   return [...new Set(buffer.toString('latin1').match(new RegExp(`[\\x20-\\x7e]{${minLength},}`, 'g')) || [])];
 }
 
+function extractParameterNames(pickleStrings) {
+  const joined = (pickleStrings || []).join('\n');
+  const matches = joined.match(/[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*\.(?:weight|bias|running_mean|running_var|num_batches_tracked)/g) || [];
+  return [...new Set(matches)];
+}
+
 function inspectPytorchZip(buffer) {
   const zip = parseZipCentralDirectory(buffer);
   if (!zip) return null;
@@ -80,11 +86,18 @@ function inspectPytorchZip(buffer) {
   }));
   const dataPklEntry = zip.entries.find((entry) => /(^|\/)data\.pkl$/i.test(entry.name));
   const dataPkl = dataPklEntry ? extractZipEntry(buffer, dataPklEntry) : null;
-  const pickleStrings = printableStrings(dataPkl, 3).slice(0, 300);
+  const pickleStrings = printableStrings(dataPkl, 3).slice(0, 500);
+  const parameterNames = extractParameterNames(pickleStrings);
   const storageEntries = entries
     .filter((entry) => /(^|\/)data\/\d+$/i.test(entry.name))
     .sort((a, b) => Number(a.name.match(/(\d+)$/)?.[1] || 0) - Number(b.name.match(/(\d+)$/)?.[1] || 0));
   const unusualNames = entries.filter((entry) => !/(^|\/)(data\.pkl|byteorder|version|\.data\/serialization_id|data\/\d+)$/i.test(entry.name));
+
+  const storageSizes = storageEntries.map((entry) => entry.uncompressedSize).sort((a, b) => b - a);
+  const storageOutliers = [];
+  if (storageSizes.length >= 2 && storageSizes[0] > Math.max(storageSizes[1] * 4, 4096)) {
+    storageOutliers.push(...storageEntries.filter((entry) => entry.uncompressedSize === storageSizes[0]));
+  }
 
   return {
     format: 'PyTorch ZIP',
@@ -92,6 +105,8 @@ function inspectPytorchZip(buffer) {
     entries,
     storageCount: storageEntries.length,
     storageEntries,
+    storageOutliers,
+    parameterNames,
     pickleStrings,
     unusualNames,
     notes: [
@@ -101,4 +116,82 @@ function inspectPytorchZip(buffer) {
   };
 }
 
-module.exports = { parseZipCentralDirectory, extractZipEntry, inspectPytorchZip, printableStrings };
+function auditPytorchAgainstTrainingLog(inspection, trainingLog = '') {
+  if (!inspection) return null;
+  const text = String(trainingLog || '');
+  const modulesMatch = text.match(/^\s*\[[^\]]+\]\s*modules:\s*(.+)$/mi) || text.match(/^\s*modules:\s*(.+)$/mi);
+  const expectedModules = modulesMatch
+    ? modulesMatch[1].split(',').map((item) => item.trim()).filter(Boolean)
+    : [];
+  const parameterNames = inspection.parameterNames || extractParameterNames(inspection.pickleStrings || []);
+  const parameterModule = (name) => name.replace(/\.(?:weight|bias|running_mean|running_var|num_batches_tracked)$/, '');
+  const isExpected = (name) => {
+    const module = parameterModule(name);
+    return expectedModules.some((expected) => module === expected || module.startsWith(`${expected}.`));
+  };
+  const unexpectedParameters = expectedModules.length ? parameterNames.filter((name) => !isExpected(name)) : [];
+
+  const parameterStorageMap = [];
+  if (parameterNames.length && parameterNames.length === inspection.storageEntries.length) {
+    for (let index = 0; index < parameterNames.length; index += 1) {
+      parameterStorageMap.push({
+        parameter: parameterNames[index],
+        storage: inspection.storageEntries[index].name,
+        storageBytes: inspection.storageEntries[index].uncompressedSize,
+        mapping: 'pickle-order heuristic'
+      });
+    }
+  }
+  const suspiciousMappings = parameterStorageMap.filter((item) => unexpectedParameters.includes(item.parameter));
+
+  const baselineMatch = text.match(/baseline checkpoint size:\s*([0-9.]+)\s*(KB|MB|GB)/i);
+  const exportedMatch = text.match(/exported checkpoint size:\s*([0-9.]+)\s*(KB|MB|GB)/i);
+  const toBytes = (match) => {
+    if (!match) return null;
+    const multiplier = { KB: 1024, MB: 1024 ** 2, GB: 1024 ** 3 }[match[2].toUpperCase()] || 1;
+    return Math.round(Number(match[1]) * multiplier);
+  };
+  const baselineBytes = toBytes(baselineMatch);
+  const exportedBytes = toBytes(exportedMatch);
+
+  const findings = [];
+  if (unexpectedParameters.length) findings.push({
+    severity: 'high',
+    type: 'unexpected-parameter',
+    message: `模型包含训练日志未声明的参数：${unexpectedParameters.join(', ')}`,
+    evidence: unexpectedParameters
+  });
+  if (inspection.storageOutliers?.length) findings.push({
+    severity: 'medium',
+    type: 'storage-size-outlier',
+    message: `发现异常大的 tensor storage：${inspection.storageOutliers.map((item) => `${item.name} (${item.uncompressedSize} bytes)`).join(', ')}`,
+    evidence: inspection.storageOutliers
+  });
+  if (baselineBytes && exportedBytes && exportedBytes > baselineBytes) findings.push({
+    severity: 'medium',
+    type: 'checkpoint-size-growth',
+    message: `训练日志显示导出 checkpoint 比 baseline 大 ${exportedBytes - baselineBytes} bytes。`,
+    evidence: { baselineBytes, exportedBytes, deltaBytes: exportedBytes - baselineBytes }
+  });
+
+  return {
+    expectedModules,
+    parameterNames,
+    unexpectedParameters,
+    parameterStorageMap,
+    suspiciousMappings,
+    storageOutliers: inspection.storageOutliers || [],
+    baselineBytes,
+    exportedBytes,
+    findings
+  };
+}
+
+module.exports = {
+  parseZipCentralDirectory,
+  extractZipEntry,
+  inspectPytorchZip,
+  printableStrings,
+  extractParameterNames,
+  auditPytorchAgainstTrainingLog
+};
