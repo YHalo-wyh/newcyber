@@ -8,16 +8,22 @@ function read(name) {
   return fs.readFileSync(path.join(__dirname, '..', 'renderer', name), 'utf8');
 }
 
-test('AI tabular and UDS programming renderer extensions stay compilable', () => {
-  for (const name of ['ai_tabular_tools.js', 'uds_programming_tools.js']) {
+test('batch-two renderer extensions stay compilable', () => {
+  for (const name of ['mavlink_ftp_tools.js', 'ai_tabular_tools.js', 'uds_programming_tools.js']) {
     assert.doesNotThrow(() => new vm.Script(read(name), { filename: `renderer/${name}` }));
   }
 });
 
-test('toolbox loads AI tabular and UDS programming extensions after finals base', () => {
+test('toolbox loads batch-two extensions after finals base in dependency order', () => {
   const html = read('toolbox.html');
   const finals = html.indexOf('finals_tools.js');
+  const mavlink = html.indexOf('mavlink_ftp_tools.js');
+  const evm = html.indexOf('evm_runtime_tools.js');
   const tabular = html.indexOf('ai_tabular_tools.js');
   const uds = html.indexOf('uds_programming_tools.js');
-  assert.ok(finals >= 0 && tabular > finals && uds > tabular);
+  assert.ok(finals >= 0);
+  assert.ok(mavlink > finals);
+  assert.ok(evm > mavlink);
+  assert.ok(tabular > evm);
+  assert.ok(uds > tabular);
 });
