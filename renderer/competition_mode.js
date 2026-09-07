@@ -1,6 +1,7 @@
 (() => {
   const originalHomeView = homeView;
   const originalWorkspaceView = workspaceView;
+  let workspaceArtifacts = [];
 
   const TRACKS = {
     vehicle: {
@@ -40,10 +41,11 @@
     for (const file of files) {
       if (file.metadata?.pcapng?.can) score.vehicle += 12;
       if (file.metadata?.lowAltitude || /(?:mavlink|ardupilot|px4|\.tlog$|\.ulg$)/i.test(file.path || '')) score.lowalt += 10;
-      if (file.metadata?.aiAudit || file.metadata?.aiTabular || file.metadata?.model || file.metadata?.modelStructure || /\.(?:pt|pth|safetensors|npy|onnx|gguf|csv|tsv)$/i.test(file.path || '')) score.ai += 8;
+      if (file.metadata?.aiAudit || file.metadata?.aiTabular || file.metadata?.model || /\.(?:pt|pth|safetensors|npy|onnx|gguf|csv|tsv)$/i.test(file.path || '')) score.ai += 8;
       if (file.metadata?.web3Audit || file.metadata?.solanaAudit || /\.(?:sol|vy|rs)$/i.test(file.path || '')) score.web3 += 8;
     }
-    return Object.entries(score).sort((a, b) => b[1] - a[1])[0]?.[1] > 0 ? Object.entries(score).sort((a, b) => b[1] - a[1])[0][0] : null;
+    const ranked = Object.entries(score).sort((a, b) => b[1] - a[1]);
+    return ranked[0]?.[1] > 0 ? ranked[0][0] : null;
   }
 
   function primaryTrack(analysis) {
@@ -93,6 +95,7 @@
           name: transfer.artifact.name || 'firmware.bin',
           file: file.path,
           size: transfer.artifact.size || transfer.firmwareSize || 0,
+          artifact: transfer.artifact,
           next: transfer.artifact.metadata?.rawTransferPayload ? '数据可能仍压缩/加密，先保留并继续识别格式。' : '导出后直接交给 IDA / Ghidra 做固件逆向。'
         });
       }
@@ -104,6 +107,7 @@
           name: item.artifact.name || item.path || 'mavftp.bin',
           file: file.path,
           size: item.artifact.size || item.reconstructedSize || 0,
+          artifact: item.artifact,
           next: '优先查看文件内容、配置、密钥、脚本和 Flag 线索。'
         });
       }
@@ -116,7 +120,7 @@
       let score = (file.flags?.length || 0) * 100;
       for (const finding of file.findings || []) score += SEVERITY_SCORE[finding.severity] || 0;
       if (file.metadata?.pcapng?.can?.udsProgramming?.exportableTransfers) score += 60;
-      if (file.metadata?.modelStructure?.riskSummary?.high) score += 40;
+      if ((file.metadata?.model?.securityFindings || []).some((item) => item.severity === 'high')) score += 40;
       if (file.metadata?.lowAltitude?.signing?.magicValid) score += 35;
       return { file, score };
     }).filter((item) => item.score > 0)
@@ -125,7 +129,7 @@
       .map((item) => item.file);
   }
 
-  function buildSteps(analysis, track, flags, findings, artifacts) {
+  function buildSteps(track, flags, findings, artifacts) {
     const steps = [];
     if (flags.length) steps.push({ level: 'win', title: '先验证 Flag 候选', text: `${flags[0].flag} · 来自 ${flags[0].file}` });
     if (artifacts.length) steps.push({ level: 'win', title: `导出 ${artifacts[0].kind}`, text: `${artifacts[0].name}。${artifacts[0].next}` });
@@ -158,12 +162,13 @@
     const flags = allFlags(analysis);
     const findings = highValueFindings(analysis);
     const artifacts = exportableArtifacts(analysis);
+    workspaceArtifacts = artifacts.map((item) => item.artifact);
     const files = priorityFiles(analysis);
-    const steps = buildSteps(analysis, track, flags, findings, artifacts);
+    const steps = buildSteps(track, flags, findings, artifacts);
     const highCount = (analysis.findings || []).filter((item) => item.severity === 'high').length;
 
     const flagPanel = flags.length ? `<article class="simple-result win"><span>FLAG 候选</span><strong>${esc(flags[0].flag)}</strong><small>${esc(flags[0].file)}</small></article>` : '';
-    const artifactPanel = artifacts.length ? `<article class="simple-result win"><span>可继续利用的产物</span><strong>${esc(artifacts[0].kind)}</strong><small>${esc(artifacts[0].name)} · ${fmtBytes(artifacts[0].size)}</small></article>` : '';
+    const artifactPanel = artifacts.length ? `<article class="simple-result win"><span>可继续利用的产物</span><strong>${esc(artifacts[0].kind)}</strong><small>${esc(artifacts[0].name)} · ${fmtBytes(artifacts[0].size)}</small><button class="button simple-export" data-competition-artifact="0">直接导出</button></article>` : '';
 
     return `<div class="competition-summary">
       <div class="competition-title-row"><div><span class="kicker">比赛模式</span><h1>${esc(analysis.workspaceName)}</h1><p>先看下面这几项。技术细节只有在需要复核时再展开。</p></div><button class="button ghost" data-action="rescan-workspace">重新扫描</button></div>
@@ -185,6 +190,22 @@
       <details class="advanced-details"><summary>展开技术细节（卡住时再看）</summary><div class="advanced-content">${originalWorkspaceView()}</div></details>
     </div>`;
   }
+
+  document.addEventListener('click', async (event) => {
+    const button = event.target.closest('[data-competition-artifact]');
+    if (!button) return;
+    const artifact = workspaceArtifacts[Number(button.dataset.competitionArtifact)];
+    if (!artifact) return toast('当前没有可导出的完整产物', true);
+    button.disabled = true;
+    try {
+      const saved = await window.newcyber.saveArtifact(artifact);
+      if (saved?.filePath) toast(`已导出 ${artifact.name}`);
+    } catch (error) {
+      toast(error?.message || '导出失败', true);
+    } finally {
+      button.disabled = false;
+    }
+  });
 
   homeView = simpleHomeView;
   workspaceView = simpleWorkspaceView;
