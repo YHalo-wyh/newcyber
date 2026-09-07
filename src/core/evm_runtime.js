@@ -5,7 +5,7 @@ const KNOWN_SELECTORS = new Map([
   ['0x23b872dd', 'transferFrom(address,address,uint256)'],
   ['0x095ea7b3', 'approve(address,uint256)'],
   ['0x70a08231', 'balanceOf(address)'],
-  ['0xdd62ed3e', 'allowance(address,address,uint256)'],
+  ['0xdd62ed3e', 'allowance(address,address)'],
   ['0x18160ddd', 'totalSupply()'],
   ['0x06fdde03', 'name()'],
   ['0x95d89b41', 'symbol()'],
