@@ -7,6 +7,8 @@ const {
   verifyMavlink2Signature,
   decodeMavFtp
 } = require('../src/core/low_altitude');
+const { verifyMavlinkSignatureInput } = require('../src/core/mavlink_signing');
+const { runTool } = require('../src/core/tool_router');
 
 function uint48le(value) {
   let current = BigInt(value);
@@ -114,4 +116,23 @@ test('STARPWN-style signed FTP stream is surfaced as security evidence', () => {
   assert.ok(result.findings.some((item) => item.id === 'mavlink2-signed'));
   assert.ok(result.findings.some((item) => item.id === 'mavlink-ftp-filesystem-access'));
   assert.ok(result.ftpEvents.some((item) => item.path === 'DCIM/flag.jpg'));
+});
+
+test('offline signing verifier accepts key + frame text and is routed through tool_router', () => {
+  const key = Buffer.from('33'.repeat(32), 'hex');
+  const frame = buildSignedV2({
+    payload: ftpPayload({ opcode: 4, path: 'terrain/cache.bin', sequence: 7 }),
+    msgid: 110,
+    key,
+    linkId: 9,
+    timestamp: 5555n,
+    seq: 42
+  });
+  const input = `key=${key.toString('hex')}\nframe=${frame.toString('hex')}`;
+  const direct = verifyMavlinkSignatureInput(input);
+  assert.equal(direct.allValid, true);
+  assert.equal(direct.frames[0].linkId, 9);
+  const routed = runTool('mavlink-signature-verify', { input });
+  assert.equal(routed.allValid, true);
+  assert.equal(routed.validFrames, 1);
 });
