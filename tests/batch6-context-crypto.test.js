@@ -65,8 +65,8 @@ test('batch6 renderer extensions compile and load after auto decode', () => {
   assert.ok(workspace > crypto);
 });
 
-test('Electron entrypoint compiles and uses batch-six analyzer', () => {
+test('Electron entrypoint compiles and keeps batch6 or later workspace wrapper', () => {
   const main = read('main.js');
   assert.doesNotThrow(() => new vm.Script(main, { filename: 'main.js' }));
-  assert.match(main, /finals_analyzer_batch6/);
+  assert.match(main, /finals_analyzer_batch(?:6|7)/);
 });
