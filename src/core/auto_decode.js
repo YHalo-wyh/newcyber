@@ -7,7 +7,7 @@ const MAX_OUTPUT_BYTES = 4 * 1024 * 1024;
 const MAX_NODES = 600;
 const MAX_DEPTH = 3;
 
-const FLAG_RE = /(?:flag|ctf|[A-Za-z0-9_]{2,24})\{[^{}\r\n]{1,200}\}/gi;
+const FLAG_RE = /(?:flag|ctf|[A-Za-z][A-Za-z0-9_]{2,23})\{[\x20-\x7a\x7c\x7e]{1,200}\}/gi;
 const KEYWORD_RE = /\b(?:flag|ctf|key|secret|password|token|admin|success|accepted)\b/i;
 
 const MAGIC = [
