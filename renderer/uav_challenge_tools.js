@@ -19,7 +19,7 @@
     ['uav-dos-analyze', ...UAV_TOOLS['uav-dos-analyze']],
     ['uav-injection-analyze', ...UAV_TOOLS['uav-injection-analyze']],
     ['uav-leak-analyze', ...UAV_TOOLS['uav-leak-analyze']],
-    ['firmware-unpack', '固件结构分析 / 解包', '选固件文件，识别厂商头、kernel/rootfs/bootloader、文件系统并导出可验证 segment；可选调用本机 binwalk 递归解包。']
+    ['firmware-unpack', '固件结构分析 / 解包', '选固件文件，识别厂商头、kernel/rootfs/bootloader、文件系统、凭据/服务/更新线索并导出可验证 segment；可选调用本机 binwalk 递归解包。']
   ];
 
   const previousToolView = toolView;
@@ -28,8 +28,8 @@
   function firmwareView() {
     const selected = state.toolResult?.fileName;
     const result = state.toolResult?.analysis;
-    return `<div class="page-head tool-head"><div><span class="kicker">FIRMWARE WORKBENCH</span><h1>固件结构分析 / 解包</h1><p>结构识别 → segment 恢复 → rootfs 解包 → 配置/密钥/服务审计。</p></div><button class="button ghost" data-view="lowalt">返回</button></div>
-      <div class="workbench"><article class="panel input-panel"><div class="field grow"><label>固件文件</label><div class="result-empty">${selected ? `当前：${esc(selected)}` : '选择 .bin / .img / .fw / .rom / .trx / .ubi / squashfs 等文件。'}</div></div><div class="run-row"><span>文件按二进制结构解析</span><button class="button primary" data-action="choose-firmware">选择并分析</button></div></article>
+    return `<div class="page-head tool-head"><div><span class="kicker">FIRMWARE WORKBENCH</span><h1>固件结构分析 / 解包</h1><p>结构识别 → segment 恢复 → rootfs 解包 → 配置/密钥/服务/升级链审计。</p></div><button class="button ghost" data-view="lowalt">返回</button></div>
+      <div class="workbench"><article class="panel input-panel"><div class="field grow"><label>固件文件</label><div class="result-empty">${selected ? `当前：${esc(selected)}` : '选择 .bin / .img / .fw / .rom / .trx / .ubi / squashfs 等文件。'}</div></div><div class="run-row"><span>按容器、文件系统和可验证 carve 结果组织证据</span><button class="button primary" data-action="choose-firmware">选择并分析</button></div></article>
       <article class="panel result-panel"><div class="result-title"><b>结果</b>${state.toolResult ? '<button class="text-button" data-action="firmware-binwalk">Binwalk 递归解包</button>' : ''}</div><div id="tool-result">${state.toolError ? `<div class="error-box">${esc(state.toolError)}</div>` : result ? renderFirmware(result) : '<div class="result-empty">等待选择固件。</div>'}</div></article></div>`;
   }
 
@@ -44,11 +44,21 @@
     return Object.entries(groups).map(([name, rows]) => `<details class="panel"><summary><b>${esc(name)}</b> · ${rows.filter(x=>x.matched).length}/${rows.length} 命中</summary><div class="knowledge-list">${rows.map(row=>`<article><span>${row.matched ? 'CHECK' : 'PLAYBOOK'}</span><b>${esc(row.title)}</b><p>${esc(row.action)}</p><small>${esc((row.evidence || []).join(' · '))}</small></article>`).join('')}</div></details>`).join('');
   }
 
+  function telemetryEvidence(result) {
+    const telemetry = result.telemetry;
+    const control = result.controlFlow;
+    let html = '';
+    if (telemetry?.anomalies?.length) html += `<details class="panel" open><summary><b>遥测物理一致性</b> · ${telemetry.anomalies.length} 异常</summary><div class="knowledge-list">${telemetry.anomalies.slice(0,30).map(x=>`<article><span>${esc(x.severity)}</span><b>${esc(x.id)}</b><p>${esc(x.meaning)}</p><small>${esc(x.evidence)}</small></article>`).join('')}</div></details>`;
+    if (control?.findings?.length) html += `<details class="panel" open><summary><b>MAVLink 控制状态机</b> · ${control.findings.length} 证据</summary><div class="knowledge-list">${control.findings.slice(0,30).map(x=>`<article><span>${esc(x.severity)}</span><b>${esc(x.id)}</b><p>${esc(x.message || '')}</p><small>${esc(x.evidence || '')}</small></article>`).join('')}</div></details>`;
+    return html;
+  }
+
   renderResult = function uavRenderResult(tool, result) {
     if (!Object.prototype.hasOwnProperty.call(UAV_TOOLS, tool) && tool !== 'uav-challenge-matrix') return previousRenderResult(tool, result);
     const hits = result.hits || [];
     return `<div class="result-stats"><div><b>${hits.length}</b><span>优先验证</span></div><div><b>${result.coverage?.total || 0}</b><span>题型覆盖</span></div></div>
       ${hits.length ? hits.slice(0,12).map(hit=>`<div class="finding ${hit.confidence >= .8 ? 'high' : hit.confidence >= .6 ? 'medium' : 'info'}"><span>${Math.round(hit.confidence*100)}%</span><div><b>${esc(hit.title)}</b><small>${esc((hit.evidence||[]).join(' · '))}</small><p>${esc(hit.action)}</p></div></div>`).join('') : '<div class="result-empty">当前证据没有形成高价值命中；可继续加入抓包、日志或服务扫描结果。</div>'}
+      ${telemetryEvidence(result)}
       ${result.mavlink ? `<details><summary>MAVLink 统计</summary><pre class="mini-pre">${esc(JSON.stringify(result.mavlink.messageCounts,null,2))}</pre></details>` : ''}
       ${scenarioMatrix(result)}`;
   };
@@ -57,10 +67,12 @@
     const vendor = result.vendor ? `${result.vendor.vendor} ${result.vendor.version}` : '未识别厂商头';
     const magic = (result.magic || []).slice(0,40);
     const artifacts = result.artifacts || [];
+    const clues = result.securityStrings || [];
     return `<div class="result-stats"><div><b>${fmtBytes(result.size)}</b><span>固件大小</span></div><div><b>${result.entropy}</b><span>前 1MiB 熵</span></div><div><b>${magic.length}</b><span>Magic 命中</span></div><div><b>${artifacts.length}</b><span>可导出段</span></div></div>
       <p class="notice"><b>容器：</b>${esc(vendor)}</p>
       ${(result.findings||[]).map(x=>`<div class="finding ${x.severity}"><span>${esc(x.severity)}</span><div><b>${esc(x.title)}</b><small>${esc(x.evidence)}</small></div></div>`).join('')}
       ${table(['偏移','类型'], magic.map(x=>[x.offsetHex,x.name]))}
+      ${clues.length ? `<details class="panel" open><summary><b>固件配置 / 凭据 / 服务线索</b> · ${clues.length}</summary>${table(['偏移','类型','字符串'], clues.slice(0,100).map(x=>[x.offsetHex,x.kind,x.text]))}</details>` : ''}
       ${artifacts.length ? `<div class="knowledge-list">${artifacts.map((a,i)=>`<article><span>ARTIFACT</span><b>${esc(a.name)}</b><p>${fmtBytes(a.size)} · SHA256 ${esc(a.sha256.slice(0,16))}…</p><button class="button" data-firmware-artifact="${i}">导出</button></article>`).join('')}</div>` : ''}
       ${(result.nextActions||[]).map(x=>`<p class="notice">${esc(x)}</p>`).join('')}`;
   }
