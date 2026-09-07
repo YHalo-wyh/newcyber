@@ -111,6 +111,17 @@
           next: '优先查看文件内容、配置、密钥、脚本和 Flag 线索。'
         });
       }
+      for (const item of file.metadata?.autoDecode?.candidates || []) {
+        if (!item?.artifact) continue;
+        artifacts.push({
+          kind: `自动解码 ${item.magic || '文件'} 候选`,
+          name: item.artifact.name || `decoded-${String(item.magic || 'data').toLowerCase()}.bin`,
+          file: file.path,
+          size: item.artifact.size || item.size || 0,
+          artifact: item.artifact,
+          next: item.magic === 'ZIP' ? '导出后先解包，继续扫描里面的附件。' : item.magic === 'ELF' ? '导出后直接交给 IDA / Ghidra。' : '导出后继续做文件类型对应的取证/逆向。'
+        });
+      }
     }
     return artifacts.slice(0, 4);
   }
@@ -122,6 +133,7 @@
       if (file.metadata?.pcapng?.can?.udsProgramming?.exportableTransfers) score += 60;
       if ((file.metadata?.model?.securityFindings || []).some((item) => item.severity === 'high')) score += 40;
       if (file.metadata?.lowAltitude?.signing?.magicValid) score += 35;
+      if ((file.metadata?.autoDecode?.candidates || []).some((item) => item.magic || item.foundFlag)) score += 55;
       return { file, score };
     }).filter((item) => item.score > 0)
       .sort((a, b) => b.score - a.score)
