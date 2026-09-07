@@ -1,10 +1,11 @@
 const common = require('./common');
 const vehicle = require('./vehicle');
 const lowalt = require('./lowalt');
+const lowaltMatrix = require('./lowalt_matrix');
 const ai = require('./ai');
 const web3 = require('./web3');
 
-const ENTRIES = [...common, ...vehicle, ...lowalt, ...ai, ...web3];
+const ENTRIES = [...common, ...vehicle, ...lowalt, ...lowaltMatrix, ...ai, ...web3];
 
 const TRACK_ALIASES = new Map([
   ['common', 'common'], ['通用', 'common'], ['misc', 'common'], ['crypto', 'common'],
