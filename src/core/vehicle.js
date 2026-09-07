@@ -1,4 +1,5 @@
 const { parseCanLine, decodeUds } = require('./toolbox');
+const { analyzeCanopenSdoFrames } = require('./canopen');
 
 function frameHex(frame) {
   return Buffer.from(frame.bytes || []).toString('hex');
@@ -219,6 +220,7 @@ function analyzeCanAdvanced(text) {
 
   const indexedFrames = frames.map((frame, index) => ({ ...frame, index: index + 1 }));
   const isoTpSessions = reassembleIsoTpFrames(indexedFrames);
+  const canopen = analyzeCanopenSdoFrames(indexedFrames);
 
   return {
     parsedFrames: frames.length,
@@ -226,10 +228,12 @@ function analyzeCanAdvanced(text) {
     ids,
     eventCandidates,
     isoTpSessions,
+    canopen,
     hints: [
       'transitions 会保留同一 CAN ID 的逐帧 byte/bit 跃迁，适合定位转向灯、车门、档位等首次状态变化。',
       'eventCandidates 只按“少量 bit 突变”启发式排序，不代表具体车辆语义。',
       'isoTpSessions 严格按 First Frame / Consecutive Frame sequence number 重组；UDS 语义解码失败不会影响原始 ISO-TP 结构结果。',
+      'CANopen SDO 会识别 0x600/0x580 COB-ID、对象索引和 segmented upload/download；优先关注 0x1000/0x1008/0x1009/0x100A 等设备信息对象。',
       '需要提交原始抓包帧 HEX 时，应回到对应 frameIndex 的原始 PCAP/SocketCAN frame 核对。'
     ]
   };
