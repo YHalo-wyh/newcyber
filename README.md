@@ -28,6 +28,7 @@ NewCyber 是为线下断网安全竞赛准备的多方向本地工具箱，当�
 - 飞控安全事件：ARM/DISARM、`ARM → SERIAL_CONTROL`、sequence gap、未签名 MAVLink2
 - MAVLink2 signing trailer：Link ID、48-bit timestamp、48-bit signature、timestamp rollback 线索
 - MAVLink2 签名离线验证：输入 32-byte key + signed frame，重算 SHA-256/48 并比较 wire signature
+- MAVLink CRC：对已内置的 common.xml 消息子集执行 X.25 + CRC_EXTRA 校验，明确区分 `valid / invalid / unknown-crc-extra`，未知 dialect 不猜
 - MAVLink FTP：session、opcode、request opcode、offset、path/data/error 拆解
 - MAVLink FTP 文件重组：按 remote/session/offset 聚合 ReadFile/BurstReadFile ACK，识别重传、冲突、gap 与 EOF，并只对完整覆盖生成可保存文件 artifact
 - ArduPilot AP_Param EEPROM / StorageKeys：固定结构定位、32-byte signing key 提取与哈希
@@ -42,7 +43,9 @@ NewCyber 是为线下断网安全竞赛准备的多方向本地工具箱，当�
 - 结构化模型数据画像（CSV/TSV）：分位数、均值/标准差、强相关特征、中心样本索引、NaN/Inf 边界
 - 表格模型候选验证：计算 RMS standardized distance、Q05-Q95 主体区间和强相关条件残差，只评估 profile compatibility，不冒充真实模型 anomaly score
 - 高维表格数据自动进入 workspace AI 证据，用于 Isolation Forest / XGBoost / 风控模型题的第一轮离线分析
-- NumPy / SafeTensors / PyTorch ZIP 安全结构检查，不直接反序列化不可信模型
+- SafeTensors 深度结构审计：校验 dtype、shape、`data_offsets`、实际 byte range、越界、overlap 与长度一致性
+- NumPy NPY 深度审计：解析 descr/shape/fortran_order，校验固定 dtype payload 长度，并把 object dtype / pickle 语义显式标高风险
+- PyTorch ZIP 深度审计：沿用 storage/参数/训练日志证据，并静态解析 `data.pkl` pickle opcode / GLOBAL / STACK_GLOBAL；高风险 global 与普通 `torch.*` 引用分级，不执行 `torch.load` / `pickle.loads`
 
 ### 区块链安全
 
@@ -52,6 +55,8 @@ NewCyber 是为线下断网安全竞赛准备的多方向本地工具箱，当�
 - runtime dispatcher 恢复：`PUSH4 → EQ → JUMPI` selector 与 jump destination
 - EVM storage/state 证据：SLOAD/SSTORE、直接 slot 与同 basic block 低/中置信候选；不冒充完整符号执行
 - EVM 局部数据流：在单 basic block 内追踪 `CALLDATALOAD → MSTORE/CALLDATACOPY → SLOAD/SSTORE/CALL`，展示 CALL target/value/input 来源，跨 CFG 边界保持 unknown
+- EIP-1167 minimal proxy：只在 canonical runtime 完整匹配时恢复内嵌 implementation 地址
+- EIP-1967 proxy evidence：识别 implementation/admin/beacon 标准 storage slot，并把 slot 的 SLOAD/SSTORE 与 DELEGATECALL / upgrade selector 证据关联；只有 implementation slot 真正流入 DELEGATECALL 才给高置信
 - Solidity 静态规则：tx.origin、delegatecall、低级 call、初始化、ABI smuggling 等
 - Solana / Anchor：Program ID、instruction、PDA seeds、Signer/AccountInfo、Anchor.toml、链上日志线索
 
@@ -110,16 +115,21 @@ npm test
 main.js                              Electron 主进程、IPC 与 artifact 保存校验
 preload.js                           渲染层白名单接口
 src/core/artifacts.js                统一二进制 artifact 格式与 SHA-256 校验
-src/core/finals_analyzer.js          四赛道 workspace 专项分析入口
+src/core/finals_analyzer*.js         四赛道 workspace 专项分析与批次扩展
 src/core/vehicle*.js                 CAN / CANopen / ISO-TP / UDS / 刷写恢复
 src/core/uds_programming.js          UDS block map / firmware artifact
 src/core/low_altitude*.js            ArduPilot / MAVLink / signing / FTP
 src/core/mavlink_ftp_reassembly.js   MAVLink FTP 文件块重组与 artifact
+src/core/mavlink_crc.js              MAVLink X.25 / common CRC_EXTRA 校验
 src/core/ai_source.js                AI 源码与生成链审计
 src/core/ai_tabular.js               表格模型数据画像与候选验证
-src/core/evm_runtime.js              EVM runtime / dispatcher / storage / 局部 data flow
+src/core/model.js                    PyTorch ZIP/storage/训练日志基础深审
+src/core/model_artifacts.js          SafeTensors / NPY / pickle opcode-global 结构审计
+src/core/evm_runtime*.js             EVM runtime / dispatcher / storage / 局部 data flow
+src/core/evm_proxy.js                EIP-1167 / EIP-1967 proxy evidence
 src/core/solana.js                   Solana / Anchor 审计
 renderer/batch3_tools.js             Artifact pipeline / AI candidate / EVM data-flow UI
+renderer/batch4_tools.js             模型结构 / EVM proxy / MAVLink CRC UI
 renderer/artifact_tools.js           统一 artifact 保存动作
 renderer/*_tools.js                  各赛道独立 UI 扩展
 .github/workflows/corpus-smoke.yml   公开真题 corpus gate
@@ -128,7 +138,7 @@ renderer/*_tools.js                  各赛道独立 UI 扩展
 ## 下一批优先扩展
 
 - 车联网：UDS `dataFormatIdentifier` / 厂商自定义压缩与加密头识别、MQTT 车机协议证据
-- 低空：MAVLink CRC extra / dialect、TLOG、PX4 ULog / ArduPilot DataFlash
-- AI：树模型 / Isolation Forest 模型文件结构证据、ONNX/GGUF 深度检查、RAG 向量库离线审计
-- 区块链：proxy / implementation 恢复、跨 basic-block CFG evidence、DeFi 资产流摘要
+- 低空：MAVLink TLOG、PX4 ULog / ArduPilot DataFlash、可加载自定义 dialect CRC_EXTRA 表
+- AI：XGBoost / LightGBM / Isolation Forest 树结构证据、ONNX/GGUF 深度检查、RAG 向量库离线审计
+- 区块链：跨 basic-block CFG evidence、beacon implementation 调用链、Diamond/EIP-2535、DeFi 资产流摘要
 - 通用：artifact 证据包（binary + provenance + report）统一导出、环境自检
