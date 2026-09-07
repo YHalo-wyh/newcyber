@@ -1,3 +1,5 @@
+const { auditEcdsaSignatureReplay } = require('./web3_signatures');
+
 function lineNumberAt(source, index) {
   return source.slice(0, index).split(/\r?\n/).length;
 }
@@ -140,6 +142,8 @@ function auditSolidity(input) {
 
   const unchecked = /\bunchecked\s*\{/g;
   while ((match = unchecked.exec(code))) push('unchecked', 'low', '存在 unchecked 算术块', match.index, 'Solidity 0.8+ 下 unchecked 关闭溢出检查，确认循环/计数逻辑是否安全。');
+
+  for (const finding of auditEcdsaSignatureReplay(source, code)) findings.push(finding);
 
   const severityOrder = { high: 0, medium: 1, low: 2 };
   findings.sort((a, b) => (severityOrder[a.severity] ?? 9) - (severityOrder[b.severity] ?? 9) || a.line - b.line);
