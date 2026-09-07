@@ -9,7 +9,7 @@ const { analyzeEvmRuntime } = require('./evm_runtime_batch4');
 const { autoDecode } = require('./auto_decode');
 const { decryptCryptoContext } = require('./context_crypto');
 const { searchKnowledge, knowledgeStats } = require('../knowledge');
-const { analyzeUavChallengeEvidence, getScenarioCatalog } = require('./uav_challenge_matrix_v2');
+const { analyzeUavChallengeEvidence, getScenarioCatalog } = require('./uav_challenge_matrix_v3');
 
 function runTool(tool, payload = {}) {
   if (tool === 'can-analyze') return analyzeCanAdvanced(payload.input);
