@@ -120,4 +120,94 @@ async function scanWorkspace(rootPath) {
   return analysis;
 }
 
-module.exports = { ...base, scanWorkspace, DEEP_INSPECTION_LIMIT };
+function oneLine(value) {
+  return String(value ?? '').replace(/\s+/g, ' ').replace(/`/g, "'").trim();
+}
+
+function findingEvidence(item) {
+  const value = item.evidence ?? item.description ?? item.patterns;
+  if (value == null || value === '') return '';
+  if (typeof value === 'string') return oneLine(value);
+  try { return oneLine(JSON.stringify(value)); } catch { return oneLine(value); }
+}
+
+function changeSummary(changes = []) {
+  return changes.map((change) => {
+    const from = Number.isInteger(change.from) ? change.from.toString(16).padStart(2, '0') : '--';
+    const to = Number.isInteger(change.to) ? change.to.toString(16).padStart(2, '0') : '--';
+    const setBits = Number.isInteger(change.setBits) && change.setBits ? ` +${change.setBits.toString(16).padStart(2, '0')}` : '';
+    const clearedBits = Number.isInteger(change.clearedBits) && change.clearedBits ? ` -${change.clearedBits.toString(16).padStart(2, '0')}` : '';
+    return `b${change.byteIndex}:${from}->${to}${setBits}${clearedBits}`;
+  }).join('; ');
+}
+
+function buildDeepEvidenceSection(analysis) {
+  const lines = [];
+
+  for (const file of analysis.files || []) {
+    const can = file.metadata?.pcapng?.can;
+    if (can) {
+      lines.push(`### CAN / PCAPNG：\`${oneLine(file.path)}\``, '');
+      lines.push(`- 解析 CAN 帧：${can.parsedFrames || 0}`);
+      lines.push(`- CAN ID 数量：${can.uniqueIds || 0}`);
+      const candidates = (can.eventCandidates || []).slice(0, 100);
+      if (candidates.length) {
+        lines.push('', '| ID | frame | packet | payload | 变化 | raw frame |', '| --- | ---: | ---: | --- | --- | --- |');
+        for (const event of candidates) {
+          lines.push(`| ${oneLine(event.id)} | ${event.frameIndex ?? '—'} | ${event.packetIndex ?? '—'} | \`${oneLine(event.payload)}\` | ${oneLine(changeSummary(event.changes))} | \`${oneLine(event.rawFrameHex || '—')}\` |`);
+        }
+      }
+      lines.push('');
+    }
+
+    const audit = file.metadata?.modelAudit;
+    const model = file.metadata?.model;
+    if (model || audit) {
+      lines.push(`### 模型供应链：\`${oneLine(file.path)}\``, '');
+      if (Number.isFinite(model?.storageCount)) lines.push(`- tensor storage 数量：${model.storageCount}`);
+      if (audit?.unexpectedParameters?.length) lines.push(`- 训练日志未声明参数：\`${audit.unexpectedParameters.map(oneLine).join('`, `')}\``);
+      if (audit?.suspiciousMappings?.length) {
+        lines.push('- 可疑参数/storage 映射：');
+        for (const item of audit.suspiciousMappings) {
+          lines.push(`  - \`${oneLine(item.parameter)}\` -> \`${oneLine(item.storage)}\` (${item.storageBytes} bytes, ${oneLine(item.mapping)})`);
+        }
+      }
+      if (audit?.storageOutliers?.length) {
+        lines.push('- 异常 storage：');
+        for (const item of audit.storageOutliers) lines.push(`  - \`${oneLine(item.name)}\`：${item.uncompressedSize} bytes`);
+      }
+      if (audit?.baselineBytes && audit?.exportedBytes) lines.push(`- checkpoint 体积：baseline ${audit.baselineBytes} bytes -> exported ${audit.exportedBytes} bytes`);
+      lines.push('');
+    }
+  }
+
+  if (!lines.length) return '';
+  return ['## 深度解析证据', '', ...lines].join('\n');
+}
+
+function buildMarkdownReport(analysis, notes = '') {
+  let report = base.buildMarkdownReport(analysis, notes);
+  const detailLines = [];
+  for (const [index, item] of (analysis.findings || []).entries()) {
+    detailLines.push(`### ${index + 1}. ${oneLine(item.title || item.id || '未命名线索')}`, '');
+    detailLines.push(`- 严重度：${oneLine(item.severity || 'unknown')}`);
+    detailLines.push(`- 文件：\`${oneLine(item.file || 'workspace')}\``);
+    const evidence = findingEvidence(item);
+    if (evidence) detailLines.push(`- 证据：${evidence}`);
+    detailLines.push('');
+  }
+
+  const sections = [];
+  if (detailLines.length) sections.push(['## 发现证据明细', '', ...detailLines].join('\n'));
+  const deep = buildDeepEvidenceSection(analysis);
+  if (deep) sections.push(deep);
+  if (!sections.length) return report;
+
+  const marker = '\n## Flag 候选\n';
+  const block = `\n${sections.join('\n\n')}\n`;
+  if (report.includes(marker)) report = report.replace(marker, `${block}${marker}`);
+  else report = `${report.trim()}${block}\n`;
+  return report;
+}
+
+module.exports = { ...base, scanWorkspace, buildMarkdownReport, DEEP_INSPECTION_LIMIT };
