@@ -58,7 +58,8 @@ test('UDSCTF: ReadMemoryByAddress 7DF#0723144000000050', () => {
 });
 
 test('UDSCTF: TransferData 解出 blockSequenceCounter', () => {
-  const result = decodeUdsAdvanced('07 36 03 DE AD BE EF 00 01');
+  // Raw UDS payload: avoid pretending an 8-byte payload fits in a Classical-CAN ISO-TP single frame.
+  const result = decodeUdsAdvanced('36 03 DE AD BE EF 00 01');
   assert.equal(result.serviceName, 'TransferData');
   assert.equal(result.transferData.blockSequenceCounter, 3);
   assert.equal(result.transferData.data, 'deadbeef0001');
