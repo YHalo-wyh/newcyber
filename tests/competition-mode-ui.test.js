@@ -35,3 +35,58 @@ test('competition mode still exposes all four tracks', () => {
   const source = read('renderer/competition_mode.js');
   for (const name of ['车联网安全', '低空经济安全', '人工智能安全', '区块链安全']) assert.match(source, new RegExp(name));
 });
+
+test('competition mode renders a real actionable workspace summary', () => {
+  const context = {
+    homeView: () => '<div>old home</div>',
+    workspaceView: () => '<div>old workspace technical details</div>',
+    state: {
+      workspace: {
+        workspaceName: 'demo',
+        categories: [{ name: '车联网', score: 12 }],
+        findings: [{ severity: 'high', title: '发现 UDS 刷写链', file: 'traffic.pcapng' }],
+        files: [{
+          path: 'traffic.pcapng',
+          type: 'PCAPNG 流量',
+          size: 4096,
+          flags: ['flag{demo}'],
+          findings: [{ severity: 'high', title: '发现 UDS 刷写链' }],
+          metadata: {
+            pcapng: {
+              can: {
+                udsProgramming: {
+                  exportableTransfers: 1,
+                  transfers: [{
+                    artifactReady: true,
+                    firmwareSize: 4,
+                    artifact: {
+                      name: 'uds-demo.firmware.bin',
+                      size: 4,
+                      metadata: { kind: 'uds-firmware-candidate', rawTransferPayload: false }
+                    }
+                  }]
+                }
+              }
+            }
+          }
+        }]
+      }
+    },
+    esc: (value) => String(value ?? ''),
+    fmtBytes: (value) => `${value} B`,
+    render: () => {},
+    toast: () => {},
+    document: { addEventListener: () => {} },
+    window: { newcyber: { saveArtifact: async () => ({ filePath: 'x', size: 4, sha256: 'a'.repeat(64) }) } },
+    console
+  };
+  vm.createContext(context);
+  vm.runInContext(read('renderer/competition_mode.js'), context);
+  const html = context.workspaceView();
+  assert.match(html, /车联网安全/);
+  assert.match(html, /flag\{demo\}/);
+  assert.match(html, /ECU 固件候选/);
+  assert.match(html, /直接导出/);
+  assert.match(html, /发现 UDS 刷写链/);
+  assert.match(html, /old workspace technical details/);
+});
