@@ -53,5 +53,5 @@ test('auto decode UI keeps results simple and actionable', () => {
 
 test('Electron workspace keeps batch-five capability through a later analyzer wrapper', () => {
   const main = read('main.js');
-  assert.match(main, /finals_analyzer_batch(?:5|6|7)/);
+  assert.match(main, /finals_analyzer_batch(?:5|6|7|8)/);
 });
