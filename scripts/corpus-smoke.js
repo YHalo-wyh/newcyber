@@ -1,8 +1,6 @@
 const fs = require('fs/promises');
 const path = require('path');
-const { scanWorkspace } = require('../src/core/analyzer');
-const { parsePcapng } = require('../src/core/pcapng');
-const { inspectPytorchZip } = require('../src/core/model');
+const { scanWorkspace } = require('../src/core/workbench_analyzer');
 
 async function summarize(label, root) {
   const analysis = await scanWorkspace(path.resolve(root));
@@ -19,7 +17,7 @@ async function summarize(label, root) {
       entropy: file.entropy,
       metadata: file.metadata
     })),
-    findings: analysis.findings.map((item) => ({ severity: item.severity, title: item.title, file: item.file }))
+    findings: analysis.findings.map((item) => ({ severity: item.severity, title: item.title, file: item.file, evidence: item.evidence }))
   };
   console.log(`\n=== CORPUS ${label} ===`);
   console.log(JSON.stringify(summary, null, 2));
@@ -27,12 +25,11 @@ async function summarize(label, root) {
   return analysis;
 }
 
-async function testEasyCan(root, analysis) {
+async function testEasyCan(analysis) {
   const capture = analysis.files.find((file) => file.path.toLowerCase().endsWith('.pcapng'));
   if (!capture) throw new Error('easy_can: PCAPNG capture not found');
-  const buffer = await fs.readFile(path.join(root, capture.path));
-  const pcapng = parsePcapng(buffer);
-  if (!pcapng?.can) throw new Error(`easy_can: SocketCAN was not decoded; interfaces=${JSON.stringify(pcapng?.interfaces || [])}`);
+  const pcapng = capture.metadata?.pcapng;
+  if (!pcapng?.can) throw new Error(`easy_can: SocketCAN was not decoded in normal workspace scan; metadata=${JSON.stringify(capture.metadata || {})}`);
 
   const signal = pcapng.can.ids.find((item) => item.id === '0x188');
   if (!signal) throw new Error('easy_can: CAN ID 0x188 not found');
@@ -58,26 +55,27 @@ async function testSilentWeights(root, analysis) {
   const model = analysis.files.find((file) => ['.pth', '.pt'].includes(file.extension));
   if (!model) throw new Error('SilentWeights: PyTorch model artifact not found');
 
-  const modelBuffer = await fs.readFile(path.join(root, model.path));
-  const inspection = inspectPytorchZip(modelBuffer);
-  if (!inspection) throw new Error('SilentWeights: PyTorch ZIP inspection failed');
-
-  const readmePath = path.join(root, 'README.txt');
-  const logPath = path.join(root, 'training.log');
-  const [readme, trainingLog] = await Promise.all([
-    fs.readFile(readmePath, 'utf8'),
-    fs.readFile(logPath, 'utf8')
-  ]);
+  const readme = await fs.readFile(path.join(root, 'README.txt'), 'utf8');
+  const audit = model.metadata?.modelAudit;
+  const inspection = model.metadata?.model;
+  if (!inspection || !audit) throw new Error('SilentWeights: model deep inspection/audit did not reach normal workspace scan');
 
   console.log('\n=== SILENTWEIGHTS SAFE MODEL CHECK ===');
   console.log('README.txt:\n' + readme.trim());
-  console.log('\ntraining.log:\n' + trainingLog.trim());
-  console.log('\nPyTorch ZIP inspection:\n' + JSON.stringify(inspection, null, 2));
+  console.log('\nModel audit:\n' + JSON.stringify(audit, null, 2));
 
-  if (!inspection.entries.some((entry) => /data\.pkl$/i.test(entry.name))) {
-    throw new Error('SilentWeights: data.pkl was not found');
+  if (!audit.unexpectedParameters.includes('feature_adapter.weight')) {
+    throw new Error(`SilentWeights: expected feature_adapter.weight anomaly, got ${JSON.stringify(audit.unexpectedParameters)}`);
   }
-  if (!inspection.storageCount) throw new Error('SilentWeights: tensor storage entries were not found');
+  if (!audit.suspiciousMappings.some((item) => item.parameter === 'feature_adapter.weight' && /data\/8$/.test(item.storage))) {
+    throw new Error(`SilentWeights: feature_adapter.weight was not associated with storage 8: ${JSON.stringify(audit.suspiciousMappings)}`);
+  }
+  if (!audit.storageOutliers.some((item) => /data\/8$/.test(item.name))) {
+    throw new Error(`SilentWeights: storage 8 was not detected as size outlier: ${JSON.stringify(audit.storageOutliers)}`);
+  }
+  if (!analysis.findings.some((item) => item.file === model.path && item.title === '模型参数与训练日志不一致')) {
+    throw new Error('SilentWeights: anomaly was not surfaced as a workspace finding');
+  }
 }
 
 async function main() {
@@ -88,7 +86,7 @@ async function main() {
   const vehicle = await summarize('CISCN-2025-easy_can', easyCan);
   const ai = await summarize('WQB-2026-SilentWeights', silentWeights);
 
-  await testEasyCan(path.resolve(easyCan), vehicle);
+  await testEasyCan(vehicle);
   await testSilentWeights(path.resolve(silentWeights), ai);
 
   console.log('\nCorpus smoke assertions passed.');
