@@ -1,8 +1,37 @@
 (() => {
-  if (typeof renderResult !== 'function') return;
+  if (typeof renderResult !== 'function' || typeof DOMAINS === 'undefined' || typeof TOOL_META === 'undefined') return;
+
+  if (!DOMAINS.lowalt.tools.some(([id]) => id === 'mavlink-signature-verify')) {
+    DOMAINS.lowalt.tools.push([
+      'mavlink-signature-verify',
+      'MAVLink2 签名验证',
+      '使用 EEPROM/配置中恢复的 32-byte key，离线验证 signed MAVLink2 frame 的 48-bit 签名。'
+    ]);
+  }
+  TOOL_META['mavlink-signature-verify'] = {
+    domain: 'lowalt',
+    title: 'MAVLink2 签名验证',
+    placeholder: 'key=001122...（64 hex）\nframe=fd...（完整 signed MAVLink2 frame）',
+    label: 'Signing key + frame hex'
+  };
 
   const originalRenderResult = renderResult;
   renderResult = function renderMavlinkFtpResult(tool, result) {
+    if (tool === 'mavlink-signature-verify') {
+      const rows = (result.frames || []).map((item) => [
+        item.index,
+        `${item.sysid}:${item.compid}`,
+        item.seq,
+        item.msgid,
+        item.linkId,
+        item.timestamp,
+        item.expected,
+        item.computed,
+        item.valid ? 'MATCH' : 'MISMATCH'
+      ]);
+      return `<div class="result-stats"><div><b>${result.validFrames || 0}</b><span>Valid</span></div><div><b>${result.invalidFrames || 0}</b><span>Invalid</span></div></div>${table(['#','SYS:COMP','SEQ','MSGID','Link ID','Timestamp','Wire sig','Computed','结果'], rows)}<div class="kv-grid"><div><span>Key SHA-256</span><strong>${esc(result.keySha256 || '—')}</strong></div></div><p class="notice">${esc(result.note || '')}</p>`;
+    }
+
     const baseHtml = originalRenderResult(tool, result);
     if (tool !== 'mavlink-hex' || !result) return baseHtml;
     const summary = result.securitySummary || {};
@@ -35,7 +64,7 @@
       <div class="result-stats"><div><b>${summary.signedV2Frames || 0}</b><span>Signed v2</span></div><div><b>${Object.keys(summary.signingLinkCounts || {}).length}</b><span>Link IDs</span></div><div><b>${summary.signingTimestampRegressionCount || 0}</b><span>Timestamp rollback</span></div><div><b>${summary.ftpEventCount || 0}</b><span>FTP events</span></div></div>
       ${signatureRows.length ? table(['SEQ','SYS:COMP','Link ID','Signing timestamp','Signature','MSGID','消息'], signatureRows) : ''}
       ${ftpRows.length ? `<p class="notice">FILE_TRANSFER_PROTOCOL 已拆为 session/opcode/offset/path。OpenFileRO / ReadFile / BurstReadFile 可直接作为飞控文件系统取证入口；认证成功不等价于文件访问合理。</p>${table(['帧','源','FTP SEQ','Session','Opcode','Req Opcode','Offset','Size','Path/Data/Error'], ftpRows)}` : ''}
-      <p class="notice">若同时从 EEPROM 提取到 32-byte signing key，可用核心 verifyMavlink2Signature() 对抓包逐帧离线确认密钥是否匹配；不要仅因帧带签名就推断密钥未复用。</p>
+      <p class="notice">若同时从 EEPROM 提取到 32-byte signing key，可打开“MAVLink2 签名验证”逐帧离线确认密钥是否匹配；不要仅因帧带签名就推断密钥未复用。</p>
     </article>`;
     return `${panel}${baseHtml}`;
   };
