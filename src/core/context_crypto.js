@@ -79,7 +79,7 @@ function nameMatchesRole(name, aliases) {
 
 function assignmentLiterals(text, aliases, role) {
   const results = [];
-  const lineRe = /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*[:=]\s*(.+?)\s*$/gim;
+  const lineRe = /^\s*(?:(?:const|let|var)\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*(?::\s*[^=]+)?=\s*(.+?)\s*$/gim;
   for (const match of text.matchAll(lineRe)) {
     if (!nameMatchesRole(match[1], aliases)) continue;
     const literal = literalFromExpression(match[2]);
