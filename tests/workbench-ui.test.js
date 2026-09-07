@@ -11,8 +11,8 @@ function sampleAnalysis() {
     workspaceName: 'real-corpus',
     workspacePath: '/tmp/real-corpus',
     scannedAt: '2026-09-07T00:00:00.000Z',
-    stats: { files: 2, bytes: 200000, findings: 1, flags: 0 },
-    categories: [{ name: '取证 / 流量', score: 5 }, { name: 'AI / ML', score: 5 }],
+    stats: { files: 4, bytes: 420000, findings: 3, flags: 0 },
+    categories: [{ name: '取证 / 流量', score: 5 }, { name: 'AI / ML', score: 5 }, { name: '低空经济', score: 9 }, { name: '区块链', score: 7 }],
     candidates: { flags: [] },
     recommendations: ['优先核对状态跃迁原始帧。'],
     findings: [{
@@ -49,21 +49,53 @@ function sampleAnalysis() {
             exportedBytes: 1214464
           }
         }
+      },
+      {
+        name: 'eeprom.bin', path: 'eeprom.bin', type: '二进制数据', extension: '.bin', size: 16384,
+        entropy: 1.2, flags: [], findings: [], sha256: 'c'.repeat(64), partialHash: false,
+        metadata: {
+          lowAltitude: {
+            format: 'ArduPilot AP_Param EEPROM', header: 'PA', headerHex: '50410600',
+            signing: {
+              offset: 8064, offsetHex: '0x1f80', magic: '0x3852fcd1', magicValid: true,
+              timestamp: '123456789', keyLength: 32,
+              signingKeyHex: '0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20',
+              signingKeySha256: 'd'.repeat(64)
+            }
+          }
+        }
+      },
+      {
+        name: 'SelfAuthorizedVault.sol', path: 'SelfAuthorizedVault.sol', type: '文本/源码', extension: '.sol', size: 4096,
+        entropy: 4.5, flags: [], findings: [], sha256: 'e'.repeat(64), partialHash: false,
+        metadata: {
+          web3Audit: {
+            summary: { high: 1, medium: 1, low: 0 },
+            findings: [
+              { severity: 'high', line: 24, id: 'abi-smuggling-offset', title: '动态 bytes 授权使用硬编码 calldata 偏移', message: '授权 selector 与实际 actionData selector 可能不一致。' },
+              { severity: 'medium', line: 7, id: 'first-caller-init', title: '公开的一次性初始化入口', message: '确认首次调用者权限。' }
+            ]
+          }
+        }
       }
     ]
   };
 }
 
-test('导出报告保留 CAN 原始帧与模型异常证据', () => {
+test('导出报告保留 CAN、模型、UAV 和 Web3 深度证据', () => {
   const report = buildMarkdownReport(sampleAnalysis(), '人工复核中');
   assert.match(report, /深度解析证据/);
   assert.match(report, /00000188040000000200000000000000/);
   assert.match(report, /feature_adapter\.weight/);
   assert.match(report, /archive\/data\/8/);
+  assert.match(report, /ArduPilot \/ MAVLink/);
+  assert.match(report, /0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20/);
+  assert.match(report, /Solidity 静态审计/);
+  assert.match(report, /abi-smuggling-offset/);
   assert.match(report, /人工复核中/);
 });
 
-test('workspace evidence 扩展能把深度证据渲染到赛题页', () => {
+test('workspace evidence 扩展能把四赛道深度证据渲染到赛题页', () => {
   const source = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'workspace_evidence.js'), 'utf8');
   const context = {
     state: { workspace: sampleAnalysis() },
@@ -79,6 +111,10 @@ test('workspace evidence 扩展能把深度证据渲染到赛题页', () => {
   assert.match(html, /00000188040000000200000000000000/);
   assert.match(html, /feature_adapter\.weight/);
   assert.match(html, /archive\/data\/8/);
+  assert.match(html, /ArduPilot \/ MAVLink 深度解析/);
+  assert.match(html, /0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20/);
+  assert.match(html, /Solidity 静态审计/);
+  assert.match(html, /abi-smuggling-offset/);
 });
 
 test('PyTorch 审计把未声明参数关联到对应 storage', () => {
