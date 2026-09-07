@@ -29,7 +29,7 @@ function parseCanSocketcan(packet) {
 
   return {
     id,
-    idHex: id.toString(16).toUpperCase(),
+    idHex: id.toString(16).toUpperCase().padStart(extended ? 8 : 3, '0'),
     canIdRaw: `0x${canIdRaw.toString(16).padStart(8, '0')}`,
     endian,
     extended,
