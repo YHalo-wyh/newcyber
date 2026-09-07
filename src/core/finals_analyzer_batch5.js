@@ -24,7 +24,7 @@ function extractSuspiciousStrings(text) {
   };
 
   pushMatches('hex', /(?<![A-Za-z0-9])(?:0x)?(?:[0-9A-Fa-f]{2}[\s,:-]?){8,512}(?![A-Za-z0-9])/g);
-  pushMatches('base64', /(?<![A-Za-z0-9+/=_-])(?:[A-Za-z0-9+/]{4}){3,256}(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?(?![A-Za-z0-9+/=_-])/g);
+  pushMatches('base64', /(?<![A-Za-z0-9+/_-])(?:[A-Za-z0-9+/]{4}){3,256}(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?(?![A-Za-z0-9+/_-])/g);
   pushMatches('base64url', /(?<![A-Za-z0-9_-])[A-Za-z0-9_-]{16,1024}={0,2}(?![A-Za-z0-9_-])/g);
   pushMatches('percent', /(?:%[0-9A-Fa-f]{2}){4,256}/g);
   pushMatches('escape', /(?:(?:\\x[0-9A-Fa-f]{2})|(?:\\u[0-9A-Fa-f]{4})){4,256}/g);
