@@ -7,11 +7,11 @@ const vm = require('node:vm');
 const { searchKnowledge, knowledgeStats } = require('../src/knowledge');
 const { runTool } = require('../src/core/tool_router');
 const { auditSolidity } = require('../src/core/web3');
-const { auditAiChallengeSource } = require('../src/core/ai_source');
 const { decodeUdsAdvanced } = require('../src/core/vehicle_final');
 const { analyzeMavlinkAdvanced } = require('../src/core/low_altitude_final');
 const { decryptCryptoContext } = require('../src/core/context_crypto');
 const { generateSuite } = require('../scripts/generate-generalization-corpus');
+const { evaluateCase } = require('../scripts/generalization-smoke');
 
 const root = path.join(__dirname, '..');
 const read = (relative) => fs.readFileSync(path.join(root, relative), 'utf8');
@@ -87,21 +87,36 @@ contract Target {
   assert.equal(audit.findings.some((item) => item.id === 'abi-packed-dynamic-collision'), false);
 });
 
-test('generalization corpus is deterministic and contains balanced semantic variants', () => {
-  const a = generateSuite({ seed: 'ci-generalization-v1', count: 4 });
-  const b = generateSuite({ seed: 'ci-generalization-v1', count: 4 });
+test('generalization corpus v2 is deterministic and balanced per capability family', () => {
+  const a = generateSuite({ seed: 'ci-generalization-v2', count: 4 });
+  const b = generateSuite({ seed: 'ci-generalization-v2', count: 4 });
   assert.deepEqual(a, b);
-  assert.equal(a.cases.length, 20);
-  for (const track of ['web3', 'ai', 'vehicle', 'lowalt', 'common']) {
-    const cases = a.cases.filter((item) => item.track === track);
-    assert.equal(cases.length, 4);
-    assert.ok(cases.some((item) => item.positive));
-    assert.ok(cases.some((item) => !item.positive));
+  assert.equal(a.version, 2);
+  assert.equal(a.countPerFamily, 4);
+  const families = [
+    'interface-trust-and-abi',
+    'model-output-shell',
+    'adversarial-budget',
+    'membership-inference',
+    'dataset-backdoor',
+    'model-supply-chain',
+    'uds-security-access',
+    'mavlink-crc',
+    'context-crypto'
+  ];
+  assert.equal(a.cases.length, families.length * 4);
+  for (const family of families) {
+    const cases = a.cases.filter((item) => item.family === family);
+    assert.equal(cases.length, 4, `${family}: wrong case count`);
+    assert.ok(cases.some((item) => item.positive), `${family}: positive missing`);
+    assert.ok(cases.some((item) => !item.positive), `${family}: negative missing`);
   }
+  assert.equal(a.cases.filter((item) => item.track === 'ai').length, 20);
+  for (const track of ['web3', 'vehicle', 'lowalt', 'common']) assert.equal(a.cases.filter((item) => item.track === track).length, 4);
 });
 
 test('generated Web3 variants survive identifier changes and reject trusted/abi.encode negatives', () => {
-  const cases = generateSuite({ seed: 'web3-holdout-v1', count: 6 }).cases.filter((item) => item.track === 'web3');
+  const cases = generateSuite({ seed: 'web3-holdout-v2', count: 6 }).cases.filter((item) => item.track === 'web3');
   for (const item of cases) {
     const audit = auditSolidity(item.input);
     const ids = findingIds(audit);
@@ -115,17 +130,19 @@ test('generated Web3 variants survive identifier changes and reject trusted/abi.
   }
 });
 
-test('generated AI variants preserve output-to-shell semantics without flagging argv-safe negatives', () => {
-  const cases = generateSuite({ seed: 'ai-holdout-v1', count: 6 }).cases.filter((item) => item.track === 'ai');
+test('generated AI variants validate each Batch 9 family with independent negative controls', () => {
+  const cases = generateSuite({ seed: 'ai-holdout-v2', count: 6 }).cases.filter((item) => item.track === 'ai');
+  const seen = new Set();
   for (const item of cases) {
-    const ids = findingIds(auditAiChallengeSource(item.input));
-    if (item.positive) assert.ok(ids.has('ai-output-shell-injection'), `${item.id}: shell flow missed`);
-    else assert.equal(ids.has('ai-output-shell-injection'), false, `${item.id}: safe argv flow flagged`);
+    seen.add(item.family);
+    const result = evaluateCase(item);
+    assert.equal(result.pass, true, `${item.id}: ${result.reason}`);
   }
+  for (const family of ['model-output-shell','adversarial-budget','membership-inference','dataset-backdoor','model-supply-chain']) assert.ok(seen.has(family), `${family}: family missing`);
 });
 
 test('generated vehicle variants decode SecurityAccess independent of CAN ID', () => {
-  const cases = generateSuite({ seed: 'vehicle-holdout-v1', count: 6 }).cases.filter((item) => item.track === 'vehicle');
+  const cases = generateSuite({ seed: 'vehicle-holdout-v2', count: 6 }).cases.filter((item) => item.track === 'vehicle');
   for (const item of cases) {
     const lines = item.input.split(/\r?\n/);
     const request = decodeUdsAdvanced(lines[0]);
@@ -141,7 +158,7 @@ test('generated vehicle variants decode SecurityAccess independent of CAN ID', (
 });
 
 test('generated MAVLink variants validate CRC while sysid/compid/sequence change', () => {
-  const cases = generateSuite({ seed: 'mavlink-holdout-v1', count: 6 }).cases.filter((item) => item.track === 'lowalt');
+  const cases = generateSuite({ seed: 'mavlink-holdout-v2', count: 6 }).cases.filter((item) => item.track === 'lowalt');
   for (const item of cases) {
     const result = analyzeMavlinkAdvanced(item.input);
     assert.equal(result.frames.length, 1, `${item.id}: frame parse failed`);
@@ -152,7 +169,7 @@ test('generated MAVLink variants validate CRC while sysid/compid/sequence change
 });
 
 test('generated crypto variants recover complete contexts and refuse missing-IV negatives', () => {
-  const cases = generateSuite({ seed: 'crypto-holdout-v1', count: 6 }).cases.filter((item) => item.track === 'common');
+  const cases = generateSuite({ seed: 'crypto-holdout-v2', count: 6 }).cases.filter((item) => item.track === 'common');
   for (const item of cases) {
     const result = decryptCryptoContext(item.input);
     if (item.positive) {
