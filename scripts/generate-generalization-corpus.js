@@ -160,22 +160,19 @@ function generateCryptoCase(rng, index) {
   const iv = crypto.createHash('sha256').update(`iv-${index}-${rng()}`).digest().subarray(0, 16);
   const flag = `flag{general_crypto_${index}}`;
   const ciphertext = encryptAesCbc(key, iv, flag);
-  const keyName = ident(rng, 'secretKey');
-  const ivName = ident(rng, 'initialVector');
-  const ctName = ident(rng, 'encryptedData');
+  const keyName = ident(rng, 'key');
+  const ivName = ident(rng, 'iv');
+  const ctName = ident(rng, 'encrypted');
   const positive = index % 2 === 0;
   const source = positive ? `
 const algorithm = "aes-128-cbc";
 const ${keyName} = Buffer.from("${key.toString('hex')}", "hex");
 const ${ivName} = Buffer.from("${iv.toString('base64')}", "base64");
 const ${ctName} = Buffer.from("${ciphertext.toString('hex')}", "hex");
-const key = ${keyName};
-const iv = ${ivName};
-const ciphertext = ${ctName};
 ` : `
 const algorithm = "aes-128-cbc";
-const key = Buffer.from("${key.toString('hex')}", "hex");
-const ciphertext = Buffer.from("${ciphertext.toString('hex')}", "hex");
+const ${keyName} = Buffer.from("${key.toString('hex')}", "hex");
+const ${ctName} = Buffer.from("${ciphertext.toString('hex')}", "hex");
 // IV intentionally absent: analyzer must not guess it.
 `;
   return {
