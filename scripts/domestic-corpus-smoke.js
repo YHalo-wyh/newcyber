@@ -65,6 +65,32 @@ async function testSuEasyLlm(root) {
   console.log(JSON.stringify({ category: categoryScore(analysis, '人工智能'), llmCrypto: audit.llmCrypto, findings: audit.findings.map((item) => item.id) }, null, 2));
 }
 
+async function testHackergameLlm(root) {
+  const analysis = await scanWorkspace(path.resolve(root));
+  const source = analysis.files.find((file) => /main\.py$/i.test(file.path));
+  if (!source) throw new Error('Hackergame 2023 small LLM planet: main.py not found');
+  const audit = source.metadata?.aiAudit;
+  const challenge = audit?.generationChallenge;
+  if (!challenge) throw new Error('Hackergame 2023 small LLM planet: generation challenge was not detected');
+  if (!challenge.models?.includes('roneneldan/TinyStories-33M')) throw new Error(`Hackergame model id missed: ${JSON.stringify(challenge.models)}`);
+  if (challenge.generation?.maxNewTokens !== 30 || challenge.generation?.numBeams !== 1) {
+    throw new Error(`Hackergame generation config mismatch: ${JSON.stringify(challenge.generation)}`);
+  }
+  const targets = challenge.targets.map((item) => item.target);
+  for (const target of ['you are smart', 'accepted', 'hackergame', '🐮']) {
+    if (!targets.includes(target)) throw new Error(`Hackergame target oracle missed: ${target}`);
+  }
+  if (!challenge.deterministicGreedy) throw new Error('Hackergame greedy generation should be recognized as deterministic');
+  if (categoryScore(analysis, '人工智能') <= 0) throw new Error('Hackergame corpus: 人工智能 category did not trigger');
+  if (!analysis.recommendations.some((item) => /目标输出型生成题/.test(item))) throw new Error('Hackergame corpus: target-output recommendation missing');
+
+  const report = buildMarkdownReport(analysis, 'Hackergame 2023 small LLM planet public corpus');
+  if (!report.includes('Generation strategy') || !report.includes('hackergame')) throw new Error('Hackergame corpus: report lost target-output evidence');
+
+  console.log('\n=== HACKERGAME 2023 SMALL LLM PLANET ===');
+  console.log(JSON.stringify({ model: challenge.models, generation: challenge.generation, targets: challenge.targets }, null, 2));
+}
+
 async function testSuctfSolana(root) {
   const analysis = await scanWorkspace(path.resolve(root));
   const anchorConfigFile = analysis.files.find((file) => /Anchor\.toml$/i.test(file.path));
@@ -102,11 +128,13 @@ async function main() {
   const uds = process.argv[2];
   const easyLlm = process.argv[3];
   const solana = process.argv[4];
-  if (!uds || !easyLlm || !solana) throw new Error('usage: node scripts/domestic-corpus-smoke.js <udsctf_dir> <su_easyllm_dir> <suctf_solana_dir>');
+  const hackergame = process.argv[5];
+  if (!uds || !easyLlm || !solana || !hackergame) throw new Error('usage: node scripts/domestic-corpus-smoke.js <udsctf_dir> <su_easyllm_dir> <suctf_solana_dir> <hackergame_llm_dir>');
 
   await testUdsCtf(path.resolve(uds));
   await testSuEasyLlm(path.resolve(easyLlm));
   await testSuctfSolana(path.resolve(solana));
+  await testHackergameLlm(path.resolve(hackergame));
   console.log('\nDomestic real-corpus assertions passed.');
 }
 
