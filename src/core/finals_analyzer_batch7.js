@@ -2,7 +2,7 @@ const fsp = require('fs/promises');
 const path = require('path');
 const base = require('./finals_analyzer_batch6');
 const { analyzeFirmwareBuffer } = require('./firmware_unpack');
-const { analyzeUavChallengeEvidence } = require('./uav_challenge_matrix_v2');
+const { analyzeUavChallengeEvidence } = require('./uav_challenge_matrix_v3');
 
 const FIRMWARE_EXTENSIONS = new Set(['.bin','.img','.fw','.rom','.trx','.chk','.ubi','.squashfs','.jffs2']);
 const UAV_TEXT_EXTENSIONS = new Set(['.txt','.log','.hex','.mavlink','.nmea','.csv','.json','.md','.conf','.cfg']);
@@ -43,9 +43,7 @@ async function enrichFirmware(rootPath, file) {
   const summary = stripArtifacts(result);
   file.metadata = { ...(file.metadata || {}), firmware: summary };
   file.findings ||= [];
-  for (const finding of summary.findings || []) {
-    file.findings.push({ ...finding, file: file.path, count: 1, id: `${finding.id}:${file.path}` });
-  }
+  for (const finding of summary.findings || []) file.findings.push({ ...finding, file: file.path, count: 1, id: `${finding.id}:${file.path}` });
   if (summary.magic.length || summary.vendor) {
     file.findings.push({
       id: `firmware-structure:${file.path}`,
@@ -67,7 +65,21 @@ async function enrichUavText(rootPath, file) {
   if (!/(mavlink|ardupilot|px4|gps|nmea|rtsp|ftp|gcs|param_|mission_|attitude|vfr_hud|deauth|ssid|bssid|nmap|prearm|battery|ulog|dataflash)/i.test(text) && !/^(?:fe|fd)[0-9a-f\s]+$/i.test(text.trim())) return false;
   const result = analyzeUavChallengeEvidence(text);
   if (!result.hits.length) return false;
-  file.metadata = { ...(file.metadata || {}), uavChallenge: { coverage: result.coverage, hits: result.hits.slice(0, 12), telemetry: result.telemetry ? { summary: result.telemetry.summary, anomalies: result.telemetry.anomalies.slice(0, 20) } : null } };
+  file.metadata = {
+    ...(file.metadata || {}),
+    uavChallenge: {
+      coverage: result.coverage,
+      hits: result.hits.slice(0, 12),
+      telemetry: result.telemetry ? { summary: result.telemetry.summary, anomalies: result.telemetry.anomalies.slice(0, 20) } : null,
+      control: result.controlFlow ? {
+        streams: result.controlFlow.streams,
+        paramWrites: result.controlFlow.paramWrites.slice(0, 30),
+        modeChanges: result.controlFlow.modeChanges.slice(0, 30),
+        commands: result.controlFlow.commands.slice(0, 30).map((x) => ({ command: x.command, ack: x.ack, accepted: x.accepted })),
+        findings: result.controlFlow.findings.slice(0, 20)
+      } : null
+    }
+  };
   file.findings ||= [];
   for (const hit of result.hits.filter((x) => x.confidence >= 0.6).slice(0, 8)) {
     file.findings.push({
@@ -124,9 +136,8 @@ function buildUavSection(analysis) {
     if (uav?.hits?.length) {
       lines.push(`### 低空题型：\`${file.path}\``, '');
       for (const hit of uav.hits.slice(0, 8)) lines.push(`- ${hit.title} (${Math.round(hit.confidence * 100)}%)：${hit.action}`);
-      if (uav.telemetry?.anomalies?.length) {
-        lines.push(`- 遥测一致性异常：${uav.telemetry.anomalies.slice(0, 6).map((x) => `${x.id}@frame${x.frameIndex}`).join(', ')}`);
-      }
+      if (uav.telemetry?.anomalies?.length) lines.push(`- 遥测一致性异常：${uav.telemetry.anomalies.slice(0, 6).map((x) => `${x.id}@frame${x.frameIndex}`).join(', ')}`);
+      if (uav.control?.findings?.length) lines.push(`- 控制状态机：${uav.control.findings.slice(0, 6).map((x) => x.id).join(', ')}`);
       lines.push('');
     }
   }
