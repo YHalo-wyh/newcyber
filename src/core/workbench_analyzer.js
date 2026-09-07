@@ -3,6 +3,8 @@ const path = require('path');
 const base = require('./analyzer');
 const { parsePcapng } = require('./pcapng');
 const { inspectPytorchZip, auditPytorchAgainstTrainingLog } = require('./model');
+const { inspectArduPilotEeprom } = require('./low_altitude');
+const { auditSolidity } = require('./web3');
 
 const DEEP_INSPECTION_LIMIT = 64 * 1024 * 1024;
 const TEXT_CONTEXT_LIMIT = 1024 * 1024;
@@ -101,22 +103,115 @@ async function enrichPytorch(rootPath, files, file) {
   }
 }
 
+function isArduPilotEepromCandidate(file) {
+  const lower = file.path.toLowerCase();
+  if (file.extension === '.eeprom') return true;
+  if (!['.bin', '.dat', '.raw', ''].includes(file.extension)) return false;
+  return /(?:^|[\\/])(?:eeprom|ap_param|ardupilot|storagekeys?)(?:[._-]|$)/i.test(lower)
+    || /(?:eeprom|ap_param|ardupilot|storagekeys?)/i.test(path.basename(lower));
+}
+
+async function enrichLowAltitude(rootPath, file) {
+  const fullPath = path.join(rootPath, file.path);
+  const read = await readFileBounded(fullPath, DEEP_INSPECTION_LIMIT);
+  if (read.skipped) {
+    file.metadata = {
+      ...(file.metadata || {}),
+      lowAltitude: { skipped: true, reason: 'EEPROM/固件超过深度解析上限', size: read.size, limit: DEEP_INSPECTION_LIMIT }
+    };
+    return;
+  }
+  if (!read.buffer?.length) return;
+  const inspection = inspectArduPilotEeprom(read.buffer);
+  const recognized = inspection.format === 'ArduPilot AP_Param EEPROM' || inspection.signing?.magicValid;
+  if (!recognized) return;
+
+  file.metadata = { ...(file.metadata || {}), lowAltitude: inspection };
+  const existingIds = new Set((file.findings || []).map((item) => item.id));
+  for (const [index, finding] of (inspection.findings || []).entries()) {
+    const id = `uav-ardupilot:${file.path}:${index}:${finding.title}`;
+    if (existingIds.has(id)) continue;
+    file.findings.push({
+      id,
+      severity: finding.severity || 'info',
+      title: finding.title,
+      file: file.path,
+      count: 1,
+      evidence: finding.evidence
+    });
+  }
+}
+
+async function enrichSolidity(rootPath, file) {
+  const source = await readTextBounded(path.join(rootPath, file.path));
+  if (!source.trim()) return;
+  const audit = auditSolidity(source);
+  file.metadata = { ...(file.metadata || {}), web3Audit: audit };
+  const existingIds = new Set((file.findings || []).map((item) => item.id));
+  for (const finding of audit.findings || []) {
+    const id = `web3-${finding.id}:${file.path}:${finding.line}`;
+    if (existingIds.has(id)) continue;
+    const context = finding.evidence ? `\n${finding.evidence}` : '';
+    file.findings.push({
+      id,
+      severity: finding.severity,
+      title: finding.title,
+      file: file.path,
+      count: 1,
+      evidence: `L${finding.line}: ${finding.message || finding.id}${context}`
+    });
+  }
+}
+
+function upsertCategory(analysis, name, score) {
+  if (!score) return;
+  const existing = analysis.categories.find((item) => item.name === name);
+  if (existing) existing.score = Math.max(existing.score || 0, score);
+  else analysis.categories.push({ name, score });
+}
+
+function appendRecommendation(analysis, text) {
+  analysis.recommendations ||= [];
+  if (!analysis.recommendations.includes(text)) analysis.recommendations.push(text);
+}
+
+function refreshDeepCategories(analysis) {
+  const lowAltitudeFiles = analysis.files.filter((file) => file.metadata?.lowAltitude && !file.metadata.lowAltitude.skipped);
+  const signingFiles = lowAltitudeFiles.filter((file) => file.metadata.lowAltitude.signing?.magicValid);
+  if (lowAltitudeFiles.length) {
+    upsertCategory(analysis, '低空经济', 5 + signingFiles.length * 4);
+    appendRecommendation(analysis, '发现 ArduPilot EEPROM/StorageKeys 证据；优先核对 MAVLink 2 signing 结构、时间戳与 32-byte shared key。');
+  }
+
+  const web3Files = analysis.files.filter((file) => file.metadata?.web3Audit);
+  if (web3Files.length) {
+    const high = web3Files.reduce((sum, file) => sum + (file.metadata.web3Audit.summary?.high || 0), 0);
+    upsertCategory(analysis, '区块链', 5 + Math.min(high * 2, 10));
+    if (high) appendRecommendation(analysis, 'Solidity 静态审计命中高风险调用/授权模式；先沿 calldata、selector、delegatecall 与权限边界复核真实可利用路径。');
+  }
+
+  analysis.categories.sort((a, b) => (b.score || 0) - (a.score || 0) || a.name.localeCompare(b.name, 'zh-CN'));
+}
+
 async function scanWorkspace(rootPath) {
   const analysis = await base.scanWorkspace(rootPath);
   for (const file of analysis.files) {
     try {
       if (file.extension === '.pcapng') await enrichPcapng(rootPath, file);
       if (file.extension === '.pth' || file.extension === '.pt') await enrichPytorch(rootPath, analysis.files, file);
+      if (isArduPilotEepromCandidate(file)) await enrichLowAltitude(rootPath, file);
+      if (file.extension === '.sol') await enrichSolidity(rootPath, file);
     } catch (error) {
       file.metadata = { ...(file.metadata || {}), deepInspectionError: error.message };
     }
   }
 
-  const severityOrder = { high: 0, medium: 1, low: 2 };
+  const severityOrder = { high: 0, medium: 1, low: 2, info: 3 };
   analysis.findings = analysis.files
     .flatMap((file) => file.findings || [])
     .sort((a, b) => (severityOrder[a.severity] ?? 9) - (severityOrder[b.severity] ?? 9));
   analysis.stats.findings = analysis.findings.length;
+  refreshDeepCategories(analysis);
   return analysis;
 }
 
@@ -177,6 +272,34 @@ function buildDeepEvidenceSection(analysis) {
         for (const item of audit.storageOutliers) lines.push(`  - \`${oneLine(item.name)}\`：${item.uncompressedSize} bytes`);
       }
       if (audit?.baselineBytes && audit?.exportedBytes) lines.push(`- checkpoint 体积：baseline ${audit.baselineBytes} bytes -> exported ${audit.exportedBytes} bytes`);
+      lines.push('');
+    }
+
+    const lowAltitude = file.metadata?.lowAltitude;
+    if (lowAltitude && !lowAltitude.skipped) {
+      lines.push(`### ArduPilot / MAVLink：\`${oneLine(file.path)}\``, '');
+      lines.push(`- 格式：${oneLine(lowAltitude.format)}`);
+      lines.push(`- Header：\`${oneLine(lowAltitude.header)}\` / \`${oneLine(lowAltitude.headerHex)}\``);
+      if (lowAltitude.signing) {
+        lines.push(`- Signing struct offset：\`${oneLine(lowAltitude.signing.offsetHex)}\``);
+        lines.push(`- Magic：\`${oneLine(lowAltitude.signing.magic)}\`（${lowAltitude.signing.magicValid ? 'valid' : 'fallback candidate'}）`);
+        lines.push(`- Timestamp：${oneLine(lowAltitude.signing.timestamp)}`);
+        lines.push(`- MAVLink 2 signing key（敏感凭据）：\`${oneLine(lowAltitude.signing.signingKeyHex)}\``);
+        lines.push(`- Key SHA-256：\`${oneLine(lowAltitude.signing.signingKeySha256)}\``);
+      }
+      lines.push('');
+    }
+
+    const web3 = file.metadata?.web3Audit;
+    if (web3) {
+      lines.push(`### Solidity 静态审计：\`${oneLine(file.path)}\``, '');
+      lines.push(`- High：${web3.summary?.high || 0} / Medium：${web3.summary?.medium || 0} / Low：${web3.summary?.low || 0}`);
+      if (web3.findings?.length) {
+        lines.push('', '| 严重度 | 行 | 规则 | 发现 | 说明 |', '| --- | ---: | --- | --- | --- |');
+        for (const finding of web3.findings.slice(0, 100)) {
+          lines.push(`| ${oneLine(finding.severity)} | ${finding.line ?? '—'} | ${oneLine(finding.id)} | ${oneLine(finding.title)} | ${oneLine(finding.message)} |`);
+        }
+      }
       lines.push('');
     }
   }
