@@ -3,7 +3,7 @@ const path = require('path');
 const fs = require('fs/promises');
 const { execFile } = require('child_process');
 const { promisify } = require('util');
-const { scanWorkspace, inspectFile, buildMarkdownReport } = require('./src/core/finals_analyzer_batch6');
+const { scanWorkspace, inspectFile, buildMarkdownReport } = require('./src/core/finals_analyzer_batch7');
 const { runTool } = require('./src/core/tool_router');
 const { bufferFromArtifact } = require('./src/core/artifacts');
 const { analyzeFirmwareBuffer, MAX_FIRMWARE_BYTES } = require('./src/core/firmware_unpack');
@@ -94,26 +94,26 @@ function registerIpc() {
     const filePath = path.resolve(result.filePaths[0]);
     approvedFirmwareFiles.add(filePath);
     const buffer = await readFirmware(filePath);
-    return { filePath, fileName:path.basename(filePath), analysis:analyzeFirmwareBuffer(buffer) };
+    return { filePath, fileName: path.basename(filePath), analysis: analyzeFirmwareBuffer(buffer) };
   });
 
   ipcMain.handle('firmware:extract-binwalk', async (_event, filePath) => {
     const resolved = path.resolve(String(filePath || ''));
     if (!approvedFirmwareFiles.has(resolved)) throw new Error('请先通过固件选择器打开文件');
-    const out = await dialog.showOpenDialog(win, { title:'选择固件解包输出目录', properties:['openDirectory','createDirectory'] });
+    const out = await dialog.showOpenDialog(win, { title: '选择固件解包输出目录', properties: ['openDirectory', 'createDirectory'] });
     if (out.canceled || !out.filePaths[0]) return null;
     const outputDir = path.resolve(out.filePaths[0]);
     try {
       const { stdout, stderr } = await execFileAsync('binwalk', ['-eM', '--directory', outputDir, resolved], {
-        windowsHide:true,
-        timeout:120000,
-        maxBuffer:4 * 1024 * 1024,
-        shell:false
+        windowsHide: true,
+        timeout: 120000,
+        maxBuffer: 4 * 1024 * 1024,
+        shell: false
       });
-      return { ok:true, outputDir, stdout:String(stdout || '').slice(-12000), stderr:String(stderr || '').slice(-4000) };
+      return { ok: true, outputDir, stdout: String(stdout || '').slice(-12000), stderr: String(stderr || '').slice(-4000) };
     } catch (error) {
-      if (error?.code === 'ENOENT') return { ok:false, missingTool:'binwalk', outputDir, error:'未找到 binwalk；仍可使用内置结构识别和 segment 导出。' };
-      return { ok:false, outputDir, error:error?.message || String(error), stdout:String(error?.stdout || '').slice(-12000), stderr:String(error?.stderr || '').slice(-4000) };
+      if (error?.code === 'ENOENT') return { ok: false, missingTool: 'binwalk', outputDir, error: '未找到 binwalk；仍可使用内置结构识别和 segment 导出。' };
+      return { ok: false, outputDir, error: error?.message || String(error), stdout: String(error?.stdout || '').slice(-12000), stderr: String(error?.stderr || '').slice(-4000) };
     }
   });
 
