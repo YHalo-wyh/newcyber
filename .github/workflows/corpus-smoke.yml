@@ -23,13 +23,39 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-          mkdir -p /tmp/newcyber-corpus/easy_can /tmp/newcyber-corpus/silentweights
+          mkdir -p \
+            /tmp/newcyber-corpus/easy_can \
+            /tmp/newcyber-corpus/silentweights \
+            /tmp/newcyber-corpus/starpwn \
+            /tmp/newcyber-corpus/web3
+
           curl -fL --retry 3 -o /tmp/easy_can.zip 'https://github.com/CTF-Archives/2025-CISCN-Finals/releases/download/v1.0/ctf-easy_can_0472f45fbab6d039d804cd45e60ba30b.zip'
           echo '73d3646f68a589b0cace8379ea55570b32486ba183c0323611bf406b79969f5d  /tmp/easy_can.zip' | sha256sum -c -
           unzip -q /tmp/easy_can.zip -d /tmp/newcyber-corpus/easy_can
+
           curl -fL --retry 3 -o /tmp/silentweights.zip 'https://github.com/CTF-Archives/2026-WQB-Quals/releases/download/attachments/SilentWeights_367c1179ccb1339df487d17c0e7242bf.zip'
           echo '4c7d2da0063709d549d6c89f89c580fb9f9908fb32da909d2454697dc32a5877  /tmp/silentweights.zip' | sha256sum -c -
           unzip -q /tmp/silentweights.zip -d /tmp/newcyber-corpus/silentweights
+
+          curl -fL --retry 3 \
+            -o /tmp/newcyber-corpus/starpwn/eeprom.bin \
+            'https://raw.githubusercontent.com/Abdelkad3r/STARPWN-CTF-2026/be85298b19cac9a37b239b288adb497ab2c6fb7a/ground-ops/one-to-rule-them-all/challenge/eeprom.bin'
+          test "$(stat -c%s /tmp/newcyber-corpus/starpwn/eeprom.bin)" -eq 16384
+
+          curl -fL --retry 3 \
+            -o /tmp/newcyber-corpus/web3/15.ABI-Smuggling.sol \
+            'https://raw.githubusercontent.com/6boris/awesome-web3-contracts/ade79cc1140f56d7ffa5555012e566735233c6d4/contracts/CTF/Damn-Vulnerable-DeFi/15.ABI-Smuggling.sol'
+          grep -q 'calldataload(calldataOffset)' /tmp/newcyber-corpus/web3/15.ABI-Smuggling.sol
+
           find /tmp/newcyber-corpus -maxdepth 4 -type f -printf '%p\n'
+          sha256sum \
+            /tmp/newcyber-corpus/starpwn/eeprom.bin \
+            /tmp/newcyber-corpus/web3/15.ABI-Smuggling.sol
+
       - name: Run NewCyber against real public corpora
-        run: node scripts/corpus-smoke.js /tmp/newcyber-corpus/easy_can /tmp/newcyber-corpus/silentweights
+        run: >-
+          node scripts/corpus-smoke.js
+          /tmp/newcyber-corpus/easy_can
+          /tmp/newcyber-corpus/silentweights
+          /tmp/newcyber-corpus/starpwn
+          /tmp/newcyber-corpus/web3
