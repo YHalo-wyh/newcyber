@@ -3,6 +3,7 @@ const path = require('path');
 const fs = require('fs/promises');
 const { scanWorkspace, inspectFile, buildMarkdownReport } = require('./src/core/finals_analyzer');
 const { runTool } = require('./src/core/tool_router');
+const { bufferFromArtifact } = require('./src/core/artifacts');
 
 let win = null;
 const approvedRoots = new Set();
@@ -57,6 +58,18 @@ function registerIpc() {
     if (result.canceled || !result.filePath) return null;
     await fs.writeFile(result.filePath, buildMarkdownReport(payload.analysis, payload.notes || ''), 'utf8');
     return result.filePath;
+  });
+
+  ipcMain.handle('artifact:save', async (_event, artifact) => {
+    const decoded = bufferFromArtifact(artifact, { requireComplete: true });
+    const result = await dialog.showSaveDialog(win, {
+      title: '导出二进制产物',
+      defaultPath: decoded.name,
+      filters: [{ name: 'Binary artifact', extensions: [path.extname(decoded.name).replace(/^\./, '') || 'bin'] }]
+    });
+    if (result.canceled || !result.filePath) return null;
+    await fs.writeFile(result.filePath, decoded.buffer);
+    return { filePath: result.filePath, size: decoded.buffer.length, sha256: decoded.sha256 };
   });
 
   ipcMain.handle('toolbox:run', async (_event, tool, payload) => runTool(tool, payload || {}));
