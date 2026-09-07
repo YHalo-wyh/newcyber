@@ -1,5 +1,5 @@
 const toolbox = require('./toolbox');
-const { analyzeCanAdvanced, decodeUdsAdvanced } = require('./vehicle');
+const { analyzeCanAdvanced, decodeUdsAdvanced } = require('./vehicle_final');
 const { auditAiChallengeSource } = require('./ai_source');
 const { analyzeTabularDataset } = require('./ai_tabular');
 const { auditSolanaAnchor } = require('./solana');
