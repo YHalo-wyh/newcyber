@@ -9,6 +9,12 @@ function normalizeMac(value) {
   return raw.length === 12 ? raw.match(/../g).join(':') : null;
 }
 
+function cleanSsid(value) {
+  const text=String(value||'').trim();
+  if (!text) return null;
+  return text.split(/\s{2,}|\s+(?=(?:channel|ch)\b)|\s+(?=WPA3?\b)|\s+(?=WEP\b)|\s+(?=OPEN\b)/i)[0].trim() || null;
+}
+
 function parseWifiEvidence(input) {
   const text = String(input || '');
   const networks = [];
@@ -23,7 +29,7 @@ function parseWifiEvidence(input) {
     const cryptoMatch = line.match(/\b(WPA3|WPA2|WPA|WEP|OPN|OPEN)\b/i);
     if (!bssidMatch && !ssidMatch) continue;
     const bssid = normalizeMac(bssidMatch?.[1]);
-    const ssid = ssidMatch?.[1]?.trim() || null;
+    const ssid = cleanSsid(ssidMatch?.[1]);
     const key = `${bssid || '?'}|${ssid || '?'}`;
     if (seen.has(key)) continue;
     seen.add(key);
@@ -43,7 +49,7 @@ function parseWifiEvidence(input) {
 
   const crackResults = [];
   for (const [index,line] of lines.entries()) {
-    const keyMatch = line.match(/(?:KEY\s+FOUND|password|passphrase|psk)\s*[!:\]= -]+\s*[\["']?([^\]"'\s]{4,128})/i);
+    const keyMatch = line.match(/(?:KEY\s+FOUND|password|passphrase|psk)\s*[!:\]= -]+\s*[\["']?\s*([^\]"'\s]{4,128})/i);
     if (keyMatch) crackResults.push({ line:index + 1, candidate:keyMatch[1], evidence:line.trim().slice(0,300) });
   }
 
@@ -66,4 +72,4 @@ function parseWifiEvidence(input) {
   };
 }
 
-module.exports = { normalizeMac, parseWifiEvidence };
+module.exports = { normalizeMac, cleanSsid, parseWifiEvidence };
