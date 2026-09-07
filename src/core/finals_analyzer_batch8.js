@@ -1,10 +1,10 @@
 const fsp=require('fs/promises');
 const path=require('path');
 const base=require('./finals_analyzer_batch7');
-const { parseWifiEvidence }=require('./uav_wifi');
+const { parseWifiEvidence, analyzeUavChallengeEvidence }=require('./uav_challenge_matrix_v4');
 const { analyzeFlightLog }=require('./uav_flight_log');
 
-const TEXT_EXTENSIONS=new Set(['.txt','.log','.csv','.md','.conf','.cfg']);
+const TEXT_EXTENSIONS=new Set(['.txt','.log','.csv','.md','.conf','.cfg','.hex','.mavlink']);
 const ULOG_EXTENSIONS=new Set(['.ulg']);
 const MAX_TEXT=2*1024*1024;
 const MAX_LOG=64*1024*1024;
@@ -23,6 +23,20 @@ function flightSummary(result) {
     events:(result.events||[]).slice(0,300),
     findings:result.findings||[],
     notes:result.notes||[]
+  };
+}
+
+function controlSummary(result) {
+  const control=result.controlFlow;
+  if (!control) return null;
+  return {
+    streams:control.streams||[],
+    paramWrites:(control.paramWrites||[]).slice(0,50),
+    modeChanges:(control.modeChanges||[]).slice(0,50),
+    commands:(control.commands||[]).slice(0,50),
+    geofenceTransactions:(control.geofenceTransactions||[]).slice(0,50),
+    gcsProfiles:(control.gcsProfiles||[]).slice(0,50),
+    findings:(control.findings||[]).slice(0,40)
   };
 }
 
@@ -52,12 +66,29 @@ async function enrichBatch8(rootPath,file) {
         for (const finding of wifi.findings||[]) file.findings.push({ ...finding, id:`${finding.id}:${file.path}`, title:'Wi-Fi 攻击面证据', file:file.path, count:1 });
         changed=true;
       }
+
       const log=analyzeFlightLog(text);
       if (log.format!=='unknown') {
         file.metadata={...(file.metadata||{}),uavFlightLog:flightSummary(log)};
         file.findings||=[];
         for (const finding of log.findings||[]) file.findings.push({ ...finding, id:`${finding.id}:${file.path}`, title:'飞行日志提取证据', file:file.path, count:1 });
         changed=true;
+      }
+
+      if (/^(?:fe|fd)[0-9a-f\s]+$/i.test(text.trim())) {
+        const advanced=analyzeUavChallengeEvidence(text);
+        const control=controlSummary(advanced);
+        if (control?.geofenceTransactions?.length || control?.gcsProfiles?.length) {
+          file.metadata={
+            ...(file.metadata||{}),
+            uavChallenge:{ ...(file.metadata?.uavChallenge||{}), coverage:advanced.coverage, hits:advanced.hits.slice(0,16), control }
+          };
+          file.findings||=[];
+          for (const finding of (control.findings||[]).filter((x)=>['geofence-param-confirmed','geofence-param-mismatch','gcs-signing-downgrade','gcs-competing-controller','gcs-identity-collision'].includes(x.id))) {
+            file.findings.push({ ...finding, id:`${finding.id}:${file.path}:${finding.frameIndex||0}`, title:finding.id.startsWith('geofence')?'地理围栏变更证据':'GCS 身份/控制源异常', file:file.path, count:1 });
+          }
+          changed=true;
+        }
       }
     }
   }
@@ -77,7 +108,7 @@ async function scanWorkspace(rootPath) {
     try { if (await enrichBatch8(rootPath,file)) enriched++; }
     catch (error) { file.metadata={...(file.metadata||{}),uavBatch8Error:error.message}; }
   }
-  if (enriched) analysis.recommendations.push(`Batch 8 进一步解析 ${enriched} 个无线/飞行日志证据文件：优先把 Wi-Fi 身份、GCS 控制源、围栏参数和飞行状态按时间线关联。`);
+  if (enriched) analysis.recommendations.push(`Batch 8 进一步解析 ${enriched} 个无线/飞行日志/控制流证据文件：优先把 Wi-Fi 身份、GCS 控制源、围栏参数和飞行状态按时间线关联。`);
   refresh(analysis);
   analysis.version=Math.max(Number(analysis.version)||1,9);
   return analysis;
@@ -88,6 +119,7 @@ function buildBatch8Section(analysis) {
   for (const file of analysis.files||[]) {
     const wifi=file.metadata?.uavWifi;
     const log=file.metadata?.uavFlightLog;
+    const control=file.metadata?.uavChallenge?.control;
     if (wifi) {
       lines.push(`### Wi-Fi：\`${file.path}\``,'');
       if (wifi.networks?.length) lines.push(`- 网络：${wifi.networks.slice(0,10).map((x)=>`${x.ssid||'?'}@${x.bssid||'?'}`).join(', ')}`);
@@ -101,8 +133,14 @@ function buildBatch8Section(analysis) {
       if (log.timeRange) lines.push(`- 时长：${log.timeRange.durationSec.toFixed(3)}s`);
       lines.push(`- GPS=${log.gps?.length||0}，姿态=${log.attitude?.length||0}，参数=${log.params?.length||0}，事件=${log.events?.length||0}`,'');
     }
+    if (control?.geofenceTransactions?.length || control?.gcsProfiles?.length) {
+      lines.push(`### 控制源与围栏：\`${file.path}\``,'');
+      if (control.geofenceTransactions?.length) lines.push(`- 围栏事务：${control.geofenceTransactions.map((x)=>`${x.paramId}=${x.requestedValue}(${x.confirmed===true?'confirmed':x.confirmed===false?'mismatch':'unknown'})`).join(', ')}`);
+      if (control.gcsProfiles?.length) lines.push(`- GCS 控制源：${control.gcsProfiles.map((x)=>`${x.stream}[signed=${x.signed}/${x.controlEvents}]`).join(', ')}`);
+      lines.push('');
+    }
   }
-  return lines.length ? ['## Wi-Fi 与飞行日志证据','',...lines].join('\n') : '';
+  return lines.length ? ['## Wi-Fi / GCS / 围栏 / 飞行日志证据','',...lines].join('\n') : '';
 }
 
 function buildMarkdownReport(analysis,notes='') {
