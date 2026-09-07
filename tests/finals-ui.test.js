@@ -25,6 +25,8 @@ test('决赛 UI 暴露 CANopen、MAVLink 与 EVM runtime 真题证据', () => {
   assert.match(finals, /ARM → SERIAL/);
   assert.match(evm, /EVM Runtime 入口恢复/);
   assert.match(evm, /dispatcher selectors/);
+  assert.match(evm, /EVM Storage \/ State 证据/);
+  assert.match(evm, /高置信直接证据/);
 });
 
 test('workspace CANopen 卡片读取 PCAPNG 展开的真实 metadata 路径', () => {
