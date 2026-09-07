@@ -1,4 +1,5 @@
 const crypto = require('crypto');
+const { createBinaryArtifact } = require('./artifacts');
 
 function bytesFromSession(session) {
   if (!session?.complete || !session.payload || !/^[0-9a-f]+$/i.test(session.payload) || session.payload.length % 2) return null;
@@ -39,7 +40,27 @@ function parseRequestDownload(bytes) {
   };
 }
 
+function artifactName(state, digest) {
+  const can = String(state.canId || 'unknown').replace(/[^0-9a-z]+/gi, '-').replace(/^-|-$/g, '') || 'unknown';
+  const address = String(state.requestDownload?.address || 'unknown').replace(/^0x/i, '');
+  const raw = state.requestDownload?.dataFormatIdentifier && state.requestDownload.dataFormatIdentifier !== '0x00';
+  return `uds-${can}-${address}-${digest.slice(0, 12)}${raw ? '.transfer.bin' : '.firmware.bin'}`;
+}
+
 function finalize(state, complete, endSessionIndex = null) {
+  const blockMap = [];
+  let offset = 0;
+  for (const block of state.blocks) {
+    blockMap.push({
+      counter: block.counter,
+      sessionIndex: block.sessionIndex,
+      offset,
+      length: block.data.length,
+      endOffset: offset + block.data.length
+    });
+    offset += block.data.length;
+  }
+
   const firmware = Buffer.concat(state.blocks.map((block) => block.data));
   const declaredSize = state.requestDownload?.valid ? BigInt(state.requestDownload.size) : null;
   const actualSize = BigInt(firmware.length);
@@ -50,6 +71,32 @@ function finalize(state, complete, endSessionIndex = null) {
     declared: declaredSize.toString(),
     actual: actualSize.toString()
   });
+
+  const digest = crypto.createHash('sha256').update(firmware).digest('hex');
+  const confidence = complete && !errors.length && sizeMatches !== false ? 'high' : complete ? 'medium' : 'low';
+  const artifactReady = complete && firmware.length > 0 && !errors.length && sizeMatches !== false;
+  const rawTransferPayload = Boolean(state.requestDownload?.dataFormatIdentifier && state.requestDownload.dataFormatIdentifier !== '0x00');
+  const artifact = artifactReady ? createBinaryArtifact({
+    name: artifactName(state, digest),
+    buffer: firmware,
+    completeness: 'complete',
+    provenance: blockMap.map((block) => ({
+      source: 'UDS TransferData',
+      sessionIndex: block.sessionIndex,
+      blockSequenceCounter: block.counter,
+      offset: block.offset,
+      length: block.length
+    })),
+    metadata: {
+      kind: rawTransferPayload ? 'uds-raw-transfer-payload' : 'uds-firmware-candidate',
+      canId: state.canId,
+      address: state.requestDownload?.address || null,
+      declaredSize: state.requestDownload?.size || null,
+      dataFormatIdentifier: state.requestDownload?.dataFormatIdentifier || null,
+      rawTransferPayload
+    }
+  }) : null;
+
   return {
     canId: state.canId,
     startSessionIndex: state.startSessionIndex,
@@ -58,14 +105,17 @@ function finalize(state, complete, endSessionIndex = null) {
     requestDownload: state.requestDownload,
     blockCount: state.blocks.length,
     blockSequenceCounters: state.blocks.map((block) => block.counter),
+    blockMap,
     duplicateBlocks: state.duplicateBlocks,
     firmwareSize: firmware.length,
     firmwareHex: firmware.toString('hex'),
-    firmwareSha256: crypto.createHash('sha256').update(firmware).digest('hex'),
+    firmwareSha256: digest,
     declaredSizeMatches: sizeMatches,
     complete,
     errors,
-    confidence: complete && !errors.length && sizeMatches !== false ? 'high' : complete ? 'medium' : 'low'
+    confidence,
+    artifactReady,
+    artifact
   };
 }
 
@@ -151,18 +201,21 @@ function reconstructUdsProgramming(isoTpSessions) {
   return {
     transfers,
     completeTransfers: transfers.filter((item) => item.complete).length,
+    exportableTransfers: transfers.filter((item) => item.artifactReady).length,
     firmwareCandidates: transfers.filter((item) => item.firmwareSize > 0).map((item, index) => ({
       index,
       canId: item.canId,
       size: item.firmwareSize,
       sha256: item.firmwareSha256,
       confidence: item.confidence,
-      address: item.requestDownload?.address || null
+      address: item.requestDownload?.address || null,
+      artifactReady: item.artifactReady
     })),
     hints: [
       '按 RequestDownload(0x34) → TransferData(0x36) → RequestTransferExit(0x37) 重建候选固件；仅处理完整 ISO-TP 请求负载。',
-      'blockSequenceCounter 跳号、冲突重传和声明长度不匹配会降低 confidence；不要在存在 gap 时把 firmwareHex 当成完整镜像。',
-      '实际刷写可能在 TransferData 数据前携带厂商自定义头、压缩或加密；dataFormatIdentifier 非 0 时尤其需要人工确认。'
+      '只有收到 0x37、blockSequenceCounter 无 gap/冲突且声明长度不矛盾时才生成可保存 artifact。',
+      'blockMap 保留每个 TransferData block 的 BSC、sessionIndex、输出 offset 与长度，可用于回查抓包和定位缺口。',
+      'dataFormatIdentifier 非 0 时导出的是 raw transfer payload，可能仍压缩/加密，不能直接当明文 ECU firmware。'
     ]
   };
 }
