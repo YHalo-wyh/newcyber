@@ -1,12 +1,17 @@
 const { app, BrowserWindow, dialog, ipcMain } = require('electron');
 const path = require('path');
 const fs = require('fs/promises');
+const { execFile } = require('child_process');
+const { promisify } = require('util');
 const { scanWorkspace, inspectFile, buildMarkdownReport } = require('./src/core/finals_analyzer_batch6');
 const { runTool } = require('./src/core/tool_router');
 const { bufferFromArtifact } = require('./src/core/artifacts');
+const { analyzeFirmwareBuffer, MAX_FIRMWARE_BYTES } = require('./src/core/firmware_unpack');
 
+const execFileAsync = promisify(execFile);
 let win = null;
 const approvedRoots = new Set();
+const approvedFirmwareFiles = new Set();
 
 function createWindow() {
   win = new BrowserWindow({
@@ -26,6 +31,13 @@ function createWindow() {
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   win.webContents.on('will-navigate', (event) => event.preventDefault());
   win.loadFile(path.join(__dirname, 'renderer', 'toolbox.html'));
+}
+
+async function readFirmware(filePath) {
+  const stat = await fs.stat(filePath);
+  if (stat.size <= 0) throw new Error('固件文件为空');
+  if (stat.size > MAX_FIRMWARE_BYTES) throw new Error(`固件文件超过分析上限 ${MAX_FIRMWARE_BYTES} bytes`);
+  return fs.readFile(filePath);
 }
 
 function registerIpc() {
@@ -70,6 +82,39 @@ function registerIpc() {
     if (result.canceled || !result.filePath) return null;
     await fs.writeFile(result.filePath, decoded.buffer);
     return { filePath: result.filePath, size: decoded.buffer.length, sha256: decoded.sha256 };
+  });
+
+  ipcMain.handle('firmware:choose-analyze', async () => {
+    const result = await dialog.showOpenDialog(win, {
+      title: '选择固件文件',
+      properties: ['openFile'],
+      filters: [{ name: 'Firmware / Binary', extensions: ['bin','img','fw','rom','trx','chk','ubi','squashfs','zip'] }, { name: 'All files', extensions: ['*'] }]
+    });
+    if (result.canceled || !result.filePaths[0]) return null;
+    const filePath = path.resolve(result.filePaths[0]);
+    approvedFirmwareFiles.add(filePath);
+    const buffer = await readFirmware(filePath);
+    return { filePath, fileName:path.basename(filePath), analysis:analyzeFirmwareBuffer(buffer) };
+  });
+
+  ipcMain.handle('firmware:extract-binwalk', async (_event, filePath) => {
+    const resolved = path.resolve(String(filePath || ''));
+    if (!approvedFirmwareFiles.has(resolved)) throw new Error('请先通过固件选择器打开文件');
+    const out = await dialog.showOpenDialog(win, { title:'选择固件解包输出目录', properties:['openDirectory','createDirectory'] });
+    if (out.canceled || !out.filePaths[0]) return null;
+    const outputDir = path.resolve(out.filePaths[0]);
+    try {
+      const { stdout, stderr } = await execFileAsync('binwalk', ['-eM', '--directory', outputDir, resolved], {
+        windowsHide:true,
+        timeout:120000,
+        maxBuffer:4 * 1024 * 1024,
+        shell:false
+      });
+      return { ok:true, outputDir, stdout:String(stdout || '').slice(-12000), stderr:String(stderr || '').slice(-4000) };
+    } catch (error) {
+      if (error?.code === 'ENOENT') return { ok:false, missingTool:'binwalk', outputDir, error:'未找到 binwalk；仍可使用内置结构识别和 segment 导出。' };
+      return { ok:false, outputDir, error:error?.message || String(error), stdout:String(error?.stdout || '').slice(-12000), stderr:String(error?.stderr || '').slice(-4000) };
+    }
   });
 
   ipcMain.handle('toolbox:run', async (_event, tool, payload) => runTool(tool, payload || {}));
