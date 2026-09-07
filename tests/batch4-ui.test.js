@@ -30,5 +30,5 @@ test('batch4 UI exposes model structure, proxy implementation and MAVLink CRC ev
 
 test('Electron workspace keeps batch-four capability through a later analyzer wrapper', () => {
   const main = read('main.js');
-  assert.match(main, /finals_analyzer_batch(?:4|5|6)/);
+  assert.match(main, /finals_analyzer_batch(?:4|5|6|7)/);
 });
