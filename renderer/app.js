@@ -93,7 +93,8 @@ async function showFile(relativePath) {
   try {
     const result = await window.newcyber.inspectFile(state.analysis.workspacePath, relativePath);
     const file = state.analysis.files.find((item) => item.path === relativePath);
-    drawer.innerHTML = `<div class="drawer"><div class="drawer-head"><div><strong>${escapeHtml(relativePath)}</strong><small>SHA-256 ${escapeHtml(file.sha256)}</small></div><button data-action="close-drawer">×</button></div><div class="drawer-meta"><span>${escapeHtml(file.type)}</span><span>${formatBytes(file.size)}</span><span>熵 ${file.entropy}</span><span>${result.binary ? '字符串视图' : '文本预览'}</span></div><pre>${escapeHtml(result.text)}</pre>${result.truncated ? '<div class="drawer-note">文件较大，只显示开头部分。</div>' : ''}</div>`;
+    const metadata = file.metadata ? `<details class="metadata" open><summary>格式分析结果</summary><pre>${escapeHtml(JSON.stringify(file.metadata, null, 2))}</pre></details>` : '';
+    drawer.innerHTML = `<div class="drawer"><div class="drawer-head"><div><strong>${escapeHtml(relativePath)}</strong><small>SHA-256 ${escapeHtml(file.sha256)}</small></div><button data-action="close-drawer">×</button></div><div class="drawer-meta"><span>${escapeHtml(file.type)}</span><span>${formatBytes(file.size)}</span><span>熵 ${file.entropy}</span><span>${result.binary ? '字符串视图' : '文本预览'}</span></div><div class="drawer-body">${metadata}<pre>${escapeHtml(result.text)}</pre></div>${result.truncated ? '<div class="drawer-note">文件较大，只显示开头部分。</div>' : ''}</div>`;
     document.querySelector('[data-action="close-drawer"]').addEventListener('click', () => { drawer.innerHTML = ''; });
   } catch (error) {
     drawer.innerHTML = `<div class="drawer"><div class="drawer-head"><strong>无法读取文件</strong><button data-action="close-drawer">×</button></div><p class="drawer-error">${escapeHtml(error.message)}</p></div>`;

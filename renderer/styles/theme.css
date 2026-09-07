@@ -144,7 +144,11 @@ tbody tr:last-child td { border-bottom: 0; }
 .drawer-head button { border: 0; background: transparent; color: var(--muted); font-size: 22px; cursor: pointer; }
 .drawer-meta { display: flex; gap: 7px; padding: 11px 0; }
 .drawer-meta span { background: #252731; border-radius: 5px; padding: 4px 7px; color: #969ba6; font-size: 9px; }
-.drawer pre { margin: 0; overflow: auto; white-space: pre-wrap; word-break: break-word; background: #0e0f12; border: 1px solid #262830; border-radius: 8px; padding: 14px; color: #bdc1ca; font: 11px/1.6 Consolas, monospace; }
+.drawer-body { min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 10px; }
+.drawer-body > pre { margin: 0; min-height: 180px; overflow: visible; white-space: pre-wrap; word-break: break-word; background: #0e0f12; border: 1px solid #262830; border-radius: 8px; padding: 14px; color: #bdc1ca; font: 11px/1.6 Consolas, monospace; }
+.metadata { border: 1px solid #302e3e; background: #1a1921; border-radius: 8px; padding: 10px; }
+.metadata summary { color: var(--accent-2); cursor: pointer; font-size: 11px; }
+.metadata pre { margin: 10px 0 0; max-height: 250px; overflow: auto; white-space: pre-wrap; color: #aeb2bd; font: 10px/1.55 Consolas, monospace; }
 .drawer-note, .drawer-error { color: var(--yellow); font-size: 10px; padding-top: 10px; }
 .loading-view { height: 70vh; display: grid; place-content: center; justify-items: center; }
 .loading-view h2 { margin: 18px 0 6px; font-size: 17px; }

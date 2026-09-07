@@ -9,6 +9,10 @@ NewCyber 是面向 CTF、AI 安全专项赛和攻防修复题的本地分析工�
 - 从文本与二进制可打印字符串中提取 Flag、URL、IP 地址候选
 - 发现命令拼接、不可信反序列化、硬编码凭据、SQL 拼接等待验证线索
 - 识别 WAV、PCAP/PCAPNG、PE、ELF、APK/JAR、SQLite、PDF 等格式
+- 对 PCM WAV 按 0.1 秒分段，恢复 600Hz 出现/反向比特序列与主频列表
+- 汇总 PCAP 中的协议和主要 IPv4 TCP/UDP 会话
+- 安全读取 NumPy、SafeTensors、PyTorch ZIP、APK/JAR 的结构，不反序列化模型
+- 识别 PE/ELF 的架构和基础头信息，检查压缩包路径穿越条目
 - 文件预览、队伍记录、Markdown 报告导出
 
 NewCyber 默认只读分析附件，不执行赛题程序，也不直接加载 `.pt`、`.pth`、`.pkl` 等可能触发反序列化的模型文件。

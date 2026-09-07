@@ -1,6 +1,7 @@
 const fsp = require('fs/promises');
 const path = require('path');
 const crypto = require('crypto');
+const { analyzeKnownFormat } = require('./formats');
 
 const LIMITS = {
   maxFiles: 6000,
@@ -104,16 +105,6 @@ function detectType(buffer, ext) {
   return isProbablyText(buffer, ext) ? '文本/源码' : '二进制数据';
 }
 
-function parseWav(buffer) {
-  if (buffer.length < 44 || buffer.subarray(0, 4).toString() !== 'RIFF' || buffer.subarray(8, 12).toString() !== 'WAVE') return null;
-  const channels = buffer.readUInt16LE(22);
-  const sampleRate = buffer.readUInt32LE(24);
-  const byteRate = buffer.readUInt32LE(28);
-  const dataIndex = buffer.indexOf(Buffer.from('data'));
-  const dataSize = dataIndex >= 0 && dataIndex + 8 <= buffer.length ? buffer.readUInt32LE(dataIndex + 4) : Math.max(buffer.length - 44, 0);
-  return { channels, sampleRate, durationSeconds: byteRate ? Number((dataSize / byteRate).toFixed(3)) : null };
-}
-
 function extractSignals(text, relativePath) {
   const flags = [...new Set(text.match(/(?:flag|ctf|dart|FLAG|CTF)\{[^}\r\n]{1,200}\}/g) || [])].slice(0, 50);
   const urls = [...new Set(text.match(/https?:\/\/[^\s"'<>]{4,300}/g) || [])].slice(0, 50);
@@ -186,7 +177,7 @@ async function analyzeFile(rootPath, filePath, categoryScores) {
   const signals = extractSignals(text, relativePath);
   const hashBuffer = stat.size <= LIMITS.hashBytes ? await fsp.readFile(filePath) : head;
   const sha256 = crypto.createHash('sha256').update(hashBuffer).digest('hex');
-  const wav = type === 'WAV 音频' ? parseWav(head) : null;
+  const metadata = analyzeKnownFormat(head, type, ext);
   return {
     path: relativePath,
     name: path.basename(filePath),
@@ -201,7 +192,7 @@ async function analyzeFile(rootPath, filePath, categoryScores) {
     urls: signals.urls,
     ips: signals.ips,
     findings: signals.findings,
-    metadata: wav || null
+    metadata
   };
 }
 
