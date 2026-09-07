@@ -24,7 +24,7 @@ function parseWifiEvidence(input) {
   for (const line of lines) {
     const bssidMatch = line.match(/(?:BSSID|AP|Access\s+Point)\s*[:=]?\s*([0-9a-f]{2}(?::|-)[0-9a-f]{2}(?:(?::|-)[0-9a-f]{2}){4})/i)
       || line.match(/\b([0-9a-f]{2}(?::|-)[0-9a-f]{2}(?:(?::|-)[0-9a-f]{2}){4})\b/i);
-    const ssidMatch = line.match(/(?:ESSID|SSID)\s*[:=]\s*["']?([^"'\t,]+)["']?/i);
+    const ssidMatch = line.match(/\b(?:ESSID|SSID)\b\s*[:=]\s*["']?([^"'\t,]+)["']?/i);
     const channelMatch = line.match(/(?:channel|ch)\s*[:=]?\s*(\d{1,3})/i);
     const cryptoMatch = line.match(/\b(WPA3|WPA2|WPA|WEP|OPN|OPEN)\b/i);
     if (!bssidMatch && !ssidMatch) continue;
