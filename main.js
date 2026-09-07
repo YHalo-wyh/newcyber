@@ -6,7 +6,7 @@ const { promisify } = require('util');
 const { scanWorkspace, inspectFile, buildMarkdownReport } = require('./src/core/finals_analyzer_batch7');
 const { runTool } = require('./src/core/tool_router');
 const { bufferFromArtifact } = require('./src/core/artifacts');
-const { analyzeFirmwareBuffer, MAX_FIRMWARE_BYTES } = require('./src/core/firmware_unpack');
+const { analyzeFirmwareBuffer, MAX_FIRMWARE_BYTES } = require('./src/core/firmware_workbench');
 
 const execFileAsync = promisify(execFile);
 let win = null;
