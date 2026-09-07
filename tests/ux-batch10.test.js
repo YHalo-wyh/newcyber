@@ -20,18 +20,38 @@ test('UX script is syntactically valid and keeps interaction offline', () => {
   const source = read('renderer/ux.js');
   assert.doesNotThrow(() => new Function(source));
   assert.match(source, /newcyber\.sidebarCollapsed/);
+  assert.match(source, /newcyber\.recentTools/);
   assert.match(source, /event\.key\.toLowerCase\(\) === 'k'/);
   assert.match(source, /event\.key === 'Enter'/);
   assert.match(source, /event\.shiftKey.*'o'/s);
+  assert.match(source, /event\.key\.toLowerCase\(\) === 'f'/);
   assert.match(source, /runCurrentTool\(\)/);
   assert.match(source, /chooseWorkspace\(\)/);
   assert.doesNotMatch(source, /\bfetch\s*\(|https?:\/\//i, 'UX layer must not add network dependency');
+});
+
+test('UX enhancement keeps recent tool state and prevents duplicate expensive actions', () => {
+  const source = read('renderer/ux.js');
+  assert.match(source, /rememberTool\(tool\)/);
+  assert.match(source, /recentToolsHtml\(\)/);
+  assert.match(source, /button\?\.disabled/);
+  assert.match(source, /分析中…/);
+  assert.match(source, /扫描中…/);
+  assert.match(source, /aria-busy/);
 });
 
 test('competition-specific legacy banner is replaced by neutral product copy', () => {
   const source = read('renderer/ux.js');
   assert.match(source, /BAY AREA CUP · OFFLINE TOOLBOX/);
   assert.match(source, /OFFLINE · DETERMINISTIC · FOUR TRACKS/);
+});
+
+test('workspace pill becomes an accessible jump target when a challenge is open', () => {
+  const source = read('renderer/ux.js');
+  assert.match(source, /ux-workspace-jump/);
+  assert.match(source, /jump-workspace/);
+  assert.match(source, /setAttribute\('role', 'button'\)/);
+  assert.match(source, /setAttribute\('tabindex', '0'\)/);
 });
 
 test('UX CSS covers keyboard focus, command palette, sidebar memory states and reduced motion', () => {
@@ -42,4 +62,6 @@ test('UX CSS covers keyboard focus, command palette, sidebar memory states and r
   assert.match(css, /sidebar-mobile-open/);
   assert.match(css, /prefers-reduced-motion/);
   assert.match(css, /ux-input-meta/);
+  assert.match(css, /ux-recent-grid/);
+  assert.match(css, /input-panel\[aria-busy="true"\]/);
 });
