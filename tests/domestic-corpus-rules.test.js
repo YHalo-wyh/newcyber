@@ -28,6 +28,52 @@ return JSONResponse({"system_prompt": SYSTEM_PROMPT, "temperature": TEMPERATURE}
   assert.ok(result.llmCrypto.temperatures.includes(0.28));
 });
 
+// Regression source: USTC Hackergame 2023 / 小型大语言模型星球.
+test('Hackergame 2023 small LLM planet: extract target-output oracle and generation constraints', () => {
+  const source = `
+model = AutoModelForCausalLM.from_pretrained("roneneldan/TinyStories-33M").eval()
+tokenizer = AutoTokenizer.from_pretrained("roneneldan/TinyStories-33M")
+
+def check_message(message):
+    if len(message) > 200:
+        return False, "too long"
+
+def check_response(message, response):
+    if "you are smart" in response:
+        pass
+    if len(message) <= 7 and "accepted" in response:
+        pass
+    if len(message) <= 100 and "hackergame" in response:
+        pass
+    if len(message) <= 200 and "🐮" in response:
+        pass
+
+def predict(message):
+    model_inputs = tokenizer.encode(message, return_tensors="pt")
+    model_outputs = model.generate(
+        model_inputs,
+        max_new_tokens=30,
+        num_beams=1,
+        pad_token_id=tokenizer.eos_token_id,
+    )
+    return model_outputs
+`;
+  const result = auditAiChallengeSource(source);
+  assert.ok(result.generationChallenge);
+  assert.deepEqual(result.generationChallenge.models, ['roneneldan/TinyStories-33M']);
+  assert.equal(result.generationChallenge.generation.maxNewTokens, 30);
+  assert.equal(result.generationChallenge.generation.numBeams, 1);
+  assert.equal(result.generationChallenge.globalInputMaxLength, 200);
+  assert.equal(result.generationChallenge.deterministicGreedy, true);
+  assert.deepEqual(result.generationChallenge.targets.map((item) => [item.target, item.inputMaxLength]), [
+    ['you are smart', null],
+    ['accepted', 7],
+    ['hackergame', 100],
+    ['🐮', 200]
+  ]);
+  assert.ok(result.findings.some((item) => item.id === 'target-output-oracle'));
+});
+
 // Regression source: SUCTF 2025 / Onchain_Checkin.
 test('SUCTF 2025 Onchain_Checkin: extract Anchor program id and account constraints', () => {
   const source = `
