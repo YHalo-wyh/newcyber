@@ -1,7 +1,7 @@
 const { app, BrowserWindow, dialog, ipcMain } = require('electron');
 const path = require('path');
 const fs = require('fs/promises');
-const { scanWorkspace, inspectFile, buildMarkdownReport } = require('./src/core/finals_analyzer_batch4');
+const { scanWorkspace, inspectFile, buildMarkdownReport } = require('./src/core/finals_analyzer_batch5');
 const { runTool } = require('./src/core/tool_router');
 const { bufferFromArtifact } = require('./src/core/artifacts');
 
