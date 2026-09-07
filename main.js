@@ -2,7 +2,7 @@ const { app, BrowserWindow, dialog, ipcMain } = require('electron');
 const path = require('path');
 const fs = require('fs/promises');
 const { scanWorkspace, inspectFile, buildMarkdownReport } = require('./src/core/analyzer');
-const { runTool } = require('./src/core/toolbox');
+const { runTool } = require('./src/core/tool_router');
 
 let win = null;
 const approvedRoots = new Set();
