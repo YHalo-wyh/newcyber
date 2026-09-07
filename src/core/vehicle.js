@@ -4,6 +4,15 @@ function frameHex(frame) {
   return Buffer.from(frame.bytes || []).toString('hex');
 }
 
+function safeDecodeUdsPayload(payload) {
+  if (!payload?.length) return null;
+  try {
+    return decodeUdsAdvanced(Buffer.from(payload).toString('hex'));
+  } catch {
+    return null;
+  }
+}
+
 function reassembleIsoTpFrames(framesInput) {
   const frames = (framesInput || []).map((frame, index) => ({
     ...frame,
@@ -27,8 +36,9 @@ function reassembleIsoTpFrames(framesInput) {
       sequenceNumbers: state.sequenceNumbers,
       ...extra
     };
-    if (complete && payload.length) {
-      try { item.uds = decodeUdsAdvanced(Buffer.from(payload).toString('hex')); } catch { /* keep raw payload */ }
+    if (complete) {
+      const uds = safeDecodeUdsPayload(payload);
+      if (uds) item.uds = uds;
     }
     sessions.push(item);
   };
@@ -44,7 +54,7 @@ function reassembleIsoTpFrames(framesInput) {
       const length = bytes[0] & 0x0f;
       if (!length || length > bytes.length - 1) continue;
       const payload = bytes.slice(1, 1 + length);
-      sessions.push({
+      const item = {
         canId: `0x${id}`,
         startFrameIndex: frame.index,
         endFrameIndex: frame.index,
@@ -53,9 +63,11 @@ function reassembleIsoTpFrames(framesInput) {
         collectedLength: length,
         complete: true,
         payload: Buffer.from(payload).toString('hex'),
-        sequenceNumbers: [],
-        uds: decodeUdsAdvanced(Buffer.from(payload).toString('hex'))
-      });
+        sequenceNumbers: []
+      };
+      const uds = safeDecodeUdsPayload(payload);
+      if (uds) item.uds = uds;
+      sessions.push(item);
       continue;
     }
 
@@ -217,7 +229,7 @@ function analyzeCanAdvanced(text) {
     hints: [
       'transitions 会保留同一 CAN ID 的逐帧 byte/bit 跃迁，适合定位转向灯、车门、档位等首次状态变化。',
       'eventCandidates 只按“少量 bit 突变”启发式排序，不代表具体车辆语义。',
-      'isoTpSessions 严格按 First Frame / Consecutive Frame sequence number 重组；序号不连续时保留错误而不是猜测数据。',
+      'isoTpSessions 严格按 First Frame / Consecutive Frame sequence number 重组；UDS 语义解码失败不会影响原始 ISO-TP 结构结果。',
       '需要提交原始抓包帧 HEX 时，应回到对应 frameIndex 的原始 PCAP/SocketCAN frame 核对。'
     ]
   };
@@ -264,6 +276,7 @@ function decodeUdsAdvanced(input) {
 
   let result = decodeUds(udsInput);
   const sid = bytes[0];
+  if (!Number.isInteger(sid)) return result;
   const requestSid = sid >= 0x40 ? sid - 0x40 : sid;
 
   if (requestSid === 0x23 && sid < 0x40) result = decodeReadMemory(bytes, result);
