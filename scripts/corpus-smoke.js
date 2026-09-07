@@ -1,5 +1,7 @@
+const fs = require('fs/promises');
 const path = require('path');
 const { scanWorkspace } = require('../src/core/analyzer');
+const { parsePcapng } = require('../src/core/pcapng');
 
 async function summarize(label, root) {
   const analysis = await scanWorkspace(path.resolve(root));
@@ -24,6 +26,31 @@ async function summarize(label, root) {
   return analysis;
 }
 
+async function testEasyCan(root, analysis) {
+  const capture = analysis.files.find((file) => file.path.toLowerCase().endsWith('.pcapng'));
+  if (!capture) throw new Error('easy_can: PCAPNG capture not found');
+  const buffer = await fs.readFile(path.join(root, capture.path));
+  const pcapng = parsePcapng(buffer);
+  if (!pcapng?.can) throw new Error(`easy_can: SocketCAN was not decoded; interfaces=${JSON.stringify(pcapng?.interfaces || [])}`);
+
+  const signal = pcapng.can.ids.find((item) => item.id === '0x188');
+  if (!signal) throw new Error('easy_can: CAN ID 0x188 not found');
+  const firstRightSignal = signal.transitions.find((event) => event.changes.some((change) => change.byteIndex === 0 && (change.setBits & 0x02) === 0x02));
+  if (!firstRightSignal) throw new Error('easy_can: no first right-turn 0x02 transition found');
+
+  console.log('\n=== EASY_CAN SOLVER CHECK ===');
+  console.log(JSON.stringify({
+    interfaces: pcapng.interfaces,
+    parsedCanFrames: pcapng.can.parsedFrames,
+    firstRightSignal
+  }, null, 2));
+
+  const expectedRaw = '00000188040000000200000000000000';
+  if (firstRightSignal.rawFrameHex !== expectedRaw) {
+    throw new Error(`easy_can: raw frame mismatch: expected ${expectedRaw}, got ${firstRightSignal.rawFrameHex}`);
+  }
+}
+
 async function main() {
   const easyCan = process.argv[2];
   const silentWeights = process.argv[3];
@@ -32,11 +59,13 @@ async function main() {
   const vehicle = await summarize('CISCN-2025-easy_can', easyCan);
   const ai = await summarize('WQB-2026-SilentWeights', silentWeights);
 
-  const hasCapture = vehicle.files.some((file) => /pcap|can|log|asc/i.test(`${file.path} ${file.type} ${file.extension}`));
-  if (!hasCapture) throw new Error('easy_can: expected a CAN/capture-like artifact');
+  await testEasyCan(path.resolve(easyCan), vehicle);
 
   const aiScore = ai.categories.find((item) => item.name === 'AI / ML')?.score || 0;
   if (aiScore <= 0) throw new Error('SilentWeights: AI / ML classification did not trigger');
+  const model = ai.files.find((file) => ['.pth', '.pt', '.safetensors', '.onnx'].includes(file.extension));
+  if (!model) throw new Error('SilentWeights: model artifact not found');
+  if (!model.metadata) throw new Error('SilentWeights: model artifact was not structurally inspected');
 
   console.log('\nCorpus smoke assertions passed.');
 }
