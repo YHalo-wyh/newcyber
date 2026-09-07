@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { parseWavSignal, parsePcap, parseExecutable, parseZipEntries } = require('../src/core/formats');
+const { parseWavSignal, parsePcap, parseZipEntries } = require('../src/core/formats');
 
 function wavWithToneBits(bits, sampleRate = 8000) {
   const segmentSamples = sampleRate / 10;
@@ -47,15 +47,6 @@ test('解析最小 PCAP 元数据', () => {
   assert.equal(result.version, '2.4');
   assert.equal(result.linkType, 1);
   assert.equal(result.packetCountInPreview, 0);
-});
-
-test('解析 ELF 架构', () => {
-  const elf = Buffer.alloc(64);
-  Buffer.from('7f454c46', 'hex').copy(elf);
-  elf[4] = 2;
-  elf[5] = 1;
-  elf.writeUInt16LE(62, 18);
-  assert.deepEqual(parseExecutable(elf, 'ELF 可执行文件'), { format: 'ELF', architecture: 'x86-64', bits: 64, endian: 'little' });
 });
 
 test('ZIP 列表标记路径穿越条目', () => {

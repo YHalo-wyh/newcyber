@@ -27,22 +27,6 @@ const CATEGORY_RULES = {
     extensions: ['.pcap', '.pcapng', '.evtx', '.e01', '.raw', '.dd', '.mem', '.dmp', '.wav', '.mp3', '.flac'],
     keywords: ['wireshark', 'eventlog', 'volatility', 'registry', 'packet', 'spectrogram', 'forensic']
   },
-  '逆向工程': {
-    extensions: ['.apk', '.dex', '.so', '.dll', '.exe', '.elf', '.wasm', '.pyc', '.class', '.jar'],
-    keywords: ['jni_onload', 'dobbyhook', 'frida', 'ida', 'ghidra', 'decompile', 'anti-debug']
-  },
-  'Web 安全': {
-    extensions: ['.php', '.jsp', '.jspx', '.asp', '.aspx', '.html', '.js', '.ts', '.vue'],
-    keywords: ['flask', 'django', 'spring', 'laravel', 'thinkphp', 'express', 'fastapi', 'request.', 'response.', 'router.']
-  },
-  '密码学': {
-    extensions: ['.sage'],
-    keywords: ['rsa', 'ecdsa', 'aes', 'sm4', 'cipher', 'nonce', 'modulus', 'private_key', 'public_key', 'crypto']
-  },
-  '二进制利用': {
-    extensions: ['.elf', '.so'],
-    keywords: ['gets(', 'strcpy(', 'malloc(', 'free(', 'seccomp', 'libc', 'canary', 'rop']
-  },
   '恶意样本': {
     extensions: ['.exe', '.dll', '.ps1', '.vbs'],
     keywords: ['persistence', 'command_and_control', 'ransom', 'fernet', 'winreg', 'autorun', 'powershell -enc']
@@ -52,9 +36,7 @@ const CATEGORY_RULES = {
 const FINDING_RULES = [
   { id: 'shell-exec', severity: 'high', title: '可能存在命令拼接', regex: /(?:(?:os\.system|subprocess\.(?:call|run|Popen)|create_subprocess_shell|child_process\.exec|Runtime\.getRuntime\(\)\.exec|shell_exec|\bexec)\s*\([\s\S]{0,180}(?:\+|\$\{|format\(|f["'])|(?:cmd|command)\s*=\s*f["'][^\r\n]+["'][\s\S]{0,300}(?:os\.system|subprocess\.(?:call|run|Popen)|create_subprocess_shell|child_process\.exec)\s*\()/gi },
   { id: 'unsafe-pickle', severity: 'high', title: '不可信反序列化入口', regex: /(?:pickle\.loads?|joblib\.load|torch\.load|yaml\.load\s*\()/gi },
-  { id: 'hardcoded-secret', severity: 'medium', title: '疑似硬编码密钥或令牌', regex: /(?:api[_-]?key|secret|token|password|passwd)\s*[=:]\s*["'][^"'\r\n]{6,}["']/gi },
-  { id: 'sql-build', severity: 'medium', title: '可能拼接 SQL', regex: /(?:select|insert|update|delete)[^\n]{0,160}(?:\+|\$\{|format\(|%s)/gi },
-  { id: 'weak-crypto', severity: 'low', title: '发现弱哈希或弱随机数线索', regex: /(?:\bmd5\b|\bsha1\b|Math\.random\(|random\.random\()/gi }
+  { id: 'hardcoded-secret', severity: 'medium', title: '疑似硬编码密钥或令牌', regex: /(?:api[_-]?key|secret|token|password|passwd)\s*[=:]\s*["'][^"'\r\n]{6,}["']/gi }
 ];
 
 function assertInside(rootPath, targetPath) {
@@ -201,10 +183,6 @@ function recommendations(categories, files, findings) {
   const items = ['先固定原始附件哈希，所有解包和修改都在副本中进行。'];
   if (top.includes('AI / ML')) items.push('模型文件按不可信工件处理：先检查结构和元数据，避免直接 pickle/torch.load。');
   if (top.includes('取证 / 流量')) items.push('按时间线关联流量、日志和业务动作；音频题优先查看频谱、分段长度与重复模式。');
-  if (top.includes('逆向工程')) items.push('先识别架构、保护和关键导入，再围绕输入到验证分支追踪；APK 同时检查 Java、native 与网络层。');
-  if (top.includes('Web 安全')) items.push('先枚举入口、鉴权和数据流，再验证最短的输入到敏感操作链路。');
-  if (top.includes('密码学')) items.push('记录算法参数、字节序、填充、随机数和密钥来源，先复现完整变换链。');
-  if (top.includes('二进制利用')) items.push('确认文件架构与保护，定位可控输入、崩溃点、泄露源和目标对象。');
   if (findings.some((item) => item.title.includes('命令拼接'))) items.push('优先核对语音识别、模型输出等不可信文本是否进入 shell 命令。');
   if (files.some((file) => file.type === 'PCAP 流量')) items.push('对 PCAP 建立会话清单，并将可疑请求与服务端代码位置互相印证。');
   return items;

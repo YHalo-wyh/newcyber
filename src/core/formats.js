@@ -1,35 +1,3 @@
-const MACHINE_NAMES = {
-  0x014c: 'x86', 0x8664: 'x86-64', 0x01c0: 'ARM', 0xaa64: 'ARM64', 0x01c4: 'ARMv7'
-};
-
-function readUInt(buffer, offset, size, littleEndian) {
-  if (offset < 0 || offset + size > buffer.length) return null;
-  return littleEndian ? buffer.readUIntLE(offset, size) : buffer.readUIntBE(offset, size);
-}
-
-function parseExecutable(buffer, type) {
-  if (type === 'ELF 可执行文件' && buffer.length >= 20) {
-    const littleEndian = buffer[5] !== 2;
-    const machine = readUInt(buffer, 18, 2, littleEndian);
-    const machines = { 3: 'x86', 8: 'MIPS', 20: 'PowerPC', 40: 'ARM', 62: 'x86-64', 183: 'ARM64', 243: 'RISC-V' };
-    return {
-      format: 'ELF',
-      architecture: machines[machine] || `machine-${machine}`,
-      bits: buffer[4] === 2 ? 64 : 32,
-      endian: littleEndian ? 'little' : 'big'
-    };
-  }
-  if (type === 'PE/Windows 可执行文件' && buffer.length >= 64) {
-    const peOffset = buffer.readUInt32LE(0x3c);
-    if (peOffset + 24 > buffer.length || buffer.subarray(peOffset, peOffset + 4).toString('hex') !== '50450000') return { format: 'PE', note: 'PE 头不在预览范围内或已损坏' };
-    const machine = buffer.readUInt16LE(peOffset + 4);
-    const sections = buffer.readUInt16LE(peOffset + 6);
-    const characteristics = buffer.readUInt16LE(peOffset + 22);
-    return { format: 'PE', architecture: MACHINE_NAMES[machine] || `machine-0x${machine.toString(16)}`, sections, dll: Boolean(characteristics & 0x2000) };
-  }
-  return null;
-}
-
 function parseZipEntries(buffer) {
   const entries = [];
   let offset = 0;
@@ -212,11 +180,10 @@ function parsePcap(buffer) {
 function analyzeKnownFormat(buffer, type, extension) {
   if (type === 'WAV 音频') return parseWavSignal(buffer);
   if (type === 'PCAP 流量') return parsePcap(buffer);
-  if (type === 'ELF 可执行文件' || type === 'PE/Windows 可执行文件') return parseExecutable(buffer, type);
-  if (['Android APK', 'Java JAR', 'ZIP 压缩包'].includes(type) || ['.pt', '.pth'].includes(extension)) return { archive: parseZipEntries(buffer), safeModelInspection: ['.pt', '.pth'].includes(extension) };
+  if (type === 'ZIP 压缩包' || ['.pt', '.pth'].includes(extension)) return { archive: parseZipEntries(buffer), safeModelInspection: ['.pt', '.pth'].includes(extension) };
   if (extension === '.npy') return parseNpy(buffer);
   if (extension === '.safetensors') return parseSafetensors(buffer);
   return null;
 }
 
-module.exports = { analyzeKnownFormat, parseExecutable, parseZipEntries, parseNpy, parseSafetensors, parseWavSignal, parsePcap, goertzel };
+module.exports = { analyzeKnownFormat, parseZipEntries, parseNpy, parseSafetensors, parseWavSignal, parsePcap, goertzel };

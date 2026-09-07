@@ -15,7 +15,7 @@ function formatBytes(bytes) {
 }
 
 function categoryIcon(name) {
-  return ({ 'AI / ML': '◎', '取证 / 流量': '⌁', '逆向工程': '◇', 'Web 安全': '⌘', '密码学': '⌬', '二进制利用': '▣', '恶意样本': '△' })[name] || '·';
+  return ({ 'AI / ML': '◎', '取证 / 流量': '⌁', '恶意样本': '△' })[name] || '·';
 }
 
 function navItem(id, icon, label) {
@@ -38,7 +38,7 @@ function shell(content) {
 }
 
 function emptyView() {
-  return `<div class="hero"><div class="eyebrow">LOCAL-FIRST · EVIDENCE-DRIVEN</div><h1>把赛题附件变成<br><em>清晰的分析路线</em></h1><p>导入一道 CTF 或 AI 安全赛题，自动识别文件类型、判断题型、提取关键线索并生成可交接的证据报告。</p><button class="button primary large" data-action="choose">开始分析赛题 <span>→</span></button><div class="feature-row"><div><b>01</b><strong>自动分类</strong><span>AI、取证、逆向、Web、密码、Pwn</span></div><div><b>02</b><strong>证据固定</strong><span>哈希、元数据、字符串与候选结果</span></div><div><b>03</b><strong>路线建议</strong><span>根据附件组合生成下一步清单</span></div></div></div>`;
+  return `<div class="hero"><div class="eyebrow">LOCAL-FIRST · EVIDENCE-DRIVEN</div><h1>把赛题附件变成<br><em>清晰的分析路线</em></h1><p>导入一道 AI 安全、取证流量或恶意样本赛题，自动识别文件类型、判断题型、提取关键线索并生成可交接的证据报告。</p><button class="button primary large" data-action="choose">开始分析赛题 <span>→</span></button><div class="feature-row"><div><b>01</b><strong>自动分类</strong><span>AI/ML、取证流量、恶意样本</span></div><div><b>02</b><strong>证据固定</strong><span>哈希、元数据、字符串与候选结果</span></div><div><b>03</b><strong>路线建议</strong><span>根据附件组合生成下一步清单</span></div></div></div>`;
 }
 
 function statCard(label, value, detail) {
