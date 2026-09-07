@@ -1,15 +1,93 @@
 (() => {
   const SIDEBAR_KEY = 'newcyber.sidebarCollapsed';
+  const RECENT_KEY = 'newcyber.recentTools';
   const PALETTE_ID = 'ux-command-palette';
   const baseHomeView = homeView;
   const baseRender = render;
+  const baseOpenTool = openTool;
+  const baseRunCurrentTool = runCurrentTool;
+  const baseChooseWorkspace = chooseWorkspace;
   let commandItems = [];
   let activeCommandIndex = 0;
 
-  homeView = () => baseHomeView().replace(
-    'BAY AREA CUP · OFFLINE TOOLBOX',
-    'OFFLINE · DETERMINISTIC · FOUR TRACKS'
-  );
+  function readJson(key, fallback) {
+    try {
+      const value = JSON.parse(localStorage.getItem(key));
+      return value == null ? fallback : value;
+    } catch (_) { return fallback; }
+  }
+
+  function recentTools() {
+    return readJson(RECENT_KEY, []).filter((id) => TOOL_META?.[id]).slice(0, 4);
+  }
+
+  function rememberTool(tool) {
+    if (!TOOL_META?.[tool]) return;
+    const next = [tool, ...recentTools().filter((id) => id !== tool)].slice(0, 4);
+    try { localStorage.setItem(RECENT_KEY, JSON.stringify(next)); } catch (_) {}
+  }
+
+  function recentToolsHtml() {
+    const items = recentTools();
+    if (!items.length) return '';
+    return `<section class="ux-recent"><div class="ux-section-title"><b>最近使用</b><span>本机记录</span></div><div class="ux-recent-grid">${items.map((id) => {
+      const meta = TOOL_META[id];
+      return `<button class="ux-recent-card" data-tool="${esc(id)}"><span>${esc(String(meta.domain || 'T').slice(0, 1).toUpperCase())}</span><div><strong>${esc(meta.title || id)}</strong><small>${esc(meta.label || meta.domain || '工具')}</small></div><em>打开</em></button>`;
+    }).join('')}</div></section>`;
+  }
+
+  homeView = () => {
+    let html = baseHomeView().replace(
+      'BAY AREA CUP · OFFLINE TOOLBOX',
+      'OFFLINE · DETERMINISTIC · FOUR TRACKS'
+    );
+    const recent = recentToolsHtml();
+    if (recent) {
+      const marker = '<details class="advanced-details home-advanced">';
+      html = html.includes(marker) ? html.replace(marker, `${recent}${marker}`) : `${html}${recent}`;
+    }
+    return html;
+  };
+
+  openTool = function uxOpenTool(tool) {
+    rememberTool(tool);
+    return baseOpenTool(tool);
+  };
+
+  runCurrentTool = async function uxRunCurrentTool() {
+    const button = document.querySelector('[data-action="run-tool"]');
+    if (button?.disabled) return;
+    if (button) {
+      button.disabled = true;
+      button.textContent = '分析中…';
+    }
+    document.querySelector('.input-panel')?.setAttribute('aria-busy', 'true');
+    try {
+      return await baseRunCurrentTool();
+    } finally {
+      document.querySelector('.input-panel')?.removeAttribute('aria-busy');
+    }
+  };
+
+  chooseWorkspace = async function uxChooseWorkspace(existing = null) {
+    const buttons = [...document.querySelectorAll('[data-action="choose-workspace"], [data-action="rescan-workspace"]')];
+    if (buttons.some((button) => button.disabled)) return;
+    buttons.forEach((button) => {
+      button.disabled = true;
+      button.dataset.uxOldText = button.textContent;
+      button.textContent = existing ? '重新扫描中…' : '扫描中…';
+    });
+    try {
+      return await baseChooseWorkspace(existing);
+    } finally {
+      buttons.forEach((button) => {
+        if (!button.isConnected) return;
+        button.disabled = false;
+        button.textContent = button.dataset.uxOldText || '选择赛题目录';
+        delete button.dataset.uxOldText;
+      });
+    }
+  };
 
   function storedSidebarCollapsed() {
     try { return localStorage.getItem(SIDEBAR_KEY) === '1'; }
@@ -50,6 +128,14 @@
       button.innerHTML = '<span>快速跳转</span><kbd>Ctrl K</kbd>';
       actions.prepend(button);
     }
+    const workspace = actions?.querySelector('.workspace-pill');
+    if (workspace && state.workspace) {
+      workspace.classList.add('ux-workspace-jump');
+      workspace.dataset.uxAction = 'jump-workspace';
+      workspace.setAttribute('role', 'button');
+      workspace.setAttribute('tabindex', '0');
+      workspace.title = '返回当前赛题分析结果';
+    }
   }
 
   function updateInputCount(textarea) {
@@ -70,6 +156,13 @@
     meta.innerHTML = '<span class="ux-input-count">0 字符 · 0 行</span><span><kbd>Ctrl Enter</kbd> 运行</span>';
     textarea.insertAdjacentElement('afterend', meta);
     updateInputCount(textarea);
+  }
+
+  function ensureWorkspaceSearchHint() {
+    const filter = document.querySelector('#file-filter');
+    if (!filter) return;
+    filter.title = 'Ctrl+F 快速聚焦文件搜索';
+    filter.setAttribute('aria-keyshortcuts', 'Control+F');
   }
 
   function ensurePalette() {
@@ -106,16 +199,19 @@
       { type: 'view', id: 'common', icon: 'C', title: '通用工具', hint: '编码 / Hash / XOR / 自动试解', group: '页面' },
       { type: 'view', id: 'knowledge', icon: 'K', title: '离线速查', hint: '协议、selector 与常用知识', group: '页面' }
     ];
+    const recents = recentTools().map((id) => ({
+      type: 'tool', id, icon: 'R', title: TOOL_META[id].title || id,
+      hint: `最近使用 · ${TOOL_META[id].label || TOOL_META[id].domain || '工具'}`, group: '最近'
+    }));
     const tools = Object.entries(TOOL_META || {}).map(([id, meta]) => ({
-      type: 'tool',
-      id,
+      type: 'tool', id,
       icon: String(meta.domain || 'T').slice(0, 1).toUpperCase(),
       title: meta.title || id,
       hint: `${meta.domain || 'common'} · ${meta.label || '工具'}`,
       group: '工具'
     }));
     const seen = new Set();
-    return [...fixed, ...tools].filter((item) => {
+    return [...fixed, ...recents, ...tools].filter((item) => {
       const key = `${item.type}:${item.id}`;
       if (seen.has(key)) return false;
       seen.add(key);
@@ -176,6 +272,7 @@
     applySidebarState();
     ensureTopbarControls();
     ensureInputMeta();
+    ensureWorkspaceSearchHint();
     ensurePalette();
   }
 
@@ -185,10 +282,16 @@
     return result;
   };
 
+  function handleUxAction(action) {
+    if (action === 'toggle-sidebar') return toggleSidebar();
+    if (action === 'open-command') return openPalette();
+    if (action === 'jump-workspace' && state.workspace) return navigate('workspace');
+    return undefined;
+  }
+
   document.addEventListener('click', (event) => {
     const action = event.target.closest('[data-ux-action]')?.dataset.uxAction;
-    if (action === 'toggle-sidebar') toggleSidebar();
-    if (action === 'open-command') openPalette();
+    if (action) handleUxAction(action);
 
     const command = event.target.closest('[data-ux-command-index]');
     if (command) activateCommand(commandItems[Number(command.dataset.uxCommandIndex)]);
@@ -211,6 +314,9 @@
 
   document.addEventListener('keydown', (event) => {
     const ctrl = event.ctrlKey || event.metaKey;
+    const target = event.target;
+    const editing = target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement || target?.isContentEditable;
+
     if (ctrl && event.key.toLowerCase() === 'k') {
       event.preventDefault();
       openPalette();
@@ -222,9 +328,23 @@
       chooseWorkspace();
       return;
     }
+    if (ctrl && event.key.toLowerCase() === 'f' && state.view === 'workspace' && !state.tool) {
+      const filter = document.querySelector('#file-filter');
+      if (filter) {
+        event.preventDefault();
+        filter.focus();
+        filter.select();
+      }
+      return;
+    }
     if (ctrl && event.key === 'Enter' && state.tool && document.querySelector('#tool-input')) {
       event.preventDefault();
       runCurrentTool();
+      return;
+    }
+    if (!editing && target?.matches?.('[data-ux-action]') && (event.key === 'Enter' || event.key === ' ')) {
+      event.preventDefault();
+      handleUxAction(target.dataset.uxAction);
       return;
     }
     if (event.key === 'Escape') {
