@@ -23,13 +23,13 @@ module.exports = [
   },
   {
     id: 'ai.model-serialization', track: 'ai', domain: '人工智能', title: '模型文件与反序列化攻击面',
-    tags: ['pytorch', 'pickle', 'safetensors', 'npy', 'model'],
-    summary: '对 .pt/.pth/NPY object 等格式优先做静态结构审计，识别 pickle GLOBAL/STACK_GLOBAL、storage 和异常 metadata，不直接加载不可信模型。',
-    evidence: ['PyTorch ZIP 中 data.pkl', 'NPY object dtype', 'pickle 引用危险 global'],
+    tags: ['pytorch', 'pickle', 'safetensors', 'npy', 'model', 'modelscan', 'picklescan'],
+    summary: '对 .pt/.pth/NPY object 等格式先做静态结构审计，识别 pickle GLOBAL/STACK_GLOBAL、storage 和异常 metadata；可用 ModelScan/PickleScan 作为交叉证据。',
+    evidence: ['PyTorch ZIP 中 data.pkl', 'NPY object dtype', 'pickle 引用危险 global', 'ModelScan/PickleScan 报告'],
     prerequisites: ['能够静态读取容器与 opcode'],
-    verify: ['危险 global 确实可达 REDUCE/调用语义', '普通 torch rebuild global 不误报高危'],
-    falsePositives: ['正常 tensor rebuild 与 storage 引用'],
-    actions: ['列出危险 globals', '关联训练日志/参数结构异常'],
+    verify: ['危险 global 确实可达 REDUCE/调用语义', '普通 torch rebuild global 不误报高危', '多个扫描器结果互相核对'],
+    falsePositives: ['正常 tensor rebuild 与 storage 引用', '单一扫描器 clean 不代表文件可执行安全'],
+    actions: ['列出危险 globals', '关联训练日志/参数结构异常', '用 ModelScan/PickleScan 交叉扫描但保留原始证据'],
     mutations: ['pickle-global-substitution', 'object-dtype', 'storage-name-change']
   },
   {
@@ -78,13 +78,57 @@ module.exports = [
   },
   {
     id: 'ai.model-supply-chain', track: 'ai', domain: '人工智能', title: '模型 / 依赖供应链',
-    tags: ['model-download', 'dependency', 'hash', 'revision', 'supply-chain'],
+    tags: ['model-download', 'dependency', 'hash', 'revision', 'supply-chain', 'trust-remote-code'],
     summary: '检查模型、Tokenizer、adapter、依赖是否固定 revision/hash，以及加载路径是否允许本地覆盖、远端自定义代码或不可信 artifact。',
-    evidence: ['from_pretrained 未固定 revision', 'trust_remote_code', '动态下载/插件加载'],
+    evidence: ['from_pretrained 未固定 revision', 'trust_remote_code', '动态下载/插件加载', 'extra-index-url / VCS / 本地依赖'],
     prerequisites: ['加载行为可从源码恢复'],
-    verify: ['确认攻击者能影响解析到的 artifact/repository/revision'],
-    falsePositives: ['比赛环境中资源完全内置且 hash 固定'],
-    actions: ['记录 artifact 来源和 hash', '优先检查 remote code / pickle 格式'],
-    mutations: ['revision-unpinned', 'adapter-shadowing', 'local-path-precedence']
+    verify: ['确认攻击者能影响解析到的 artifact/repository/revision/source/path'],
+    falsePositives: ['资源完全内置、hash 固定且路径不可控'],
+    actions: ['记录 artifact 来源和 hash', '检查 remote code / pickle 格式', '给关键加载点生成 fix + regression'],
+    mutations: ['revision-unpinned', 'adapter-shadowing', 'local-path-precedence', 'extra-index-confusion']
+  },
+  {
+    id: 'ai.adversarial-budget', track: 'ai', domain: '人工智能', title: '对抗样本预算与预处理空间',
+    tags: ['fgsm', 'pgd', 'adversarial-example', 'linf', 'l2', 'epsilon', 'art', 'foolbox'],
+    summary: '对抗样本题先确认扰动在哪个数据空间计算：原始像素、0..1、归一化 tensor 或量化值。只有同时满足 norm/epsilon、clip 和目标输出，候选才有效。',
+    evidence: ['original/adversarial pair', 'epsilon/norm', 'resize/normalize/clip preprocessing', '模型前后预测'],
+    prerequisites: ['能复现 verifier 的 preprocessing 或明确预算空间'],
+    verify: ['计算 L0/L1/L2/L∞', '确认 clip 范围', '用真实 verifier 验证 targeted/untargeted 成功'],
+    falsePositives: ['在错误的数据空间计算 epsilon', '分类变化但扰动超预算', '图像保存量化后攻击失效'],
+    actions: ['先用 NewCyber 验预算', '需要梯度攻击时生成 ART/Foolbox harness', '保存前后重新验证扰动和预测'],
+    mutations: ['normalize-before-attack', 'normalize-after-attack', 'uint8-roundtrip', 'epsilon-change', 'target-label-change']
+  },
+  {
+    id: 'ai.membership-inference', track: 'ai', domain: '人工智能', title: '成员推断 / 模型隐私泄露',
+    tags: ['membership-inference', 'privacy', 'loss', 'confidence', 'entropy', 'privacy-meter'],
+    summary: '模型隐私题先把成员/非成员查询结果整理成 transcript，比较 loss、confidence、entropy 等信号的分布和 AUC；不要从单条高置信输出直接断言训练成员身份。',
+    evidence: ['member/non-member reference', 'loss/confidence/entropy', 'shadow/reference model', '重复查询输出'],
+    prerequisites: ['至少存在成员/非成员真值样本或可靠 reference distribution'],
+    verify: ['独立 holdout 上计算 AUC/TPR/FPR', '阈值只在参考集选择后固定到测试集'],
+    falsePositives: ['把训练/测试本身分布差异误当隐私泄露', '在同一数据上选阈值并报告效果'],
+    actions: ['用 transcript auditor 找最强信号', '需要完整攻击时生成 Privacy Meter / ART 接线', '记录查询预算和 preprocessing'],
+    mutations: ['confidence-only', 'loss-only', 'label-only', 'distribution-shift', 'query-budget-change']
+  },
+  {
+    id: 'ai.dataset-backdoor', track: 'ai', domain: '人工智能', title: '训练数据投毒 / 后门 Trigger',
+    tags: ['poisoning', 'backdoor', 'trigger', 'badnets', 'cleanlab', 'backdoorbench'],
+    summary: '先从数据层找重复、冲突标签、低频 token/patch 与目标标签的异常共现，再通过 trigger 插入/移除实验验证模型行为。统计关联只用于筛选，不直接等同后门。',
+    evidence: ['相同特征不同标签', 'rare token/patch 高度绑定目标类', '异常重复样本', 'clean-label 异常'],
+    prerequisites: ['能访问训练/参考数据或至少样本索引/标签'],
+    verify: ['trigger 删除后预测恢复', '对干净样本插入 trigger 后目标类命中增加', '跨位置/强度变化验证稳定性'],
+    falsePositives: ['合法长尾类别特征', '数据采集批次造成的背景相关性'],
+    actions: ['运行数据集结构审计', '用 cleanlab 辅助找 label issue', '参考 BackdoorBench 组织 ASR/clean accuracy 验证'],
+    mutations: ['trigger-token-change', 'trigger-position-change', 'label-conflict', 'clean-label', 'frequency-trigger']
+  },
+  {
+    id: 'ai.model-scan-crosscheck', track: 'ai', domain: '人工智能', title: '模型文件多扫描器交叉验证',
+    tags: ['modelscan', 'picklescan', 'pickle', 'checkpoint', 'serialization'],
+    summary: '模型附件先由 NewCyber 做结构与 pickle opcode 审计，再用 ModelScan / PickleScan 交叉确认危险 global/serialization 行为。任何单一扫描器的 clean 都不能替代来源和格式判断。',
+    evidence: ['NewCyber pickle/global finding', 'ModelScan severity/exit code', 'PickleScan dangerous globals'],
+    prerequisites: ['模型文件可作为字节读取'],
+    verify: ['不同扫描器命中指向同一 global/entry 时提高可信度', '扫描器分歧时回到 data.pkl/opcode/容器证据'],
+    falsePositives: ['普通 torch rebuild global', '扩展名与真实容器不一致', '扫描器不支持该格式导致 skipped'],
+    actions: ['使用模型交叉扫描工作台', '保存原始 scanner output', '定位具体 pickle/global 后再判断执行语义'],
+    mutations: ['extension-change', 'zip-entry-change', 'stack-global', 'pickle-global-substitution']
   }
 ];
