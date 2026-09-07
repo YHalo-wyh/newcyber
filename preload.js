@@ -5,5 +5,6 @@ contextBridge.exposeInMainWorld('newcyber', {
   scanWorkspace: (rootPath) => ipcRenderer.invoke('workspace:scan', rootPath),
   inspectFile: (rootPath, relativePath) => ipcRenderer.invoke('workspace:inspect', rootPath, relativePath),
   saveReport: (payload) => ipcRenderer.invoke('report:save', payload),
+  saveArtifact: (artifact) => ipcRenderer.invoke('artifact:save', artifact),
   runTool: (tool, payload) => ipcRenderer.invoke('toolbox:run', tool, payload)
 });
