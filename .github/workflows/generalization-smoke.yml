@@ -1,0 +1,49 @@
+name: generalization-smoke
+
+on:
+  push:
+    paths:
+      - 'src/core/**'
+      - 'src/knowledge/**'
+      - 'scripts/generate-generalization-corpus.js'
+      - 'scripts/generalization-smoke.js'
+      - 'scripts/paradigm-web3-smoke.js'
+      - 'tests/generalization-v1.test.js'
+      - '.github/workflows/generalization-smoke.yml'
+  workflow_dispatch:
+
+jobs:
+  semantic-holdout:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+
+      - name: Score deterministic semantic variants and negative controls
+        run: >-
+          node scripts/generalization-smoke.js
+          --seed github-generalization-v1
+          --count 10
+          --min-score 1
+
+      - name: Download pinned Paradigm CTF 2023 token-locker source
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p /tmp/newcyber-holdout/paradigm-token-locker
+          curl -fL --retry 3 \
+            -o /tmp/newcyber-holdout/paradigm-token-locker/UNCX_ProofOfReservesV2_UniV3.sol \
+            'https://raw.githubusercontent.com/paradigmxyz/paradigm-ctf-2023/642d6aa90a4ca195337e8cd5f09cb2f7f842a481/token-locker/challenge/project/src/UNCX_ProofOfReservesV2_UniV3.sol'
+          grep -q 'function lock(LockParams calldata params)' /tmp/newcyber-holdout/paradigm-token-locker/UNCX_ProofOfReservesV2_UniV3.sol
+          grep -q 'params.nftPositionManager.positions' /tmp/newcyber-holdout/paradigm-token-locker/UNCX_ProofOfReservesV2_UniV3.sol
+          sha256sum /tmp/newcyber-holdout/paradigm-token-locker/UNCX_ProofOfReservesV2_UniV3.sol
+
+      - name: Gate generalized external-contract trust evidence on holdout source
+        run: >-
+          node scripts/paradigm-web3-smoke.js
+          /tmp/newcyber-holdout/paradigm-token-locker/UNCX_ProofOfReservesV2_UniV3.sol
