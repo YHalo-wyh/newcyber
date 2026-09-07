@@ -1,9 +1,13 @@
 const toolbox = require('./toolbox');
 const { analyzeCanAdvanced, decodeUdsAdvanced } = require('./vehicle');
+const { auditAiChallengeSource } = require('./ai_source');
+const { auditSolanaAnchor } = require('./solana');
 
 function runTool(tool, payload = {}) {
   if (tool === 'can-analyze') return analyzeCanAdvanced(payload.input);
   if (tool === 'uds-decode') return decodeUdsAdvanced(payload.input);
+  if (tool === 'ai-source-scan') return auditAiChallengeSource(payload.input);
+  if (tool === 'solana-source-scan') return auditSolanaAnchor(payload.input) || { language: 'unknown', findings: [], notes: ['未检测到 Anchor/Solana Rust 特征。'] };
   return toolbox.runTool(tool, payload);
 }
 
