@@ -93,7 +93,7 @@ function scanPackaging(text) {
         id:'dependency-not-locked',severity:'info',title:'依赖版本未完全锁定',line:index+1,evidence:line,
         meaning:'版本范围或未指定版本会让解析结果随时间变化；这本身不是漏洞，但会扩大供应链不确定性。',
         fix:{target:`line ${index+1}`,action:'比赛复现/关键环境固定已验证版本，必要时附 hash lock。',regression:'重新安装时依赖版本与 hash 应保持一致。'}
-      );
+      });
     }
   }
   return findings;
