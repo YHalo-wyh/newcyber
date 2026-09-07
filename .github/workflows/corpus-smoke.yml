@@ -1,0 +1,35 @@
+name: public-corpus-smoke
+
+on:
+  push:
+    paths:
+      - 'src/**'
+      - 'scripts/corpus-smoke.js'
+      - '.github/workflows/corpus-smoke.yml'
+  workflow_dispatch:
+
+jobs:
+  corpus-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - name: Download pinned public challenge attachments
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p /tmp/newcyber-corpus/easy_can /tmp/newcyber-corpus/silentweights
+          curl -fL --retry 3 -o /tmp/easy_can.zip 'https://github.com/CTF-Archives/2025-CISCN-Finals/releases/download/v1.0/ctf-easy_can_0472f45fbab6d039d804cd45e60ba30b.zip'
+          echo '73d3646f68a589b0cace8379ea55570b32486ba183c0323611bf406b79969f5d  /tmp/easy_can.zip' | sha256sum -c -
+          unzip -q /tmp/easy_can.zip -d /tmp/newcyber-corpus/easy_can
+          curl -fL --retry 3 -o /tmp/silentweights.zip 'https://github.com/CTF-Archives/2026-WQB-Quals/releases/download/attachments/SilentWeights_367c1179ccb1339df487d17c0e7242bf.zip'
+          echo '4c7d2da0063709d549d6c89f89c580fb9f9908fb32da909d2454697dc32a5877  /tmp/silentweights.zip' | sha256sum -c -
+          unzip -q /tmp/silentweights.zip -d /tmp/newcyber-corpus/silentweights
+          find /tmp/newcyber-corpus -maxdepth 4 -type f -printf '%p\n'
+      - name: Run NewCyber against real public corpora
+        run: node scripts/corpus-smoke.js /tmp/newcyber-corpus/easy_can /tmp/newcyber-corpus/silentweights
