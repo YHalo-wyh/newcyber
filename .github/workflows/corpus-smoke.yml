@@ -6,6 +6,7 @@ on:
       - 'src/**'
       - 'scripts/corpus-smoke.js'
       - 'scripts/domestic-corpus-smoke.js'
+      - 'scripts/suctf-magician-smoke.js'
       - 'tests/**'
       - '.github/workflows/corpus-smoke.yml'
   workflow_dispatch:
@@ -27,17 +28,25 @@ jobs:
           set -euxo pipefail
           mkdir -p \
             /tmp/newcyber-corpus/easy_can \
+            /tmp/newcyber-corpus/ciscn_mqtt \
             /tmp/newcyber-corpus/silentweights \
             /tmp/newcyber-corpus/starpwn \
             /tmp/newcyber-corpus/web3 \
             /tmp/newcyber-corpus/udsctf \
             /tmp/newcyber-corpus/su_easyllm \
             /tmp/newcyber-corpus/suctf_solana/programs/checkin/src/instructions \
+            /tmp/newcyber-corpus/suctf_magician \
             /tmp/newcyber-corpus/wqb2025
 
           curl -fL --retry 3 -o /tmp/easy_can.zip 'https://github.com/CTF-Archives/2025-CISCN-Finals/releases/download/v1.0/ctf-easy_can_0472f45fbab6d039d804cd45e60ba30b.zip'
           echo '73d3646f68a589b0cace8379ea55570b32486ba183c0323611bf406b79969f5d  /tmp/easy_can.zip' | sha256sum -c -
           unzip -q /tmp/easy_can.zip -d /tmp/newcyber-corpus/easy_can
+
+          curl -fL --retry 3 -o /tmp/ciscn_mqtt.zip 'https://github.com/CTF-Archives/2025-CISCN-Finals/releases/download/v1.0/ctf-mqtt_84bbb93d433aeee4490fdd6b575cce60.zip'
+          echo '11e9c657d6e20a5a625fcf9dfaa99f1f0e6d9223c89c40d235fd122566da2d43  /tmp/ciscn_mqtt.zip' | sha256sum -c -
+          unzip -q /tmp/ciscn_mqtt.zip -d /tmp/newcyber-corpus/ciscn_mqtt
+          echo '=== CISCN 2025 Finals MQTT attachment inventory ==='
+          find /tmp/newcyber-corpus/ciscn_mqtt -maxdepth 6 -type f -printf '%P\t%s bytes\n' | sort
 
           curl -fL --retry 3 -o /tmp/silentweights.zip 'https://github.com/CTF-Archives/2026-WQB-Quals/releases/download/attachments/SilentWeights_367c1179ccb1339df487d17c0e7242bf.zip'
           echo '4c7d2da0063709d549d6c89f89c580fb9f9908fb32da909d2454697dc32a5877  /tmp/silentweights.zip' | sha256sum -c -
@@ -79,6 +88,12 @@ jobs:
           grep -q 'seeds = \[b"checkin_state"\]' /tmp/newcyber-corpus/suctf_solana/programs/checkin/src/instructions/checkin.rs
           grep -q 'self.account3.key()' /tmp/newcyber-corpus/suctf_solana/programs/checkin/src/instructions/checkin.rs
 
+          curl -fL --retry 3 \
+            -o /tmp/newcyber-corpus/suctf_magician/MagicBox.sol \
+            'https://raw.githubusercontent.com/team-su/SUCTF-2025/c426821886acc6b06e9e48cd1da660f6aca4952b/misc/Onchain_Magician/attachment/MagicBox.sol'
+          grep -q 'alreadyUsedSignatureHash' /tmp/newcyber-corpus/suctf_magician/MagicBox.sol
+          grep -q 'ecrecover' /tmp/newcyber-corpus/suctf_magician/MagicBox.sol
+
           curl -fL --retry 3 -o /tmp/wqb2025.zip \
             'https://github.com/CTF-Archives/2025-WQB-Quals/releases/download/attachments/attachments.zip'
           echo 'cd82d6329a56cdbf9a2e2550871bf1dbd254d5ac6c58bb1a5a1ef412e255992d  /tmp/wqb2025.zip' | sha256sum -c -
@@ -94,7 +109,8 @@ jobs:
             /tmp/newcyber-corpus/su_easyllm/easyLLM.py \
             /tmp/newcyber-corpus/suctf_solana/Anchor.toml \
             /tmp/newcyber-corpus/suctf_solana/programs/checkin/src/lib.rs \
-            /tmp/newcyber-corpus/suctf_solana/programs/checkin/src/instructions/checkin.rs
+            /tmp/newcyber-corpus/suctf_solana/programs/checkin/src/instructions/checkin.rs \
+            /tmp/newcyber-corpus/suctf_magician/MagicBox.sol
 
       - name: Run NewCyber against four-track public corpora
         run: >-
@@ -110,3 +126,8 @@ jobs:
           /tmp/newcyber-corpus/udsctf
           /tmp/newcyber-corpus/su_easyllm
           /tmp/newcyber-corpus/suctf_solana
+
+      - name: Gate SUCTF ECDSA malleability corpus
+        run: >-
+          node scripts/suctf-magician-smoke.js
+          /tmp/newcyber-corpus/suctf_magician/MagicBox.sol
