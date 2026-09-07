@@ -1,4 +1,6 @@
 const { auditEcdsaSignatureReplay } = require('./web3_signatures');
+const { auditGeneralSolidity } = require('./web3_general');
+const { matchKnowledgeByEvidence } = require('../knowledge');
 
 function lineNumberAt(source, index) {
   return source.slice(0, index).split(/\r?\n/).length;
@@ -144,19 +146,28 @@ function auditSolidity(input) {
   while ((match = unchecked.exec(code))) push('unchecked', 'low', '存在 unchecked 算术块', match.index, 'Solidity 0.8+ 下 unchecked 关闭溢出检查，确认循环/计数逻辑是否安全。');
 
   for (const finding of auditEcdsaSignatureReplay(source, code)) findings.push(finding);
+  for (const finding of auditGeneralSolidity(source, code)) findings.push(finding);
 
   const severityOrder = { high: 0, medium: 1, low: 2 };
   findings.sort((a, b) => (severityOrder[a.severity] ?? 9) - (severityOrder[b.severity] ?? 9) || a.line - b.line);
 
+  const playbooks = matchKnowledgeByEvidence(
+    'web3',
+    findings.map((item) => item.id),
+    findings.map((item) => `${item.title} ${item.message}`).join(' '),
+    { limit: 5 }
+  );
+
   return {
     language: 'Solidity',
     findings,
+    playbooks,
     summary: {
       high: findings.filter((item) => item.severity === 'high').length,
       medium: findings.filter((item) => item.severity === 'medium').length,
       low: findings.filter((item) => item.severity === 'low').length
     },
-    notes: ['静态规则用于缩小审计范围，不等价于漏洞成立；结合测试、调用上下文和状态约束复核。']
+    notes: ['静态规则用于缩小审计范围，不等价于漏洞成立；结合测试、调用上下文和状态约束复核。', 'playbooks 按 finding 证据匹配能力族，目的是给出验证路径，不按题名或固定 selector 做特判。']
   };
 }
 
