@@ -34,6 +34,7 @@ jobs:
             /tmp/newcyber-corpus/web3 \
             /tmp/newcyber-corpus/udsctf \
             /tmp/newcyber-corpus/su_easyllm \
+            /tmp/newcyber-corpus/hackergame_llm \
             /tmp/newcyber-corpus/suctf_solana/programs/checkin/src/instructions \
             /tmp/newcyber-corpus/suctf_magician \
             /tmp/newcyber-corpus/wqb2025
@@ -76,6 +77,13 @@ jobs:
           grep -q 'TEMPERATURE = 0.28' /tmp/newcyber-corpus/su_easyllm/easyLLM.py
 
           curl -fL --retry 3 \
+            -o /tmp/newcyber-corpus/hackergame_llm/main.py \
+            'https://raw.githubusercontent.com/USTC-Hackergame/hackergame2023-writeups/8e142735f69af817f0ce323fac6dfc576dd8f8ef/official/%F0%9F%AA%90%20%E5%B0%8F%E5%9E%8B%E5%A4%A7%E8%AF%AD%E8%A8%80%E6%A8%A1%E5%9E%8B%E6%98%9F%E7%90%83/src/main.py'
+          grep -q 'roneneldan/TinyStories-33M' /tmp/newcyber-corpus/hackergame_llm/main.py
+          grep -q 'max_new_tokens=30' /tmp/newcyber-corpus/hackergame_llm/main.py
+          grep -q '"hackergame" in response' /tmp/newcyber-corpus/hackergame_llm/main.py
+
+          curl -fL --retry 3 \
             -o /tmp/newcyber-corpus/suctf_solana/Anchor.toml \
             'https://raw.githubusercontent.com/team-su/SUCTF-2025/c426821886acc6b06e9e48cd1da660f6aca4952b/misc/Onchain_Checkin/attachment/Anchor.toml'
           curl -fL --retry 3 \
@@ -107,6 +115,7 @@ jobs:
             /tmp/newcyber-corpus/web3/15.ABI-Smuggling.sol \
             /tmp/newcyber-corpus/udsctf/README.md \
             /tmp/newcyber-corpus/su_easyllm/easyLLM.py \
+            /tmp/newcyber-corpus/hackergame_llm/main.py \
             /tmp/newcyber-corpus/suctf_solana/Anchor.toml \
             /tmp/newcyber-corpus/suctf_solana/programs/checkin/src/lib.rs \
             /tmp/newcyber-corpus/suctf_solana/programs/checkin/src/instructions/checkin.rs \
@@ -126,6 +135,7 @@ jobs:
           /tmp/newcyber-corpus/udsctf
           /tmp/newcyber-corpus/su_easyllm
           /tmp/newcyber-corpus/suctf_solana
+          /tmp/newcyber-corpus/hackergame_llm
 
       - name: Gate SUCTF ECDSA malleability corpus
         run: >-
