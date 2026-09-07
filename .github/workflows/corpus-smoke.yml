@@ -7,6 +7,7 @@ on:
       - 'scripts/corpus-smoke.js'
       - 'scripts/domestic-corpus-smoke.js'
       - 'scripts/suctf-magician-smoke.js'
+      - 'scripts/lilctf-runtime-smoke.js'
       - 'tests/**'
       - '.github/workflows/corpus-smoke.yml'
   workflow_dispatch:
@@ -32,6 +33,7 @@ jobs:
             /tmp/newcyber-corpus/silentweights \
             /tmp/newcyber-corpus/starpwn \
             /tmp/newcyber-corpus/web3 \
+            /tmp/newcyber-corpus/lilctf \
             /tmp/newcyber-corpus/udsctf \
             /tmp/newcyber-corpus/su_easyllm \
             /tmp/newcyber-corpus/hackergame_llm \
@@ -62,6 +64,12 @@ jobs:
             -o /tmp/newcyber-corpus/web3/15.ABI-Smuggling.sol \
             'https://raw.githubusercontent.com/6boris/awesome-web3-contracts/ade79cc1140f56d7ffa5555012e566735233c6d4/contracts/CTF/Damn-Vulnerable-DeFi/15.ABI-Smuggling.sol'
           grep -q 'calldataload(calldataOffset)' /tmp/newcyber-corpus/web3/15.ABI-Smuggling.sol
+
+          curl -fL --retry 3 \
+            -o /tmp/newcyber-corpus/lilctf/blockchain-treasure.md \
+            'https://raw.githubusercontent.com/Lil-House/LilCTF-2025/edc97b93dfd2835a3de33409556141894865a0f8/challenges/blockchain-treasure/README.md'
+          grep -q '0x5cc4d812' /tmp/newcyber-corpus/lilctf/blockchain-treasure.md
+          grep -q '60015460ff16' /tmp/newcyber-corpus/lilctf/blockchain-treasure.md
 
           curl -fL --retry 3 \
             -o /tmp/newcyber-corpus/udsctf/README.md \
@@ -113,6 +121,7 @@ jobs:
           sha256sum \
             /tmp/newcyber-corpus/starpwn/eeprom.bin \
             /tmp/newcyber-corpus/web3/15.ABI-Smuggling.sol \
+            /tmp/newcyber-corpus/lilctf/blockchain-treasure.md \
             /tmp/newcyber-corpus/udsctf/README.md \
             /tmp/newcyber-corpus/su_easyllm/easyLLM.py \
             /tmp/newcyber-corpus/hackergame_llm/main.py \
@@ -141,3 +150,8 @@ jobs:
         run: >-
           node scripts/suctf-magician-smoke.js
           /tmp/newcyber-corpus/suctf_magician/MagicBox.sol
+
+      - name: Gate LilCTF runtime bytecode corpus
+        run: >-
+          node scripts/lilctf-runtime-smoke.js
+          /tmp/newcyber-corpus/lilctf/blockchain-treasure.md
