@@ -4,6 +4,120 @@ function frameHex(frame) {
   return Buffer.from(frame.bytes || []).toString('hex');
 }
 
+function reassembleIsoTpFrames(framesInput) {
+  const frames = (framesInput || []).map((frame, index) => ({
+    ...frame,
+    index: frame.index || index + 1,
+    bytes: [...(frame.bytes || [])]
+  }));
+  const active = new Map();
+  const sessions = [];
+
+  const finish = (state, complete, extra = {}) => {
+    const payload = state.data.slice(0, state.totalLength);
+    const item = {
+      canId: `0x${state.id}`,
+      startFrameIndex: state.startFrameIndex,
+      endFrameIndex: state.lastFrameIndex,
+      frameCount: state.frameCount,
+      totalLength: state.totalLength,
+      collectedLength: state.data.length,
+      complete,
+      payload: Buffer.from(payload).toString('hex'),
+      sequenceNumbers: state.sequenceNumbers,
+      ...extra
+    };
+    if (complete && payload.length) {
+      try { item.uds = decodeUdsAdvanced(Buffer.from(payload).toString('hex')); } catch { /* keep raw payload */ }
+    }
+    sessions.push(item);
+  };
+
+  for (const frame of frames) {
+    const bytes = frame.bytes || [];
+    if (!bytes.length) continue;
+    const pciType = bytes[0] >> 4;
+    const id = String(frame.id || '').toUpperCase();
+    if (!id) continue;
+
+    if (pciType === 0) {
+      const length = bytes[0] & 0x0f;
+      if (!length || length > bytes.length - 1) continue;
+      const payload = bytes.slice(1, 1 + length);
+      sessions.push({
+        canId: `0x${id}`,
+        startFrameIndex: frame.index,
+        endFrameIndex: frame.index,
+        frameCount: 1,
+        totalLength: length,
+        collectedLength: length,
+        complete: true,
+        payload: Buffer.from(payload).toString('hex'),
+        sequenceNumbers: [],
+        uds: decodeUdsAdvanced(Buffer.from(payload).toString('hex'))
+      });
+      continue;
+    }
+
+    if (pciType === 1 && bytes.length >= 3) {
+      const totalLength = ((bytes[0] & 0x0f) << 8) | bytes[1];
+      if (totalLength <= bytes.length - 2) continue;
+      const previous = active.get(id);
+      if (previous) finish(previous, false, { error: 'new-first-frame-before-completion' });
+      const state = {
+        id,
+        totalLength,
+        data: bytes.slice(2),
+        startFrameIndex: frame.index,
+        lastFrameIndex: frame.index,
+        frameCount: 1,
+        expectedSequence: 1,
+        sequenceNumbers: []
+      };
+      active.set(id, state);
+      if (state.data.length >= totalLength) {
+        finish(state, true);
+        active.delete(id);
+      }
+      continue;
+    }
+
+    if (pciType === 2) {
+      const state = active.get(id);
+      if (!state) continue;
+      const sequence = bytes[0] & 0x0f;
+      if (sequence !== state.expectedSequence) {
+        state.lastFrameIndex = frame.index;
+        finish(state, false, {
+          error: 'sequence-mismatch',
+          expectedSequence: state.expectedSequence,
+          actualSequence: sequence
+        });
+        active.delete(id);
+        continue;
+      }
+      state.sequenceNumbers.push(sequence);
+      state.data.push(...bytes.slice(1));
+      state.lastFrameIndex = frame.index;
+      state.frameCount += 1;
+      state.expectedSequence = (state.expectedSequence + 1) & 0x0f;
+      if (state.data.length >= state.totalLength) {
+        finish(state, true);
+        active.delete(id);
+      }
+    }
+  }
+
+  for (const state of active.values()) finish(state, false, { error: 'capture-ended-before-completion' });
+  return sessions;
+}
+
+function reassembleIsoTp(text) {
+  const frames = String(text || '').split(/\r?\n/).map(parseCanLine).filter(Boolean)
+    .map((frame, index) => ({ ...frame, index: index + 1 }));
+  return reassembleIsoTpFrames(frames);
+}
+
 function analyzeCanAdvanced(text) {
   const frames = String(text || '').split(/\r?\n/).map(parseCanLine).filter(Boolean);
   const groups = new Map();
@@ -91,14 +205,19 @@ function analyzeCanAdvanced(text) {
     }, 0)
   }))).sort((a, b) => b.score - a.score || a.frameIndex - b.frameIndex).slice(0, 100);
 
+  const indexedFrames = frames.map((frame, index) => ({ ...frame, index: index + 1 }));
+  const isoTpSessions = reassembleIsoTpFrames(indexedFrames);
+
   return {
     parsedFrames: frames.length,
     uniqueIds: ids.length,
     ids,
     eventCandidates,
+    isoTpSessions,
     hints: [
       'transitions 会保留同一 CAN ID 的逐帧 byte/bit 跃迁，适合定位转向灯、车门、档位等首次状态变化。',
       'eventCandidates 只按“少量 bit 突变”启发式排序，不代表具体车辆语义。',
+      'isoTpSessions 严格按 First Frame / Consecutive Frame sequence number 重组；序号不连续时保留错误而不是猜测数据。',
       '需要提交原始抓包帧 HEX 时，应回到对应 frameIndex 的原始 PCAP/SocketCAN frame 核对。'
     ]
   };
@@ -173,4 +292,4 @@ function decodeUdsAdvanced(input) {
   return result;
 }
 
-module.exports = { analyzeCanAdvanced, decodeUdsAdvanced };
+module.exports = { analyzeCanAdvanced, decodeUdsAdvanced, reassembleIsoTp, reassembleIsoTpFrames };
