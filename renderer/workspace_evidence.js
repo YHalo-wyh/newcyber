@@ -59,6 +59,29 @@
     return `<article class="panel result-panel"><div class="result-title"><b>模型供应链深度解析 · ${esc(file.path)}</b><span>${model?.storageCount ?? 0} storages</span></div>${audit?.unexpectedParameters?.length ? `<p class="notice">训练日志未声明参数：${esc(audit.unexpectedParameters.join(', '))}</p>` : '<p class="notice">未发现可由训练日志直接证明的额外参数。</p>'}${mappings.length ? table(['异常参数','storage','大小(bytes)','映射依据'], mappings.map((item) => [item.parameter,item.storage,item.storageBytes,item.mapping])) : ''}${outliers.length ? table(['异常 storage','解压大小(bytes)','压缩大小(bytes)'], outliers.map((item) => [item.name,item.uncompressedSize,item.compressedSize])) : ''}</article>`;
   }
 
+  function renderLowAltitudeEvidence(file) {
+    const low = file.metadata?.lowAltitude;
+    if (!low || low.skipped) return '';
+    const signing = low.signing;
+    const signingRows = signing ? [
+      ['struct offset', signing.offsetHex || signing.offset],
+      ['magic', `${signing.magic || '—'}${signing.magicValid ? ' (valid)' : ' (fallback candidate)'}`],
+      ['timestamp', signing.timestamp ?? '—'],
+      ['key length', signing.keyLength ?? '—'],
+      ['MAVLink 2 signing key', signing.signingKeyHex || '—'],
+      ['key SHA-256', signing.signingKeySha256 || '—']
+    ] : [];
+    return `<article class="panel result-panel"><div class="result-title"><b>ArduPilot / MAVLink 深度解析 · ${esc(file.path)}</b><span>${esc(low.format || 'EEPROM')}</span></div><p class="notice">已按 ArduPilot AP_Param / StorageKeys 离线解析。Signing key 属于敏感凭据：CTF/授权实验可用于验证签名，真实设备请勿外泄。</p>${table(['字段','值'], [['header', low.header || '—'], ['header hex', low.headerHex || '—'], ...signingRows])}</article>`;
+  }
+
+  function renderWeb3Evidence(file) {
+    const audit = file.metadata?.web3Audit;
+    if (!audit) return '';
+    const findings = audit.findings || [];
+    const summary = audit.summary || {};
+    return `<article class="panel result-panel"><div class="result-title"><b>Solidity 静态审计 · ${esc(file.path)}</b><span>H ${summary.high || 0} / M ${summary.medium || 0} / L ${summary.low || 0}</span></div><p class="notice">规则用于 CTF triage：命中代表值得优先复核，不等价于漏洞已经成立。</p>${findings.length ? table(['级别','行','规则','发现','说明'], findings.slice(0, 120).map((finding) => [finding.severity,finding.line,finding.id,finding.title,finding.message || finding.evidence || ''])) : '<div class="result-empty">当前规则未命中。</div>'}</article>`;
+  }
+
   function renderRecommendations(analysis) {
     const recommendations = analysis.recommendations || [];
     if (!recommendations.length) return '';
@@ -69,7 +92,7 @@
     const baseHtml = originalWorkspaceView();
     if (!state.workspace) return baseHtml;
     const analysis = state.workspace;
-    const deepEvidence = (analysis.files || []).map((file) => `${renderCanEvidence(file)}${renderModelEvidence(file)}`).join('');
+    const deepEvidence = (analysis.files || []).map((file) => `${renderCanEvidence(file)}${renderModelEvidence(file)}${renderLowAltitudeEvidence(file)}${renderWeb3Evidence(file)}`).join('');
     const evidenceHtml = `${renderFindings(analysis)}${deepEvidence}${renderRecommendations(analysis)}`;
     if (!evidenceHtml) return baseHtml;
     return baseHtml.replace('<div class="workspace-actions">', `${evidenceHtml}<div class="workspace-actions">`);
