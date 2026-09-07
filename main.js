@@ -7,11 +7,14 @@ const { scanWorkspace, inspectFile, buildMarkdownReport } = require('./src/core/
 const { runTool } = require('./src/core/tool_router');
 const { bufferFromArtifact } = require('./src/core/artifacts');
 const { analyzeFirmwareBuffer, MAX_FIRMWARE_BYTES } = require('./src/core/firmware_workbench');
+const { inspectModelInternally, normalizeExternalResult, mergeModelScanEvidence, toolingCatalog } = require('./src/core/ai_tooling');
 
 const execFileAsync = promisify(execFile);
+const MAX_INTERNAL_MODEL_BYTES = 256 * 1024 * 1024;
 let win = null;
 const approvedRoots = new Set();
 const approvedFirmwareFiles = new Set();
+const approvedAiModelFiles = new Set();
 
 function createWindow() {
   win = new BrowserWindow({
@@ -38,6 +41,80 @@ async function readFirmware(filePath) {
   if (stat.size <= 0) throw new Error('固件文件为空');
   if (stat.size > MAX_FIRMWARE_BYTES) throw new Error(`固件文件超过分析上限 ${MAX_FIRMWARE_BYTES} bytes`);
   return fs.readFile(filePath);
+}
+
+async function execCaptured(command, args, options = {}) {
+  try {
+    const { stdout, stderr } = await execFileAsync(command, args, {
+      windowsHide: true,
+      timeout: options.timeout || 120000,
+      maxBuffer: options.maxBuffer || 8 * 1024 * 1024,
+      shell: false,
+      cwd: options.cwd
+    });
+    return { ok: true, code: 0, stdout: String(stdout || ''), stderr: String(stderr || '') };
+  } catch (error) {
+    if (error?.code === 'ENOENT') return { ok: false, missing: true, code: null, stdout: '', stderr: '', error: `${command} not found` };
+    return {
+      ok: false,
+      missing: false,
+      code: Number.isInteger(error?.code) ? error.code : null,
+      stdout: String(error?.stdout || ''),
+      stderr: String(error?.stderr || ''),
+      error: error?.message || String(error)
+    };
+  }
+}
+
+async function probeAiBackends() {
+  const [modelscan, picklescan] = await Promise.all([
+    execCaptured('modelscan', ['-v'], { timeout: 10000, maxBuffer: 512 * 1024 }),
+    execCaptured('picklescan', ['--help'], { timeout: 10000, maxBuffer: 512 * 1024 })
+  ]);
+  return {
+    catalog: toolingCatalog(),
+    cli: {
+      modelscan: { available: !modelscan.missing, detail: (modelscan.stdout || modelscan.stderr || modelscan.error || '').trim().slice(0, 500) },
+      picklescan: { available: !picklescan.missing, detail: picklescan.missing ? picklescan.error : 'picklescan CLI available' }
+    }
+  };
+}
+
+async function runAiModelScan(filePath) {
+  const resolved = path.resolve(String(filePath || ''));
+  if (!approvedAiModelFiles.has(resolved)) throw new Error('请先通过模型选择器打开文件');
+  const stat = await fs.stat(resolved);
+  if (stat.size <= 0) throw new Error('模型文件为空');
+  const fileName = path.basename(resolved);
+  let internal;
+  if (stat.size <= MAX_INTERNAL_MODEL_BYTES) {
+    const buffer = await fs.readFile(resolved);
+    internal = inspectModelInternally(buffer, fileName);
+  } else {
+    internal = { engine:'newcyber', format:path.extname(fileName).toLowerCase() || 'unknown', result:null, skipped:`文件超过内置整文件解析上限 ${MAX_INTERNAL_MODEL_BYTES} bytes` };
+  }
+
+  const modelscanExec = await execCaptured('modelscan', ['-p', resolved, '-r', 'json'], { timeout: 180000, maxBuffer: 16 * 1024 * 1024 });
+  const ext = path.extname(fileName).toLowerCase();
+  const pickleLike = ['.pt','.pth','.pkl','.pickle','.joblib','.bin','.npy'].includes(ext);
+  const picklescanExec = pickleLike
+    ? await execCaptured('picklescan', ['--path', resolved], { timeout: 180000, maxBuffer: 16 * 1024 * 1024 })
+    : { missing:true, code:null, stdout:'', stderr:'', error:'not-applicable' };
+
+  const external = [];
+  if (!modelscanExec.missing) external.push(normalizeExternalResult('modelscan', modelscanExec));
+  if (!picklescanExec.missing) external.push(normalizeExternalResult('picklescan', picklescanExec));
+  const merged = mergeModelScanEvidence(internal, external);
+  return {
+    filePath: resolved,
+    fileName,
+    size: stat.size,
+    ...merged,
+    backendAvailability: {
+      modelscan: !modelscanExec.missing,
+      picklescan: pickleLike && !picklescanExec.missing
+    }
+  };
 }
 
 function registerIpc() {
@@ -116,6 +193,25 @@ function registerIpc() {
       return { ok: false, outputDir, error: error?.message || String(error), stdout: String(error?.stdout || '').slice(-12000), stderr: String(error?.stderr || '').slice(-4000) };
     }
   });
+
+  ipcMain.handle('ai:backend-status', async () => probeAiBackends());
+
+  ipcMain.handle('ai:model-choose-scan', async () => {
+    const result = await dialog.showOpenDialog(win, {
+      title: '选择模型 / Checkpoint',
+      properties: ['openFile'],
+      filters: [
+        { name:'AI model / checkpoint', extensions:['pt','pth','pkl','pickle','joblib','bin','npy','safetensors','h5','keras'] },
+        { name:'All files', extensions:['*'] }
+      ]
+    });
+    if (result.canceled || !result.filePaths[0]) return null;
+    const filePath = path.resolve(result.filePaths[0]);
+    approvedAiModelFiles.add(filePath);
+    return runAiModelScan(filePath);
+  });
+
+  ipcMain.handle('ai:model-rescan', async (_event, filePath) => runAiModelScan(filePath));
 
   ipcMain.handle('toolbox:run', async (_event, tool, payload) => runTool(tool, payload || {}));
 }
