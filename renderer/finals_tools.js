@@ -138,8 +138,7 @@
         ])}</article>`);
       }
 
-      const can = file.metadata?.pcapng?.can;
-      const canopen = can?.summary?.canopen;
+      const canopen = file.metadata?.pcapng?.can?.canopen;
       if (canopen?.detected) {
         const named = (canopen.objectValues || []).filter((item) => item.objectName || item.value?.ascii).slice(0, 24);
         cards.push(`<article class="panel result-panel"><div class="result-title"><b>CANopen / SDO · ${esc(file.path)}</b><span>${named.length} object values</span></div>${named.length ? table(['Node','Index','对象','值'], named.map((item) => [item.nodeId,item.index,item.objectName || '—',item.value?.ascii || item.value?.hex || '—'])) : '<p class="notice">检测到 SDO 会话，可在 CAN 工具中查看完整分段重组。</p>'}</article>`);
