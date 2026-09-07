@@ -7,7 +7,19 @@ NewCyber 是为线下断网安全竞赛准备的多方向本地工具箱，当�
 - 人工智能安全
 - 区块链安全
 
-四个方向彼此独立，共用 Electron 外壳和少量通用能力。项目目标不是“一键解题”，而是把比赛中重复、耗时、容易忘的步骤做成确定性离线工具，并用公开真题持续校验规则是否真正泛化。
+项目默认使用 **比赛模式**：拿到题目后优先选择整个赛题目录，让工具先判断方向、找 Flag 候选、恢复可继续利用的文件/固件，并把下一步压缩成 1～3 个动作。复杂协议字段、模型结构和 EVM 证据默认折叠，需要复核时再展开。
+
+目标不是“一键解题”，而是把比赛中重复、耗时、容易忘的步骤做成确定性离线工具，让只掌握基础原理的使用者也能顺着证据继续做出结果。
+
+## 比赛模式
+
+1. 选择赛题目录。
+2. NewCyber 离线扫描附件并判断更像车联网、低空、AI 还是区块链。
+3. Flag 候选、高危线索、完整 firmware / FTP 文件 / 自动解码文件优先置顶。
+4. 页面只给最多 3 个下一步动作，例如“验证 Flag”“导出固件去 IDA”“先分析 implementation”。
+5. 卡住时再展开技术细节。
+
+如果分析途中拿到一段可疑字符串，可以直接点 **“试解可疑结果”**；选中了文本就试选中的内容，否则工具会从当前结果里寻找明显像 Hex/Base64/转义/bit/字节列表的数据并继续自动试解。
 
 ## 当前可用工具
 
@@ -60,11 +72,18 @@ NewCyber 是为线下断网安全竞赛准备的多方向本地工具箱，当�
 - Solidity 静态规则：tx.origin、delegatecall、低级 call、初始化、ABI smuggling 等
 - Solana / Anchor：Program ID、instruction、PDA seeds、Signer/AccountInfo、Anchor.toml、链上日志线索
 
-### 通用
+### 通用 / 自动试解
 
 - Text/Hex/Base64/URL 转换
 - SHA-256 / MD5
 - 循环 Hex XOR
+- **可疑数据自动试解**：Hex、Base64、Base64URL、Base32、Base58、URL、`\\xNN` / Unicode 转义、bit 串、十进制字节列表
+- 自动继续尝试 Reverse、ROT13、Caesar、Atbash、单字节 XOR `0x01..0xff`、gzip、zlib；最多递归 3 层并按 Flag、文件头、可读性排序
+- 结果自动识别 Flag，以及 PNG / ZIP / ELF / PDF / gzip / SQLite / JPEG / GIF / 7Z / RAR 等常见文件头
+- 解出的完整二进制会生成 SHA-256 绑定 artifact，可直接导出继续解包、IDA/Ghidra 或取证
+- **中间结果一键试解**：任何工具跑出可疑数据后可直接继续，不用手工搬运多轮编码
+- **Workspace 轻量自动试解**：扫描小型文本附件中的明显编码串；解出的 Flag 直接进入比赛模式 Flag 候选，解出的文件进入“可继续利用的产物”
+- 对随机高熵数据不硬猜；AES / DES / 3DES / SM4 / RSA 等强加密若缺少 key、IV、mode 或题目约束，会明确提示需要上下文而不是伪造破解结果
 - 离线知识速查（UDS、MAVLink、AI、EVM）
 - 赛题目录只读扫描：文件类型、字符串、Flag/URL/IP 候选、WAV/PCAP/模型基础检查
 - Markdown 报告导出
@@ -101,13 +120,14 @@ npm test
 
 ## 设计原则
 
-1. **Offline-first**：核心工具不依赖网络。
-2. **Deterministic-first**：能用解析器、规则和明确算法完成的，不交给大模型猜。
-3. **赛道隔离**：车联网、低空、AI、区块链的工具和题目上下文不混在一起。
-4. **不执行不可信附件**：默认只读；模型文件不直接 `pickle.load` / `torch.load`。
-5. **辅助解题，不伪装成自动解题**：启发式结果必须人工确认。
-6. **Real-corpus driven**：真题推动通用能力，回归锁行为，不为题名写特殊分支。
-7. **Artifact must be provable**：可保存产物必须绑定 size / SHA-256 / provenance；有 gap 或冲突就保留证据，不伪造完整文件。
+1. **Beginner-first UI**：默认只展示方向、成果和下一步；底层证据折叠保留。
+2. **Offline-first**：核心工具不依赖网络。
+3. **Deterministic-first**：能用解析器、规则和明确算法完成的，不交给大模型猜。
+4. **赛道隔离**：车联网、低空、AI、区块链的工具和题目上下文不混在一起。
+5. **不执行不可信附件**：默认只读；模型文件不直接 `pickle.load` / `torch.load`。
+6. **辅助解题，不伪装成自动解题**：启发式结果必须人工确认；未知强加密不假装已经破解。
+7. **Real-corpus driven**：真题推动通用能力，回归锁行为，不为题名写特殊分支。
+8. **Artifact must be provable**：可保存产物必须绑定 size / SHA-256 / provenance；有 gap 或冲突就保留证据，不伪造完整文件。
 
 ## 代码结构
 
@@ -115,7 +135,9 @@ npm test
 main.js                              Electron 主进程、IPC 与 artifact 保存校验
 preload.js                           渲染层白名单接口
 src/core/artifacts.js                统一二进制 artifact 格式与 SHA-256 校验
+src/core/auto_decode.js              多层自动解码 / 轻量密码尝试 / Flag 与文件头评分
 src/core/finals_analyzer*.js         四赛道 workspace 专项分析与批次扩展
+src/core/finals_analyzer_batch5.js   workspace 可疑字符串自动试解
 src/core/vehicle*.js                 CAN / CANopen / ISO-TP / UDS / 刷写恢复
 src/core/uds_programming.js          UDS block map / firmware artifact
 src/core/low_altitude*.js            ArduPilot / MAVLink / signing / FTP
@@ -128,6 +150,8 @@ src/core/model_artifacts.js          SafeTensors / NPY / pickle opcode-global �
 src/core/evm_runtime*.js             EVM runtime / dispatcher / storage / 局部 data flow
 src/core/evm_proxy.js                EIP-1167 / EIP-1967 proxy evidence
 src/core/solana.js                   Solana / Anchor 审计
+renderer/competition_mode.js         默认比赛模式：成果和下一步优先
+renderer/auto_decode_tools.js        手动/中间结果一键自动试解 UI
 renderer/batch3_tools.js             Artifact pipeline / AI candidate / EVM data-flow UI
 renderer/batch4_tools.js             模型结构 / EVM proxy / MAVLink CRC UI
 renderer/artifact_tools.js           统一 artifact 保存动作
@@ -137,6 +161,7 @@ renderer/*_tools.js                  各赛道独立 UI 扩展
 
 ## 下一批优先扩展
 
+- 通用：已知 key/IV 时的 AES / DES / 3DES / SM4 常见 mode 自动配方，以及从上下文自动带入候选 key/IV
 - 车联网：UDS `dataFormatIdentifier` / 厂商自定义压缩与加密头识别、MQTT 车机协议证据
 - 低空：MAVLink TLOG、PX4 ULog / ArduPilot DataFlash、可加载自定义 dialect CRC_EXTRA 表
 - AI：XGBoost / LightGBM / Isolation Forest 树结构证据、ONNX/GGUF 深度检查、RAG 向量库离线审计
