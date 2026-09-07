@@ -125,7 +125,7 @@ test('batch8 workspace auto-enriches Wi-Fi and DataFlash attachments',async()=>{
   } finally { await fsp.rm(dir,{recursive:true,force:true}); }
 });
 
-test('batch8 UAV renderer compiles, loads last, and Electron uses batch8 workspace',()=>{
+test('batch8 UAV renderer compiles, loads before later extensions, and Electron uses Batch 8 or newer workspace',()=>{
   const root=path.join(__dirname,'..');
   const source=fs.readFileSync(path.join(root,'renderer/uav_batch8_tools.js'),'utf8');
   const html=fs.readFileSync(path.join(root,'renderer/toolbox.html'),'utf8');
@@ -136,5 +136,5 @@ test('batch8 UAV renderer compiles, loads last, and Electron uses batch8 workspa
   assert.match(source,/飞行日志提取 \/ 时间线/);
   assert.match(source,/地理围栏变更事务/);
   assert.match(source,/GCS 控制源画像/);
-  assert.match(main,/finals_analyzer_batch8/);
+  assert.match(main,/finals_analyzer_batch(?:8|9)/);
 });
