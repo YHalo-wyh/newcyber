@@ -10,6 +10,7 @@ const { analyzeModelExtractionTranscript, buildModelExtractionHarness } = requir
 const { analyzeModelInversion } = require('./ai_model_inversion');
 const { scanRegulatoryApi } = require('./low_altitude_regulatory');
 const { analyzeGnssLog } = require('./gnss_audit');
+const { analyzeGnssSpectrum } = require('./gnss_sdr');
 const { auditFirmwareUpdate } = require('./firmware_update_audit');
 const { toolingCatalog } = require('./ai_tooling');
 const { auditSolanaAnchor } = require('./solana');
@@ -36,6 +37,7 @@ function runTool(tool, payload = {}) {
   if (tool === 'uav-challenge-matrix') return { ...analyzeUavChallengeEvidence(payload.input), catalog: getScenarioCatalog() };
   if (tool === 'uav-regulatory-audit') return scanRegulatoryApi(payload.input);
   if (tool === 'uav-gnss-audit') return analyzeGnssLog(payload.input, payload.options || {});
+  if (tool === 'uav-gnss-spectrum') return analyzeGnssSpectrum(payload.input, payload.options || {});
   if (tool === 'firmware-update-audit') return auditFirmwareUpdate(payload.input);
   if (tool === 'ai-source-scan') return auditAiChallengeSource(payload.input);
   if (tool === 'ai-tabular-profile') return analyzeTabularDataset(payload.input);
