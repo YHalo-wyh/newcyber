@@ -86,6 +86,8 @@ test('Batch17 reads bounded challenge text and filters relevant PoC metadata', a
     assert.ok(analysis.version >= 17);
     assert.equal(analysis.pocReferences.indexAvailable, true);
     assert.equal(analysis.pocReferences.matches[0].cve, 'CVE-2021-44228');
+    assert.ok(analysis.autopilot.automaticChecks.some((item) => item.id === 'poc-reference'));
+    assert.ok(analysis.autopilot.actions.some((item) => item.id === 'poc-reference'));
   } finally {
     await fs.rm(corpus, { recursive:true, force:true });
     await fs.rm(challenge, { recursive:true, force:true });
