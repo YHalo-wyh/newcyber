@@ -7,6 +7,7 @@ const { analyzePrivacyTranscript, buildPrivacyHarness } = require('./ai_privacy'
 const { analyzeDatasetSecurity, buildDatasetHarness } = require('./ai_dataset_security');
 const { auditAiSupplyChain } = require('./ai_supply_chain');
 const { analyzeModelExtractionTranscript, buildModelExtractionHarness } = require('./ai_model_extraction');
+const { analyzeOcrExtractionTranscript, buildOcrExtractionHarness } = require('./ai_ocr_extraction');
 const { analyzeModelInversion } = require('./ai_model_inversion');
 const { scanRegulatoryApi } = require('./low_altitude_regulatory');
 const { analyzeGnssLog } = require('./gnss_audit');
@@ -48,6 +49,8 @@ function runTool(tool, payload = {}) {
   if (tool === 'ai-privacy-harness') return buildPrivacyHarness(payload.input || payload);
   if (tool === 'ai-model-extraction') return analyzeModelExtractionTranscript(payload.input);
   if (tool === 'ai-model-extraction-harness') return buildModelExtractionHarness(payload.input || payload);
+  if (tool === 'ai-ocr-extraction') return analyzeOcrExtractionTranscript(payload.input, payload.options || {});
+  if (tool === 'ai-ocr-extraction-harness') return buildOcrExtractionHarness(payload.input || payload);
   if (tool === 'ai-model-inversion') return analyzeModelInversion(payload.input);
   if (tool === 'ai-dataset-security') return analyzeDatasetSecurity(payload.input);
   if (tool === 'ai-dataset-harness') return buildDatasetHarness(payload.input || payload);
