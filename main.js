@@ -44,6 +44,16 @@ async function readFirmware(filePath) {
   return fs.readFile(filePath);
 }
 
+async function analyzeFirmwarePath(filePath) {
+  const resolved = path.resolve(String(filePath || ''));
+  if (!resolved || resolved === path.parse(resolved).root) throw new Error('未获得有效固件文件路径');
+  const stat = await fs.stat(resolved);
+  if (!stat.isFile()) throw new Error('拖入对象不是文件');
+  approvedFirmwareFiles.add(resolved);
+  const buffer = await readFirmware(resolved);
+  return { filePath: resolved, fileName: path.basename(resolved), analysis: analyzeFirmwareBuffer(buffer) };
+}
+
 async function execCaptured(command, args, options = {}) {
   try {
     const { stdout, stderr } = await execFileAsync(command, args, {
@@ -169,15 +179,14 @@ function registerIpc() {
       filters: [{ name: 'Firmware / Binary', extensions: ['bin','img','fw','rom','trx','chk','ubi','squashfs','zip'] }, { name: 'All files', extensions: ['*'] }]
     });
     if (result.canceled || !result.filePaths[0]) return null;
-    const filePath = path.resolve(result.filePaths[0]);
-    approvedFirmwareFiles.add(filePath);
-    const buffer = await readFirmware(filePath);
-    return { filePath, fileName: path.basename(filePath), analysis: analyzeFirmwareBuffer(buffer) };
+    return analyzeFirmwarePath(result.filePaths[0]);
   });
+
+  ipcMain.handle('firmware:analyze-dropped', async (_event, filePath) => analyzeFirmwarePath(filePath));
 
   ipcMain.handle('firmware:export-recovered', async (_event, filePath) => {
     const resolved = path.resolve(String(filePath || ''));
-    if (!approvedFirmwareFiles.has(resolved)) throw new Error('请先通过固件选择器打开文件');
+    if (!approvedFirmwareFiles.has(resolved)) throw new Error('请先通过固件选择器或拖放打开文件');
     const buffer = await readFirmware(resolved);
     const analysis = analyzeFirmwareBuffer(buffer);
     if (!analysis.artifacts?.length) return { ok: false, error: '当前没有可直接导出的完整恢复段；可改用 Binwalk 解包到目录。' };
@@ -193,7 +202,7 @@ function registerIpc() {
 
   ipcMain.handle('firmware:extract-binwalk', async (_event, filePath) => {
     const resolved = path.resolve(String(filePath || ''));
-    if (!approvedFirmwareFiles.has(resolved)) throw new Error('请先通过固件选择器打开文件');
+    if (!approvedFirmwareFiles.has(resolved)) throw new Error('请先通过固件选择器或拖放打开文件');
     const out = await dialog.showOpenDialog(win, { title: '选择 Binwalk 解包输出目录', properties: ['openDirectory', 'createDirectory'] });
     if (out.canceled || !out.filePaths[0]) return null;
     const outputDir = path.resolve(out.filePaths[0]);
