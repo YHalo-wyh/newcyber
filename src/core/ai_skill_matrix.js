@@ -306,12 +306,23 @@ function backdoorSkill(bundle) {
   const base=buildSkillBase('backdoor',runs,findings);
   if (!runs.some(Boolean)) return base;
   const behavior=runs.find((x)=>x?.ok&&x.name==='backdoor-behavior')?.result;
+  const behaviorMetrics=behavior?.metrics||{};
   const dataset=runs.find((x)=>x?.ok&&x.name==='dataset-security')?.result;
-  base.metrics={ targetLabel:behavior?.targetLabel??null,targetASR:behavior?.targetASR??null,flipRate:behavior?.flipRate??null,controlTargetRate:behavior?.controlTargetRate??null,triggerSpecificity:behavior?.triggerSpecificity??null,datasetTriggerCandidates:dataset?.triggerCandidates?.length??null };
+  base.metrics={
+    targetLabel:behavior?.targetLabel??null,
+    cleanAccuracy:behaviorMetrics.cleanAccuracy??null,
+    triggeredAccuracy:behaviorMetrics.triggeredAccuracy??null,
+    accuracyDrop:behaviorMetrics.accuracyDrop??null,
+    targetASR:behaviorMetrics.targetASR??null,
+    flipRate:behaviorMetrics.flipRate??null,
+    controlTargetRate:behaviorMetrics.controlTargetRate??null,
+    triggerSpecificity:behaviorMetrics.triggerSpecificity??null,
+    datasetTriggerCandidates:dataset?.triggerCandidates?.length??null
+  };
   if (findings.some((x)=>x.id==='backdoor-control-specificity')) {
     base.status='evidence'; base.confidence='high'; base.nextAction='Trigger 效应已明显高于中性对照；继续做位置、大小、随机纹理/中性 patch 变化和跨样本复核，固化 target ASR 与 clean accuracy。';
-  } else if (behavior?.targetASR>=0.8 || findings.length) {
-    base.status='candidate'; base.confidence=behavior?.targetASR>=0.8?'high':'medium'; base.nextAction='已有后门候选，但还缺足够对照；补 neutral/control_pred，避免把普通 OOD/遮挡敏感性误判成后门。';
+  } else if (behaviorMetrics.targetASR>=0.8 || findings.length) {
+    base.status='candidate'; base.confidence=behaviorMetrics.targetASR>=0.8?'high':'medium'; base.nextAction='已有后门候选，但还缺足够对照；补 neutral/control_pred，避免把普通 OOD/遮挡敏感性误判成后门。';
   } else if (runs.some((x)=>x?.ok)) {
     base.status='no-explicit-finding'; base.confidence='low'; base.nextAction='当前未形成显式后门行为证据；从数据侧 trigger 候选出发，构造 clean/trigger/control 三组行为对照。';
   }
