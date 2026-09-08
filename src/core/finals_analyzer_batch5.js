@@ -1,7 +1,7 @@
 const fsp = require('fs/promises');
 const path = require('path');
 const base = require('./finals_analyzer_batch4');
-const { autoDecode } = require('./auto_decode');
+const { decodeSuspiciousEncoding, extractSuspiciousEncodings } = require('./encoding_probe');
 
 const TEXT_EXTENSIONS = new Set([
   '.txt', '.md', '.log', '.json', '.jsonl', '.xml', '.yaml', '.yml', '.toml', '.ini', '.conf', '.cfg',
@@ -9,37 +9,10 @@ const TEXT_EXTENSIONS = new Set([
 ]);
 const MAX_TEXT_BYTES = 512 * 1024;
 const MAX_FILES = 40;
-const MAX_CANDIDATES_PER_FILE = 6;
+const MAX_CANDIDATES_PER_FILE = 8;
 
 function extractSuspiciousStrings(text) {
-  const items = [];
-  const pushMatches = (kind, regex) => {
-    regex.lastIndex = 0;
-    for (const match of text.matchAll(regex)) {
-      const value = match[0].trim();
-      if (value.length < 8 || value.length > 4096) continue;
-      items.push({ kind, value, index: match.index || 0 });
-      if (items.length >= 80) break;
-    }
-  };
-
-  pushMatches('hex', /(?<![A-Za-z0-9])(?:0x)?(?:[0-9A-Fa-f]{2}[\s,:-]?){8,512}(?![A-Za-z0-9])/g);
-  pushMatches('base64', /(?<![A-Za-z0-9+/_-])(?:[A-Za-z0-9+/]{4}){3,256}(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?(?![A-Za-z0-9+/_-])/g);
-  pushMatches('base64url', /(?<![A-Za-z0-9_-])[A-Za-z0-9_-]{16,1024}={0,2}(?![A-Za-z0-9_-])/g);
-  pushMatches('percent', /(?:%[0-9A-Fa-f]{2}){4,256}/g);
-  pushMatches('escape', /(?:(?:\\x[0-9A-Fa-f]{2})|(?:\\u[0-9A-Fa-f]{4})){4,256}/g);
-  pushMatches('bits', /(?<![01])(?:[01]{8}[\s,_-]?){4,256}(?![01])/g);
-  pushMatches('decimal-bytes', /(?<!\d)(?:\d{1,3}[\s,;:]+){5,255}\d{1,3}(?!\d)/g);
-
-  const seen = new Set();
-  return items
-    .sort((a, b) => a.index - b.index || b.value.length - a.value.length)
-    .filter((item) => {
-      const key = item.value.replace(/\s+/g, ' ');
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    });
+  return extractSuspiciousEncodings(text, { limit: 80 });
 }
 
 async function readTextBounded(fullPath) {
@@ -55,6 +28,7 @@ function summarizeCandidate(source, result) {
   if (!best) return null;
   return {
     sourceKind: source.kind,
+    sourceConfidence: source.confidence || 0,
     sourcePreview: source.value.slice(0, 180),
     sourceOffset: source.index,
     foundFlag: result.foundFlag || null,
@@ -84,7 +58,7 @@ async function enrichAutoDecode(rootPath, file) {
   const kept = [];
   for (const source of suspicious) {
     try {
-      const result = autoDecode(source.value, { maxDepth: 2 });
+      const result = decodeSuspiciousEncoding(source, { maxDepth: 2 });
       const summary = summarizeCandidate(source, result);
       if (shouldKeep(summary)) kept.push(summary);
     } catch {}
@@ -95,6 +69,7 @@ async function enrichAutoDecode(rootPath, file) {
     ...(file.metadata || {}),
     autoDecode: {
       attempted: suspicious.length,
+      detectors: suspicious.slice(0, 16).map((x) => ({ kind:x.kind, confidence:x.confidence, offset:x.index })),
       candidates: kept
     }
   };
@@ -111,7 +86,7 @@ async function enrichAutoDecode(rootPath, file) {
       title: candidate.foundFlag ? '自动解码命中 Flag 候选' : candidate.magic ? `自动解码得到 ${candidate.magic} 文件候选` : '可疑数据存在高质量解码路径',
       file: file.path,
       count: 1,
-      evidence: `${candidate.path.join(' → ')} => ${candidate.foundFlag || candidate.magic || candidate.preview.slice(0, 120)}`
+      evidence: `${candidate.sourceKind || 'unknown'}(${Number(candidate.sourceConfidence || 0).toFixed(2)}) · ${candidate.path.join(' → ')} => ${candidate.foundFlag || candidate.magic || candidate.preview.slice(0, 120)}`
     });
   }
   return true;
@@ -142,7 +117,7 @@ async function scanWorkspace(rootPath) {
   }
   if (usefulFiles) {
     analysis.recommendations ||= [];
-    const text = '发现疑似编码/轻量加密数据并自动试解；比赛模式会优先显示解出的 Flag、文件头和高质量文本。未知 AES/RSA/SM4 等仍需结合 key/IV/模式。';
+    const text = '发现疑似编码并按指纹优先自动试解：Base64/32/58/85/91、Hex、URL/HTML/QP/Unicode、JWT、Morse、A1Z26、二进制/十进制字节等先走低成本确定性路径；多层套娃继续递归，未知 AES/RSA/SM4 仍需题目给出的 key/IV/模式。';
     if (!analysis.recommendations.includes(text)) analysis.recommendations.push(text);
   }
   refresh(analysis);
@@ -161,7 +136,7 @@ function buildAutoDecodeSection(analysis) {
     if (!candidates.length) continue;
     lines.push(`### 自动试解：\`${oneLine(file.path)}\``, '');
     for (const item of candidates.slice(0, 10)) {
-      lines.push(`- ${oneLine(item.path.join(' → '))}：${oneLine(item.foundFlag || item.magic || item.preview)}`);
+      lines.push(`- ${oneLine(item.sourceKind || 'encoding')} → ${oneLine(item.path.join(' → '))}：${oneLine(item.foundFlag || item.magic || item.preview)}`);
     }
     lines.push('');
   }
