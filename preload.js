@@ -7,6 +7,7 @@ contextBridge.exposeInMainWorld('newcyber', {
   saveReport: (payload) => ipcRenderer.invoke('report:save', payload),
   saveArtifact: (artifact) => ipcRenderer.invoke('artifact:save', artifact),
   chooseAndAnalyzeFirmware: () => ipcRenderer.invoke('firmware:choose-analyze'),
+  exportFirmwareRecovered: (filePath) => ipcRenderer.invoke('firmware:export-recovered', filePath),
   extractFirmwareWithBinwalk: (filePath) => ipcRenderer.invoke('firmware:extract-binwalk', filePath),
   getAiBackendStatus: () => ipcRenderer.invoke('ai:backend-status'),
   chooseAndScanAiModel: () => ipcRenderer.invoke('ai:model-choose-scan'),
