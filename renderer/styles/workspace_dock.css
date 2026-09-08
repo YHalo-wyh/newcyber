@@ -1,0 +1,5 @@
+/* Keep the competition-critical controls visible while long evidence/file lists scroll. */
+.ws-investigation-pane{overflow:auto}
+.ws-investigation-head{position:sticky;top:0;z-index:6;background:#0d1218}
+.ws-investigation-pane>.ws-right-section:first-of-type{position:sticky;top:55px;z-index:5;background:#0d1218;box-shadow:0 8px 16px rgba(0,0,0,.14)}
+.ws-center-header+.ws-fixed-block{position:sticky;top:55px;z-index:2;background:#0d141b;box-shadow:0 8px 16px rgba(0,0,0,.12)}
