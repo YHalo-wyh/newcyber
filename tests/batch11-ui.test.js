@@ -7,6 +7,12 @@ const vm = require('node:vm');
 const root = path.join(__dirname, '..');
 const read = (file) => fs.readFileSync(path.join(root, file), 'utf8');
 
+function assertAnalyzerAtLeast(main, minimum) {
+  const match = main.match(/finals_analyzer_batch(\d+)/);
+  assert.ok(match, 'main.js should load a finals analyzer wrapper');
+  assert.ok(Number(match[1]) >= minimum, `expected analyzer batch >= ${minimum}, got ${match[1]}`);
+}
+
 test('Batch 11 renderer loads after UX and keeps a separate visual layer', () => {
   const html = read('renderer/toolbox.html');
   assert.ok(html.indexOf('styles/investigation.css') > html.indexOf('styles/ux.css'));
@@ -37,7 +43,7 @@ test('investigation panel CSS supports fixed desktop panel, responsive overlay a
 test('Electron workspace keeps Batch 11 investigation through Batch 11 or newer analyzer wrapper', () => {
   const main = read('main.js');
   const wrapper = read('src/core/finals_analyzer_batch11.js');
-  assert.match(main, /finals_analyzer_batch(?:11|12)/);
+  assertAnalyzerAtLeast(main,11);
   assert.match(wrapper, /buildInvestigationGraph/);
   assert.match(wrapper, /buildInvestigationSection/);
 });
