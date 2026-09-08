@@ -10,12 +10,15 @@ const { analyzeFirmwareBuffer, MAX_FIRMWARE_BYTES } = require('./src/core/firmwa
 const { exportVerifiedFirmwareArtifacts } = require('./src/core/firmware_export');
 const { inspectModelInternally, normalizeExternalResult, mergeModelScanEvidence, toolingCatalog } = require('./src/core/ai_tooling');
 const { buildPocIndexFromDirectory, loadPocIndexFile, INDEX_SCHEMA } = require('./src/core/poc_reference_index');
+const { buildAdvisoryIndexFromDirectory, loadAdvisoryIndexFile, INDEX_SCHEMA:ADVISORY_INDEX_SCHEMA } = require('./src/core/offline_advisory_index');
 
 const execFileAsync = promisify(execFile);
 const MAX_INTERNAL_MODEL_BYTES = 256 * 1024 * 1024;
 let win = null;
 let pocIndexCache = null;
 let pocIndexError = null;
+let advisoryIndexCache = null;
+let advisoryIndexError = null;
 const approvedRoots = new Set();
 const approvedFirmwareFiles = new Set();
 const approvedAiModelFiles = new Set();
@@ -44,6 +47,10 @@ function pocIndexFilePath() {
   return path.join(app.getPath('userData'), 'poc-in-github-index-v1.json');
 }
 
+function advisoryIndexFilePath() {
+  return path.join(app.getPath('userData'), 'offline-advisory-index-v1.json');
+}
+
 function pocIndexStatus() {
   return {
     available:Boolean(pocIndexCache?.schema === INDEX_SCHEMA),
@@ -52,6 +59,17 @@ function pocIndexStatus() {
     source:pocIndexCache?.source || null,
     cachePath:pocIndexCache ? pocIndexFilePath() : null,
     error:pocIndexError
+  };
+}
+
+function advisoryIndexStatus() {
+  return {
+    available:Boolean(advisoryIndexCache?.schema === ADVISORY_INDEX_SCHEMA),
+    generatedAt:advisoryIndexCache?.generatedAt || null,
+    stats:advisoryIndexCache?.stats || null,
+    source:advisoryIndexCache?.source || null,
+    cachePath:advisoryIndexCache ? advisoryIndexFilePath() : null,
+    error:advisoryIndexError
   };
 }
 
@@ -64,6 +82,17 @@ async function loadCachedPocIndex() {
     pocIndexError = error?.code === 'ENOENT' ? null : (error?.message || String(error));
   }
   return pocIndexCache;
+}
+
+async function loadCachedAdvisoryIndex() {
+  try {
+    advisoryIndexCache=await loadAdvisoryIndexFile(advisoryIndexFilePath());
+    advisoryIndexError=null;
+  } catch (error) {
+    advisoryIndexCache=null;
+    advisoryIndexError=error?.code==='ENOENT'?null:(error?.message||String(error));
+  }
+  return advisoryIndexCache;
 }
 
 async function replaceIndexCacheFile(temp, target) {
@@ -79,6 +108,13 @@ async function replaceIndexCacheFile(temp, target) {
   }
 }
 
+async function persistIndex(index,target) {
+  const temp=`${target}.tmp-${process.pid}-${Date.now()}`;
+  await fs.mkdir(path.dirname(target),{recursive:true});
+  await fs.writeFile(temp,JSON.stringify(index),'utf8');
+  await replaceIndexCacheFile(temp,target);
+}
+
 async function importPocIndex() {
   const result = await dialog.showOpenDialog(win, {
     title:'选择 nomi-sec/PoC-in-GitHub 本地仓库根目录',
@@ -87,14 +123,24 @@ async function importPocIndex() {
   if (result.canceled || !result.filePaths[0]) return null;
   const sourceRoot = path.resolve(result.filePaths[0]);
   const index = await buildPocIndexFromDirectory(sourceRoot, { maxReposPerCve:6, concurrency:24 });
-  const target = pocIndexFilePath();
-  const temp = `${target}.tmp-${process.pid}-${Date.now()}`;
-  await fs.mkdir(path.dirname(target), { recursive:true });
-  await fs.writeFile(temp, JSON.stringify(index), 'utf8');
-  await replaceIndexCacheFile(temp, target);
+  await persistIndex(index,pocIndexFilePath());
   pocIndexCache = index;
   pocIndexError = null;
   return { ...pocIndexStatus(), importedFrom:sourceRoot };
+}
+
+async function importAdvisoryIndex() {
+  const result=await dialog.showOpenDialog(win,{
+    title:'选择离线 OSV-compatible Advisory JSON 目录',
+    properties:['openDirectory']
+  });
+  if (result.canceled||!result.filePaths[0]) return null;
+  const sourceRoot=path.resolve(result.filePaths[0]);
+  const index=await buildAdvisoryIndexFromDirectory(sourceRoot,{concurrency:24,maxAdvisories:120000});
+  await persistIndex(index,advisoryIndexFilePath());
+  advisoryIndexCache=index;
+  advisoryIndexError=null;
+  return {...advisoryIndexStatus(),importedFrom:sourceRoot};
 }
 
 async function readFirmware(filePath) {
@@ -213,9 +259,13 @@ function compactRecursiveAnalysis(analysis) {
     videoSessions,
     datalinkFiles,
     pocMatches:analysis.pocReferences?.matches?.length || 0,
+    advisoryMatches:analysis.advisories?.matches?.length || 0,
+    advisoryAffected:analysis.advisories?.summary?.affected || 0,
     examDirectionCounts:analysis.examDirectionCounts || null,
     batch15Counts:analysis.batch15Counts || null,
     batch17Counts:analysis.batch17Counts || null,
+    batch18Counts:analysis.batch18Counts || null,
+    batch19Counts:analysis.batch19Counts || null,
     recommendations:(analysis.recommendations||[]).slice(0,24),
     topFindings:(analysis.findings||[]).slice(0,40).map((finding)=>({ severity:finding.severity, title:finding.title, file:finding.file, evidence:finding.evidence }))
   };
@@ -278,13 +328,18 @@ async function exportAutopilotBundle(parentDir,analysis,notes='') {
     summary:analysis.autopilot?.summary||null,
     flags,
     actions:analysis.autopilot?.actions||[],
-    pocReferences:(analysis.pocReferences?.matches||[]).slice(0,12).map((item)=>({cve:item.cve,score:item.score,summary:item.summary||null,sourceUrl:item.sourceUrl,reasons:item.reasons||[]})),
+    advisories:(analysis.advisories?.matches||[]).slice(0,24).map((item)=>({id:item.advisoryId,cves:item.cves,component:item.component,state:item.applicability?.state,reason:item.applicability?.reason,summary:item.summary||null})),
+    pocReferences:(analysis.pocReferences?.matches||[]).slice(0,12).map((item)=>({cve:item.cve,score:item.score,summary:item.summary||null,sourceUrl:item.sourceUrl,reasons:item.reasons||[],advisoryApplicability:item.advisoryApplicability||null})),
     findings:(analysis.autopilot?.findings||analysis.findings||[]).slice(0,40).map((item)=>({id:item.id||null,severity:item.severity||null,title:item.title||null,file:item.file||null,evidence:item.evidence||null})),
     artifacts:exported,
     skippedArtifacts:skipped
   };
   await fs.writeFile(path.join(outputDir,'manifest.json'),JSON.stringify(manifest,null,2)+'\n','utf8');
   return {ok:true,outputDir,artifacts:exported.length,flags:flags.length,skipped:skipped.length};
+}
+
+function workspaceScanOptions() {
+  return {pocIndex:pocIndexCache,advisoryIndex:advisoryIndexCache};
 }
 
 function registerIpc() {
@@ -299,7 +354,7 @@ function registerIpc() {
   ipcMain.handle('workspace:scan', async (_event, rootPath) => {
     const resolved = path.resolve(rootPath);
     if (!approvedRoots.has(resolved)) throw new Error('请通过目录选择器打开赛题');
-    return scanWorkspace(resolved, { pocIndex:pocIndexCache });
+    return scanWorkspace(resolved, workspaceScanOptions());
   });
 
   ipcMain.handle('workspace:inspect', async (_event, rootPath, relativePath) => {
@@ -309,8 +364,9 @@ function registerIpc() {
   });
 
   ipcMain.handle('poc:index-status', async () => pocIndexStatus());
-
   ipcMain.handle('poc:index-import', async () => importPocIndex());
+  ipcMain.handle('advisory:index-status', async () => advisoryIndexStatus());
+  ipcMain.handle('advisory:index-import', async () => importAdvisoryIndex());
 
   ipcMain.handle('report:save', async (_event, payload) => {
     const result = await dialog.showSaveDialog(win, {
@@ -389,7 +445,7 @@ function registerIpc() {
       approvedRoots.add(outputDir);
       let recursive = null;
       try {
-        const analysis = await scanWorkspace(outputDir, { pocIndex:pocIndexCache });
+        const analysis = await scanWorkspace(outputDir, workspaceScanOptions());
         recursive = compactRecursiveAnalysis(analysis);
       } catch (error) {
         recursive = { error:error?.message || String(error) };
@@ -419,12 +475,11 @@ function registerIpc() {
   });
 
   ipcMain.handle('ai:model-rescan', async (_event, filePath) => runAiModelScan(filePath));
-
   ipcMain.handle('toolbox:run', async (_event, tool, payload) => runTool(tool, payload || {}));
 }
 
 app.whenReady().then(async () => {
-  await loadCachedPocIndex();
+  await Promise.all([loadCachedPocIndex(),loadCachedAdvisoryIndex()]);
   registerIpc();
   createWindow();
   app.on('activate', () => {
