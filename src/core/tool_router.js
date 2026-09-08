@@ -11,6 +11,7 @@ const { buildPromptInjectionSuite, evaluatePromptInjectionRun, auditPromptInject
 const { analyzeModelExtractionTranscript, buildModelExtractionHarness } = require('./ai_model_extraction');
 const { analyzeOcrExtractionTranscript, buildOcrExtractionHarness } = require('./ai_ocr_extraction');
 const { analyzeModelInversion } = require('./ai_model_inversion');
+const { diagnoseAiSkillMatrix } = require('./ai_skill_matrix');
 const { scanRegulatoryApi } = require('./low_altitude_regulatory');
 const { analyzeGnssLog } = require('./gnss_audit');
 const { analyzeGnssSpectrum } = require('./gnss_sdr');
@@ -43,6 +44,7 @@ function runTool(tool, payload = {}) {
   if (tool === 'uav-gnss-spectrum') return analyzeGnssSpectrum(payload.input, payload.options || {});
   if (tool === 'firmware-update-audit') return auditFirmwareUpdate(payload.input);
   if (tool === 'ai-source-scan') return auditAiChallengeSource(payload.input);
+  if (tool === 'ai-skill-matrix') return diagnoseAiSkillMatrix(payload.input ?? payload);
   if (tool === 'ai-tabular-profile') return analyzeTabularDataset(payload.input);
   if (tool === 'ai-tabular-candidate') return evaluateTabularCandidate(payload.input);
   if (tool === 'ai-adversarial-audit') return analyzeAdversarialPair(payload.input);
