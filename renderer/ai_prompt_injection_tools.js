@@ -5,15 +5,15 @@
   TOOL_META[tool]={
     domain:'ai',
     title:'提示词注入训练 / 模板库',
-    label:'可选 JSON：category / ids / marker / canary / tool',
-    placeholder:'{"category":"direct"}\n\n留空或输入 {} 可加载全部模板。'
+    label:'可选 JSON：category / ids / competitionOnly / marker / canary / tool',
+    placeholder:'{"competitionOnly":true}\n\n留空或输入 {} 可加载全部模板；competitionOnly=true 只看比赛高频 payload。'
   };
 
   const exists=(DOMAINS.ai.tools||[]).some((x)=>x[0]===tool);
   if (!exists) DOMAINS.ai.tools.unshift([
     tool,
     '提示词注入训练 / 模板库',
-    '直接注入、间接文档、RAG、工具返回值、角色伪造、Canary 泄露和跨轮持久化。模板只使用训练 marker / canary / no-op 工具。'
+    '直接覆盖、角色伪造、格式劫持、间接文档、RAG、工具返回值、隐藏上下文与跨轮触发；内置比赛高频 payload。'
   ]);
 
   const previousRenderResult=renderResult;
@@ -21,7 +21,7 @@
   function templateCards(items=[]) {
     if (!items.length) return '<div class="result-empty">当前过滤条件没有模板。</div>';
     return items.map((item)=>`<article class="panel">
-      <div class="result-title"><b>${esc(item.title)}</b><small>${esc(item.id)} · ${esc(item.category)} · ${esc(item.placement)}</small></div>
+      <div class="result-title"><b>${esc(item.title)}</b><small>${esc(item.id)} · ${esc(item.category)} · ${esc(item.placement)}${item.competition?' · 赛题高频':''}</small></div>
       <p><b>威胁：</b>${esc(item.threat)}</p>
       <pre class="output-pre">${esc(item.payload)}</pre>
       <p><b>安全预期：</b>${esc(item.expected)}</p>
@@ -33,9 +33,9 @@
   function promptInjectionResult(r) {
     return `<div class="result-stats">
       <div><b>${r.templates?.length||0}</b><span>模板</span></div>
+      <div><b>${r.competitionCount||0}</b><span>赛题高频</span></div>
       <div><b>${r.coverage?.length||0}</b><span>覆盖类别</span></div>
       <div><b>${esc(r.marker||'—')}</b><span>训练 Marker</span></div>
-      <div><b>${esc(r.tool||'—')}</b><span>No-op Tool</span></div>
     </div>
     <div class="hint-list">
       <p><b>System setup：</b>${esc(r.setup?.system||'')}</p>
