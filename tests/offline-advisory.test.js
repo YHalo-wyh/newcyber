@@ -91,9 +91,9 @@ test('Batch19 does not call a post-fix version affected',async()=>{
   } finally { await fs.rm(root,{recursive:true,force:true}); }
 });
 
-test('compatibility entrypoint now targets Batch19',()=>{
+test('compatibility entrypoint now targets Batch20',()=>{
   const entry=fssync.readFileSync(path.join(__dirname,'..','src/core/finals_analyzer_batch15.js'),'utf8');
-  assert.match(entry,/finals_analyzer_batch19/);
+  assert.match(entry,/finals_analyzer_batch20/);
 });
 
 test('Electron bridge persists advisory index and workspace renderer exposes one-click import',()=>{
