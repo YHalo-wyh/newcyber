@@ -9,10 +9,13 @@ const { bufferFromArtifact } = require('./src/core/artifacts');
 const { analyzeFirmwareBuffer, MAX_FIRMWARE_BYTES } = require('./src/core/firmware_workbench');
 const { exportVerifiedFirmwareArtifacts } = require('./src/core/firmware_export');
 const { inspectModelInternally, normalizeExternalResult, mergeModelScanEvidence, toolingCatalog } = require('./src/core/ai_tooling');
+const { buildPocIndexFromDirectory, loadPocIndexFile, INDEX_SCHEMA } = require('./src/core/poc_reference_index');
 
 const execFileAsync = promisify(execFile);
 const MAX_INTERNAL_MODEL_BYTES = 256 * 1024 * 1024;
 let win = null;
+let pocIndexCache = null;
+let pocIndexError = null;
 const approvedRoots = new Set();
 const approvedFirmwareFiles = new Set();
 const approvedAiModelFiles = new Set();
@@ -35,6 +38,50 @@ function createWindow() {
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   win.webContents.on('will-navigate', (event) => event.preventDefault());
   win.loadFile(path.join(__dirname, 'renderer', 'toolbox.html'));
+}
+
+function pocIndexFilePath() {
+  return path.join(app.getPath('userData'), 'poc-in-github-index-v1.json');
+}
+
+function pocIndexStatus() {
+  return {
+    available:Boolean(pocIndexCache?.schema === INDEX_SCHEMA),
+    generatedAt:pocIndexCache?.generatedAt || null,
+    stats:pocIndexCache?.stats || null,
+    source:pocIndexCache?.source || null,
+    cachePath:pocIndexCache ? pocIndexFilePath() : null,
+    error:pocIndexError
+  };
+}
+
+async function loadCachedPocIndex() {
+  try {
+    pocIndexCache = await loadPocIndexFile(pocIndexFilePath());
+    pocIndexError = null;
+  } catch (error) {
+    pocIndexCache = null;
+    pocIndexError = error?.code === 'ENOENT' ? null : (error?.message || String(error));
+  }
+  return pocIndexCache;
+}
+
+async function importPocIndex() {
+  const result = await dialog.showOpenDialog(win, {
+    title:'选择 nomi-sec/PoC-in-GitHub 本地仓库根目录',
+    properties:['openDirectory']
+  });
+  if (result.canceled || !result.filePaths[0]) return null;
+  const sourceRoot = path.resolve(result.filePaths[0]);
+  const index = await buildPocIndexFromDirectory(sourceRoot, { maxReposPerCve:6, concurrency:24 });
+  const target = pocIndexFilePath();
+  const temp = `${target}.tmp-${process.pid}-${Date.now()}`;
+  await fs.mkdir(path.dirname(target), { recursive:true });
+  await fs.writeFile(temp, JSON.stringify(index), 'utf8');
+  await fs.rename(temp, target);
+  pocIndexCache = index;
+  pocIndexError = null;
+  return { ...pocIndexStatus(), importedFrom:sourceRoot };
 }
 
 async function readFirmware(filePath) {
@@ -152,8 +199,10 @@ function compactRecursiveAnalysis(analysis) {
     canFrames,
     videoSessions,
     datalinkFiles,
+    pocMatches:analysis.pocReferences?.matches?.length || 0,
     examDirectionCounts:analysis.examDirectionCounts || null,
     batch15Counts:analysis.batch15Counts || null,
+    batch17Counts:analysis.batch17Counts || null,
     recommendations:(analysis.recommendations||[]).slice(0,24),
     topFindings:(analysis.findings||[]).slice(0,40).map((finding)=>({ severity:finding.severity, title:finding.title, file:finding.file, evidence:finding.evidence }))
   };
@@ -216,6 +265,7 @@ async function exportAutopilotBundle(parentDir,analysis,notes='') {
     summary:analysis.autopilot?.summary||null,
     flags,
     actions:analysis.autopilot?.actions||[],
+    pocReferences:(analysis.pocReferences?.matches||[]).slice(0,12).map((item)=>({cve:item.cve,score:item.score,summary:item.summary||null,sourceUrl:item.sourceUrl,reasons:item.reasons||[]})),
     findings:(analysis.autopilot?.findings||analysis.findings||[]).slice(0,40).map((item)=>({id:item.id||null,severity:item.severity||null,title:item.title||null,file:item.file||null,evidence:item.evidence||null})),
     artifacts:exported,
     skippedArtifacts:skipped
@@ -236,7 +286,7 @@ function registerIpc() {
   ipcMain.handle('workspace:scan', async (_event, rootPath) => {
     const resolved = path.resolve(rootPath);
     if (!approvedRoots.has(resolved)) throw new Error('请通过目录选择器打开赛题');
-    return scanWorkspace(resolved);
+    return scanWorkspace(resolved, { pocIndex:pocIndexCache });
   });
 
   ipcMain.handle('workspace:inspect', async (_event, rootPath, relativePath) => {
@@ -244,6 +294,10 @@ function registerIpc() {
     if (!approvedRoots.has(resolved)) throw new Error('赛题目录未授权');
     return inspectFile(resolved, relativePath);
   });
+
+  ipcMain.handle('poc:index-status', async () => pocIndexStatus());
+
+  ipcMain.handle('poc:index-import', async () => importPocIndex());
 
   ipcMain.handle('report:save', async (_event, payload) => {
     const result = await dialog.showSaveDialog(win, {
@@ -322,7 +376,7 @@ function registerIpc() {
       approvedRoots.add(outputDir);
       let recursive = null;
       try {
-        const analysis = await scanWorkspace(outputDir);
+        const analysis = await scanWorkspace(outputDir, { pocIndex:pocIndexCache });
         recursive = compactRecursiveAnalysis(analysis);
       } catch (error) {
         recursive = { error:error?.message || String(error) };
@@ -356,7 +410,8 @@ function registerIpc() {
   ipcMain.handle('toolbox:run', async (_event, tool, payload) => runTool(tool, payload || {}));
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
+  await loadCachedPocIndex();
   registerIpc();
   createWindow();
   app.on('activate', () => {
