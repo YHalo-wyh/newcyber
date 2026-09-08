@@ -159,6 +159,71 @@ function compactRecursiveAnalysis(analysis) {
   };
 }
 
+function safeBundleName(value,fallback='item') {
+  const base=path.basename(String(value||fallback)).replace(/[<>:"/\\|?*\x00-\x1f]/g,'_').replace(/[. ]+$/g,'').trim();
+  return (base||fallback).slice(0,140);
+}
+
+async function createBundleDirectory(parentDir,workspaceName) {
+  const stamp=new Date().toISOString().replace(/[-:]/g,'').replace(/\.\d{3}Z$/,'Z').replace('T','-');
+  const stem=`newcyber-${safeBundleName(workspaceName,'workspace')}-${stamp}`;
+  for (let i=0;i<100;i+=1) {
+    const candidate=path.join(parentDir,i?`${stem}-${i}`:stem);
+    try { await fs.mkdir(candidate); return candidate; }
+    catch (error) { if (error?.code!=='EEXIST') throw error; }
+  }
+  throw new Error('无法创建唯一结果包目录');
+}
+
+function uniqueArtifactName(name,index,used) {
+  const safe=safeBundleName(name,`artifact-${index+1}.bin`);
+  const ext=path.extname(safe);
+  const stem=ext?safe.slice(0,-ext.length):safe;
+  let candidate=safe; let suffix=1;
+  while (used.has(candidate.toLowerCase())) candidate=`${stem}-${suffix++}${ext}`;
+  used.add(candidate.toLowerCase());
+  return candidate;
+}
+
+async function exportAutopilotBundle(parentDir,analysis,notes='') {
+  const outputDir=await createBundleDirectory(parentDir,analysis.workspaceName||'workspace');
+  const artifactsDir=path.join(outputDir,'artifacts');
+  await fs.mkdir(artifactsDir);
+  const exported=[]; const skipped=[]; const used=new Set();
+  const entries=analysis.autopilot?.artifacts||[];
+  for (let index=0;index<entries.length;index+=1) {
+    const entry=entries[index];
+    if (!entry?.artifact) continue;
+    try {
+      const decoded=bufferFromArtifact(entry.artifact,{requireComplete:true});
+      const fileName=uniqueArtifactName(decoded.name||entry.name,index,used);
+      const filePath=path.join(artifactsDir,fileName);
+      await fs.writeFile(filePath,decoded.buffer);
+      exported.push({name:fileName,kind:entry.kind||'artifact',sourceFile:entry.file||null,size:decoded.buffer.length,sha256:decoded.sha256});
+    } catch (error) {
+      skipped.push({name:entry.name||entry.artifact?.name||`artifact-${index+1}`,reason:error?.message||String(error)});
+    }
+  }
+  const flags=(analysis.autopilot?.flags||[]).map((item)=>({value:item.value||item.flag||String(item),file:item.file||null})).filter((item)=>item.value);
+  const report=buildMarkdownReport(analysis,notes||'');
+  await fs.writeFile(path.join(outputDir,'report.md'),report,'utf8');
+  if (flags.length) await fs.writeFile(path.join(outputDir,'flags.txt'),flags.map((item)=>`${item.value}${item.file?`\t${item.file}`:''}`).join('\n')+'\n','utf8');
+  const manifest={
+    schema:'newcyber.autopilot-bundle.v1',
+    generatedAt:new Date().toISOString(),
+    workspace:{name:analysis.workspaceName||null,path:analysis.workspacePath||null},
+    track:analysis.autopilot?.track||null,
+    summary:analysis.autopilot?.summary||null,
+    flags,
+    actions:analysis.autopilot?.actions||[],
+    findings:(analysis.autopilot?.findings||analysis.findings||[]).slice(0,40).map((item)=>({id:item.id||null,severity:item.severity||null,title:item.title||null,file:item.file||null,evidence:item.evidence||null})),
+    artifacts:exported,
+    skippedArtifacts:skipped
+  };
+  await fs.writeFile(path.join(outputDir,'manifest.json'),JSON.stringify(manifest,null,2)+'\n','utf8');
+  return {ok:true,outputDir,artifacts:exported.length,flags:flags.length,skipped:skipped.length};
+}
+
 function registerIpc() {
   ipcMain.handle('workspace:choose', async () => {
     const result = await dialog.showOpenDialog(win, { title: '选择赛题目录', properties: ['openDirectory'] });
@@ -201,6 +266,16 @@ function registerIpc() {
     if (result.canceled || !result.filePath) return null;
     await fs.writeFile(result.filePath, decoded.buffer);
     return { filePath: result.filePath, size: decoded.buffer.length, sha256: decoded.sha256 };
+  });
+
+  ipcMain.handle('autopilot:export-bundle', async (_event, payload) => {
+    const analysis=payload?.analysis;
+    if (!analysis||typeof analysis!=='object') throw new Error('没有可导出的分析结果');
+    const workspacePath=analysis.workspacePath?path.resolve(String(analysis.workspacePath)):null;
+    if (workspacePath&&!approvedRoots.has(workspacePath)) throw new Error('赛题目录未授权，请重新打开工作区');
+    const result=await dialog.showOpenDialog(win,{title:'选择一键结果包保存位置',properties:['openDirectory','createDirectory']});
+    if (result.canceled||!result.filePaths[0]) return null;
+    return exportAutopilotBundle(path.resolve(result.filePaths[0]),analysis,payload?.notes||'');
   });
 
   ipcMain.handle('firmware:choose-analyze', async () => {
