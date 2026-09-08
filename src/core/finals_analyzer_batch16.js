@@ -60,6 +60,18 @@ function compactArtifact(artifact) {
   return { name:artifact.name, size:artifact.size, sha256:artifact.sha256, mediaType:artifact.mediaType, completeness:artifact.completeness, metadata:artifact.metadata };
 }
 
+function compactArchiveNode(section) {
+  if (!section) return null;
+  return {
+    ...section,
+    extracted:(section.extracted || []).map((item) => ({
+      ...item,
+      artifact:undefined,
+      artifactSummary:compactArtifact(item.artifact)
+    }))
+  };
+}
+
 function compactRecursive(tree) {
   return {
     schema: tree.schema,
@@ -85,6 +97,8 @@ function compactRecursive(tree) {
           artifacts: (node.capture.video.artifacts || []).map(compactArtifact).filter(Boolean)
         } : null
       } : null,
+      zip:compactArchiveNode(node.zip),
+      tar:compactArchiveNode(node.tar),
       decompressed: (node.decompressed || []).map((item) => ({ transform:item.transform, artifact:compactArtifact(item.artifact) }))
     }))
   };
@@ -182,4 +196,4 @@ function buildMarkdownReport(analysis, notes = '') {
   return section ? `${report.trim()}\n\n${section}\n` : report;
 }
 
-module.exports = { ...base, scanWorkspace, buildMarkdownReport, enrichRecursiveArtifacts, collectMetadataSeeds, compactRecursive, buildBatch16Section };
+module.exports = { ...base, scanWorkspace, buildMarkdownReport, enrichRecursiveArtifacts, collectMetadataSeeds, compactRecursive, compactArchiveNode, buildBatch16Section };
