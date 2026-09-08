@@ -9,6 +9,7 @@
     lowalt:[
       ['uav-regulatory-audit','低空监管 API','审计飞行许可、空域、无人机/运营人对象、审批状态机、BOLA、重放和地理时间边界。'],
       ['uav-gnss-audit','GNSS / GPS 欺骗','解析 NMEA GGA/RMC/GSV/GSA，检查 checksum、时间回退、位置物理一致性、卫星/SNR 和干扰候选。'],
+      ['uav-gnss-spectrum','GNSS SDR 频谱','导入 SDR/FFT 功率谱，检查 GPS/北斗/Galileo/GLONASS 主频段的窄带峰与宽带噪声抬升。'],
       ['firmware-update-audit','固件升级信任链','审计下载→manifest→签名/hash→解包/解密→flash→anti-rollback 的升级链。']
     ]
   };
@@ -17,6 +18,7 @@
   TOOL_META['ai-model-inversion']={ domain:'ai',title:'模型反演 / Inversion',label:'JSON/CSV：模型输出或 reference/reconstructed',placeholder:'[{"probabilities":[0.01,0.98,0.01],"reference":[0,1,0],"reconstructed":[0.01,0.97,0.02]}]' };
   TOOL_META['uav-regulatory-audit']={ domain:'lowalt',title:'低空监管 API',label:'OpenAPI / API 源码 / HTTP transcript',placeholder:'PATCH /api/flights/{flight_id}/approval\nAuthorization: Bearer ...\nbody: {"status":"approved","airspace_id":"A-01"}' };
   TOOL_META['uav-gnss-audit']={ domain:'lowalt',title:'GNSS / GPS 欺骗',label:'NMEA 日志',placeholder:'$GPGGA,123519,4807.038,N,01131.000,E,1,08,0.9,545.4,M,46.9,M,,*47\n$GPRMC,123520,A,4807.038,N,01131.000,E,0.1,0.0,230394,,,A*00' };
+  TOOL_META['uav-gnss-spectrum']={ domain:'lowalt',title:'GNSS SDR 频谱',label:'CSV/TSV：frequency_hz,power_db',placeholder:'frequency_hz,power_db\n1573000000,-92.1\n1575420000,-71.2\n1577000000,-91.8' };
   TOOL_META['firmware-update-audit']={ domain:'lowalt',title:'固件升级信任链',label:'升级脚本 / 源码 / manifest / strings',placeholder:'wget https://update.example/fw.bin\nsha256sum fw.bin\nverify_signature fw.bin.sig\nmtd write fw.bin firmware\nreboot' };
 
   for (const [domain,rows] of Object.entries(additions)) {
@@ -61,6 +63,13 @@
       ${findingCards(r.findings)}${actions(r.nextActions)}`;
   }
 
+  function spectrum(r) {
+    const span=r.span?`${(r.span.minHz/1e6).toFixed(3)}–${(r.span.maxHz/1e6).toFixed(3)} MHz`:'—';
+    return `<div class="result-stats"><div><b>${r.samples||0}</b><span>FFT Samples</span></div><div><b>${r.bands?.length||0}</b><span>GNSS Bands</span></div><div><b>${esc(span)}</b><span>Span</span></div><div><b>${r.findings?.filter(x=>x.severity==='medium'||x.severity==='high').length||0}</b><span>异常候选</span></div></div>
+      ${r.bands?.length?table(['Band','Peak MHz','Peak ΔdB','Median ΔdB','>6dB 比例'],r.bands.map((x)=>[x.id,(x.peakHz/1e6).toFixed(4),x.peakAboveBaselineDb.toFixed(2),x.medianAboveBaselineDb.toFixed(2),`${(x.fractionAbove6Db*100).toFixed(1)}%`])):''}
+      ${findingCards(r.findings)}${actions(r.nextActions)}`;
+  }
+
   function updateChain(r) {
     return `<div class="result-stats"><div><b>${r.summary?.high||0}</b><span>High</span></div><div><b>${r.summary?.medium||0}</b><span>Medium</span></div><div><b>${Object.values(r.stages||{}).filter(Boolean).length}</b><span>Stages</span></div><div><b>${r.flashTargets?.length||0}</b><span>Flash Targets</span></div></div>
       ${table(['阶段','识别'],Object.entries(r.stages||{}).map(([k,v])=>[k,v?'YES':'—']))}
@@ -73,6 +82,7 @@
     if (tool==='ai-model-inversion') return inversion(result);
     if (tool==='uav-regulatory-audit') return regulatory(result);
     if (tool==='uav-gnss-audit') return gnss(result);
+    if (tool==='uav-gnss-spectrum') return spectrum(result);
     if (tool==='firmware-update-audit') return updateChain(result);
     return previousRender(tool,result);
   };
