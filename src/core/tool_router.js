@@ -6,6 +6,7 @@ const { analyzeAdversarialPair, buildAdversarialHarness } = require('./ai_advers
 const { analyzePrivacyTranscript, buildPrivacyHarness } = require('./ai_privacy');
 const { analyzeDatasetSecurity, buildDatasetHarness } = require('./ai_dataset_security');
 const { auditAiSupplyChain } = require('./ai_supply_chain');
+const { buildPromptInjectionSuite, evaluatePromptInjectionRun, auditPromptInjectionSource } = require('./ai_prompt_injection');
 const { analyzeModelExtractionTranscript, buildModelExtractionHarness } = require('./ai_model_extraction');
 const { analyzeOcrExtractionTranscript, buildOcrExtractionHarness } = require('./ai_ocr_extraction');
 const { analyzeModelInversion } = require('./ai_model_inversion');
@@ -47,6 +48,9 @@ function runTool(tool, payload = {}) {
   if (tool === 'ai-adversarial-harness') return buildAdversarialHarness(payload.input || payload);
   if (tool === 'ai-privacy-audit') return analyzePrivacyTranscript(payload.input);
   if (tool === 'ai-privacy-harness') return buildPrivacyHarness(payload.input || payload);
+  if (tool === 'ai-prompt-injection-suite') return buildPromptInjectionSuite(payload.input || payload.options || {});
+  if (tool === 'ai-prompt-injection-evaluate') return evaluatePromptInjectionRun(payload.input || payload);
+  if (tool === 'ai-prompt-injection-source') return auditPromptInjectionSource(payload.input);
   if (tool === 'ai-model-extraction') return analyzeModelExtractionTranscript(payload.input);
   if (tool === 'ai-model-extraction-harness') return buildModelExtractionHarness(payload.input || payload);
   if (tool === 'ai-ocr-extraction') return analyzeOcrExtractionTranscript(payload.input, payload.options || {});
