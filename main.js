@@ -7,6 +7,7 @@ const { scanWorkspace, inspectFile, buildMarkdownReport } = require('./src/core/
 const { runTool } = require('./src/core/tool_router');
 const { bufferFromArtifact } = require('./src/core/artifacts');
 const { analyzeFirmwareBuffer, MAX_FIRMWARE_BYTES } = require('./src/core/firmware_workbench');
+const { exportVerifiedFirmwareArtifacts } = require('./src/core/firmware_export');
 const { inspectModelInternally, normalizeExternalResult, mergeModelScanEvidence, toolingCatalog } = require('./src/core/ai_tooling');
 
 const execFileAsync = promisify(execFile);
@@ -174,10 +175,26 @@ function registerIpc() {
     return { filePath, fileName: path.basename(filePath), analysis: analyzeFirmwareBuffer(buffer) };
   });
 
+  ipcMain.handle('firmware:export-recovered', async (_event, filePath) => {
+    const resolved = path.resolve(String(filePath || ''));
+    if (!approvedFirmwareFiles.has(resolved)) throw new Error('请先通过固件选择器打开文件');
+    const buffer = await readFirmware(resolved);
+    const analysis = analyzeFirmwareBuffer(buffer);
+    if (!analysis.artifacts?.length) return { ok: false, error: '当前没有可直接导出的完整恢复段；可改用 Binwalk 解包到目录。' };
+    const out = await dialog.showOpenDialog(win, { title: '选择固件恢复结果导出位置', properties: ['openDirectory', 'createDirectory'] });
+    if (out.canceled || !out.filePaths[0]) return null;
+    const exported = await exportVerifiedFirmwareArtifacts({
+      artifacts: analysis.artifacts,
+      parentDir: path.resolve(out.filePaths[0]),
+      sourceName: path.basename(resolved)
+    });
+    return { ok: true, ...exported };
+  });
+
   ipcMain.handle('firmware:extract-binwalk', async (_event, filePath) => {
     const resolved = path.resolve(String(filePath || ''));
     if (!approvedFirmwareFiles.has(resolved)) throw new Error('请先通过固件选择器打开文件');
-    const out = await dialog.showOpenDialog(win, { title: '选择固件解包输出目录', properties: ['openDirectory', 'createDirectory'] });
+    const out = await dialog.showOpenDialog(win, { title: '选择 Binwalk 解包输出目录', properties: ['openDirectory', 'createDirectory'] });
     if (out.canceled || !out.filePaths[0]) return null;
     const outputDir = path.resolve(out.filePaths[0]);
     try {
@@ -189,7 +206,7 @@ function registerIpc() {
       });
       return { ok: true, outputDir, stdout: String(stdout || '').slice(-12000), stderr: String(stderr || '').slice(-4000) };
     } catch (error) {
-      if (error?.code === 'ENOENT') return { ok: false, missingTool: 'binwalk', outputDir, error: '未找到 binwalk；仍可使用内置结构识别和 segment 导出。' };
+      if (error?.code === 'ENOENT') return { ok: false, missingTool: 'binwalk', outputDir, error: '未找到 binwalk；仍可导出内置解析器恢复出的完整段。' };
       return { ok: false, outputDir, error: error?.message || String(error), stdout: String(error?.stdout || '').slice(-12000), stderr: String(error?.stderr || '').slice(-4000) };
     }
   });
