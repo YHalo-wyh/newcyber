@@ -21,11 +21,24 @@ NewCyber 是面向安全竞赛的多方向分析工作台，当前重点覆盖�
 
 如果分析途中拿到一段可疑字符串，可以直接点 **“试解可疑结果”**；选中了文本就试选中的内容，否则工具会从当前结果里寻找明显像 Hex/Base64/转义/bit/字节列表的数据并继续自动试解。
 
+### Investigation 工作流
+
+Workspace 会把已有 finding 重新组织成统一调查链，而不是改变原分析器结论：
+
+`Finding → Evidence → Prerequisite → Exploitability → Recommended Tool → Artifact → Fix → Regression → Next Action`
+
+- 右侧 **Investigation Panel** 固定显示高价值证据、下一步和可导出 artifact。
+- 每条 finding 可展开查看原始证据、成立前提、可利用性、修复建议和回归条件，并可直接打开推荐工具或定位来源文件。
+- `Ctrl + Shift + I`：展开/收起 Investigation Panel。
+- “确认 / 排除 / 待定”是分析员本机复核状态，只保存在 `localStorage`，不会修改 core finding 或把候选自动升级成已确认漏洞。
+- Markdown 报告会追加 `Investigation Graph`，保留 Evidence / Prerequisite / Exploitability / Fix / Regression / Next Action 与 artifact SHA-256。
+
 ### 快捷操作
 
 - `Ctrl + K`：打开全局命令面板，直接跳赛道、页面或具体工具。
 - `Ctrl + Enter`：在任意工具输入页直接运行当前分析。
 - `Ctrl + Shift + O`：直接选择赛题目录并开始扫描。
+- `Ctrl + F`：在 Workspace 中直接聚焦文件搜索。
 - 左上角侧栏按钮：折叠/展开导航；桌面端状态会保存在本机 `localStorage`。
 - 工具输入区实时显示字符数和行数，长日志/源码输入时不用再额外估算规模。
 
@@ -119,7 +132,7 @@ NewCyber 是面向安全竞赛的多方向分析工作台，当前重点覆盖�
 当前 CI 同时维护三类门禁：
 
 - **真实公开题回归**：CISCN Finals、UDSCTF、SUCTF、LilCTF、STARPWN、Hackergame 等固定版本 corpus
-- **Semantic Generalization**：随机化 identifier、CAN ID、SYSID/COMPID、编码方式、控制参数与负例，统计正例召回和负例正确拒绝；AI Batch 9 进一步按 capability family 分开计分，避免总分掩盖单个子能力退化
+- **Semantic Generalization**：随机化 identifier、CAN ID、SYSID/COMPID、编码方式、控制参数与负例，统计正例召回和负例正确拒绝；AI Batch 9 进一步按 capability family 分开计分，避免总分掩盖单个子能力退化；Batch 11 进一步对随机变异后的 finding → track → recommended tool 路由做门禁
 - **Holdout Challenge**：使用未针对题名编写规则的真实公开源码/附件验证能力族，例如 Paradigm CTF `token-locker` 的 external-contract trust boundary
 
 真题只用于暴露能力缺口与锁定泛化行为；核心规则不写题名特判。
@@ -149,7 +162,7 @@ npm test
 6. **Real-corpus driven**：真题推动通用能力，回归锁行为，不为题名写特殊分支。
 7. **Semantic generalization gate**：正例换名/换参数后仍应命中，相似负例必须正确拒绝。
 8. **Artifact must be provable**：可保存产物必须绑定 size / SHA-256 / provenance；有 gap 或冲突就保留证据，不伪造完整文件。
-9. **UX 与分析核心解耦**：快捷键、命令面板和视觉状态放在独立 renderer enhancement 层，不能改变分析器输出或绕过证据门禁。
+9. **UX 与分析核心解耦**：快捷键、命令面板、Investigation Panel 和本地人工复核状态放在独立 renderer enhancement 层，不能改变分析器输出或绕过证据门禁。
 
 ## 代码结构
 
@@ -161,6 +174,8 @@ src/core/auto_decode.js              多层自动解码 / 轻量密码尝试 / F
 src/core/finals_analyzer*.js         四赛道 workspace 专项分析与批次扩展
 src/core/finals_analyzer_batch7.js   低空题型矩阵 / 固件 workspace enrichment
 src/core/finals_analyzer_batch9.js   AI Batch 9 workspace enrichment
+src/core/finals_analyzer_batch11.js  Workspace Investigation Graph / report enrichment
+src/core/investigation_graph.js      Finding→Evidence→Prerequisite→Tool→Fix/Regression/Next Action
 src/core/vehicle*.js                 CAN / CANopen / ISO-TP / UDS / 刷写恢复
 src/core/uds_programming.js          UDS block map / firmware artifact
 src/core/low_altitude*.js            ArduPilot / MAVLink / signing / FTP
@@ -194,16 +209,17 @@ renderer/auto_decode_tools.js        手动/中间结果一键自动试解 UI
 renderer/artifact_tools.js           统一 artifact 保存动作
 renderer/ux.js                       命令面板、快捷键、侧栏记忆、输入状态增强
 renderer/styles/ux.css               独立 UX/视觉覆盖层，不侵入分析核心
+renderer/investigation_panel.js      右侧调查队列、工具/文件/artifact 跳转、本地复核状态
+renderer/styles/investigation.css    Investigation Panel 桌面/窄屏布局
 .github/workflows/corpus-smoke.yml   公开真题 corpus gate
 .github/workflows/generalization-smoke.yml 泛化 + holdout gate
 ```
 
 ## 下一批优先扩展
 
-- 低空：TLOG 容器、PX4 ULog / ArduPilot DataFlash 深度时间线；802.11 management frame 与 RTP/RTSP capture 专项解析；自定义 MAVLink dialect CRC_EXTRA 表
+- 低空：原始 802.11 PCAP 的 Beacon/Probe/Auth/EAPOL/PMKID/Deauth、RTSP/RTP/H264/H265 会话；PX4 ULog topic 时间线；低空监管 API/JWT/OpenAPI 证据
 - 固件：TRX/CHK/厂商升级头、UBI/UBIFS/JFFS2 deterministic carve、rootfs 解包后自动服务/密钥/更新链审计
-- 车联网：UDS `dataFormatIdentifier` / 厂商自定义压缩与加密头识别、MQTT 车机协议证据
-- AI：Isolation Forest / XGBoost / LightGBM 安全格式的真实树结构证据、ONNX/GGUF 深度检查、RAG 向量库/embedding 数据边界审计；继续坚持不执行不可信模型
+- 车联网：DoIP / SOME-IP、UDS `dataFormatIdentifier` / 厂商自定义压缩与加密头识别、MQTT 车机协议证据
+- AI：Prompt/RAG/Tool 跨文件信任边界；Isolation Forest / XGBoost / LightGBM 安全格式树结构、ONNX/GGUF 深度检查、RAG 向量库/embedding 数据边界审计
 - 区块链：跨 basic-block CFG evidence、DeFi 资产流/flash-loan callback 状态机、Diamond/EIP-2535
 - 通用：KDF 派生链、artifact 证据包（binary + provenance + report）统一导出、环境自检
-- UI：继续减少“工具墙”，让 workspace 的 finding / artifact / next-action 可以直接跳到对应证据与工具，同时保留专业视图可展开复核
