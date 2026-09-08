@@ -1,5 +1,6 @@
 const fsp=require('fs/promises');
 const path=require('path');
+const {compareEcosystemVersion,evaluateGitBoundary}=require('./version_semantics');
 
 const INDEX_SCHEMA='newcyber.offline-advisory-index.v1';
 const DEFAULT_MAX_ADVISORIES=120000;
@@ -11,6 +12,7 @@ const ECOSYSTEM_MAP=Object.freeze({
   pypi:'pypi',
   maven:'maven',
   go:'golang',
+  golang:'golang',
   'crates.io':'cargo',
   packagist:'composer',
   rubygems:'gem',
@@ -32,53 +34,34 @@ function cveAliases(advisory={}) {
     .map((x)=>String(x).toUpperCase()))];
 }
 
-function splitVersion(value='') {
-  const raw=String(value||'').trim().replace(/^v(?=\d)/i,'');
-  if (!raw) return null;
-  const m=raw.match(/^(\d+(?:\.\d+){0,5})(?:[-+._]?([0-9A-Za-z][0-9A-Za-z.-]*))?$/);
-  if (!m) return null;
-  const nums=m[1].split('.').map((x)=>Number(x));
-  const pre=m[2]?m[2].split(/[.-]/).map((x)=>/^\d+$/.test(x)?Number(x):x.toLowerCase()):[];
-  return {raw,nums,pre};
+function cweAliases(advisory={}) {
+  const db=advisory.database_specific||{};
+  const values=[...(db.cwe_ids||[]),...(db.cwes||[]),...(advisory.cwes||[])];
+  if (db.cwe_id) values.push(db.cwe_id);
+  return [...new Set(values
+    .map((x)=>String(x||'').toUpperCase())
+    .filter((x)=>/^CWE-\d+$/.test(x)))].slice(0,32);
 }
 
 function compareVersion(a,b) {
-  const left=splitVersion(a),right=splitVersion(b);
-  if (!left||!right) return null;
-  const len=Math.max(left.nums.length,right.nums.length);
-  for (let i=0;i<len;i+=1) {
-    const x=left.nums[i]??0,y=right.nums[i]??0;
-    if (x!==y) return x<y?-1:1;
-  }
-  if (!left.pre.length&&!right.pre.length) return 0;
-  if (!left.pre.length) return 1;
-  if (!right.pre.length) return -1;
-  const plen=Math.max(left.pre.length,right.pre.length);
-  for (let i=0;i<plen;i+=1) {
-    if (i>=left.pre.length) return -1;
-    if (i>=right.pre.length) return 1;
-    const x=left.pre[i],y=right.pre[i];
-    if (x===y) continue;
-    if (typeof x==='number'&&typeof y==='number') return x<y?-1:1;
-    if (typeof x==='number') return -1;
-    if (typeof y==='number') return 1;
-    return x<y?-1:1;
-  }
-  return 0;
+  return compareEcosystemVersion(a,b,'generic','SEMVER');
 }
 
-function intervalContains(version,interval) {
-  const lower=interval.introduced&&interval.introduced!=='0'?compareVersion(version,interval.introduced):1;
+function intervalContains(version,interval,ecosystem='') {
+  if (String(interval?.type||'').toUpperCase()==='GIT') return null;
+  const rangeType=String(interval?.type||'ECOSYSTEM').toUpperCase();
+  const compare=(boundary)=>compareEcosystemVersion(version,boundary,ecosystem,rangeType);
+  const lower=interval.introduced&&interval.introduced!=='0'?compare(interval.introduced):1;
   if (lower===null) return null;
   if (interval.introduced&&interval.introduced!=='0'&&lower<0) return false;
   if (interval.fixed) {
-    const c=compareVersion(version,interval.fixed); if (c===null) return null; return c<0;
+    const c=compare(interval.fixed); if (c===null) return null; return c<0;
   }
   if (interval.lastAffected) {
-    const c=compareVersion(version,interval.lastAffected); if (c===null) return null; return c<=0;
+    const c=compare(interval.lastAffected); if (c===null) return null; return c<=0;
   }
   if (interval.limit) {
-    const c=compareVersion(version,interval.limit); if (c===null) return null; return c<0;
+    const c=compare(interval.limit); if (c===null) return null; return c<0;
   }
   return true;
 }
@@ -86,26 +69,27 @@ function intervalContains(version,interval) {
 function rangesToIntervals(ranges=[]) {
   const out=[];
   for (const range of ranges||[]) {
-    if (!['SEMVER','ECOSYSTEM'].includes(String(range?.type||'').toUpperCase())) continue;
+    const type=String(range?.type||'').toUpperCase();
+    if (!['SEMVER','ECOSYSTEM','GIT'].includes(type)) continue;
     let introduced='0';
     for (const event of range.events||[]) {
       if (event.introduced!==undefined) { introduced=String(event.introduced); continue; }
       if (event.fixed!==undefined) {
-        out.push({type:String(range.type).toUpperCase(),introduced,fixed:String(event.fixed)});
+        out.push({type,introduced,fixed:String(event.fixed),repo:range.repo||null});
         introduced=null;
         continue;
       }
       if (event.last_affected!==undefined) {
-        out.push({type:String(range.type).toUpperCase(),introduced,lastAffected:String(event.last_affected)});
+        out.push({type,introduced,lastAffected:String(event.last_affected),repo:range.repo||null});
         introduced=null;
         continue;
       }
       if (event.limit!==undefined) {
-        out.push({type:String(range.type).toUpperCase(),introduced,limit:String(event.limit)});
+        out.push({type,introduced,limit:String(event.limit),repo:range.repo||null});
         introduced=null;
       }
     }
-    if (introduced!==null) out.push({type:String(range.type).toUpperCase(),introduced});
+    if (introduced!==null) out.push({type,introduced,repo:range.repo||null});
   }
   return out;
 }
@@ -134,11 +118,13 @@ function normalizeAdvisory(raw={}) {
     id:String(raw.id),
     aliases:[...new Set((raw.aliases||[]).map(String))].slice(0,40),
     cves:cveAliases(raw),
+    cwes:cweAliases(raw),
     summary:String(raw.summary||raw.details||'').replace(/\s+/g,' ').trim().slice(0,MAX_SUMMARY)||null,
     published:raw.published||null,
     modified:raw.modified||null,
     withdrawn:raw.withdrawn||null,
-    severity:Array.isArray(raw.severity)?raw.severity.slice(0,8):[],
+    severity:Array.isArray(raw.severity)?raw.severity.slice(0,8).map((x)=>({type:x?.type||null,score:x?.score||null})):[],
+    databaseSpecific:raw.database_specific||null,
     references:Array.isArray(raw.references)?raw.references.slice(0,20).map((x)=>({type:x?.type||null,url:x?.url||null})):[],
     affected
   };
@@ -230,17 +216,25 @@ function evaluateAffected(version,affected) {
     return {state:'affected',confidence:'high',reason:`OSV affected.versions 明确包含 ${version}`,method:'exact-version'};
   }
   let comparable=false,unknownComparator=false;
+  const exactGitEvidence=[];
   for (const interval of affected.intervals||[]) {
-    const hit=intervalContains(version,interval);
+    if (String(interval.type||'').toUpperCase()==='GIT') {
+      const verdict=evaluateGitBoundary(version,interval);
+      if (verdict.state==='affected') return {...verdict,confidence:'high',interval};
+      if (verdict.state==='not-affected') { comparable=true; exactGitEvidence.push(verdict.reason); continue; }
+      unknownComparator=true;
+      continue;
+    }
+    const hit=intervalContains(version,interval,affected.ecosystem);
     if (hit===null) { unknownComparator=true; continue; }
     comparable=true;
-    if (hit) return {state:'affected',confidence:'high',reason:`${version} 落入 ${interval.type} affected range`,method:'range',interval};
+    if (hit) return {state:'affected',confidence:'high',reason:`${version} 落入 ${interval.type} affected range（${affected.ecosystem} 版本语义）`,method:'range',interval};
   }
-  if (comparable) {
+  if (comparable&&!unknownComparator) {
     const fixed=[...new Set((affected.intervals||[]).map((x)=>x.fixed).filter(Boolean))];
-    return {state:'not-affected',confidence:'high',reason:`${version} 未落入 advisory 的可比较 affected range`,method:'range',fixedVersions:fixed.slice(0,12)};
+    return {state:'not-affected',confidence:'high',reason:exactGitEvidence[0]||`${version} 未落入 advisory 的可比较 affected range`,method:exactGitEvidence.length?'git-boundary-exact':'range',fixedVersions:fixed.slice(0,12)};
   }
-  if (unknownComparator) return {state:'unknown',confidence:'low',reason:'存在 affected range，但当前版本格式无法可靠比较'};
+  if (unknownComparator) return {state:'unknown',confidence:'low',reason:'存在 affected range，但当前生态版本格式或 GIT ancestry 无法离线可靠比较'};
   return {state:'unknown',confidence:'low',reason:'advisory 未提供可用于当前组件版本的明确 versions/range'};
 }
 
@@ -263,6 +257,9 @@ function matchAdvisoriesForTechStack(stack,index,options={}) {
         advisoryId:advisory.id,
         aliases:advisory.aliases,
         cves:advisory.cves,
+        cwes:advisory.cwes||[],
+        severity:advisory.severity||[],
+        databaseSpecific:advisory.databaseSpecific||null,
         summary:advisory.summary,
         published:advisory.published,
         modified:advisory.modified,
@@ -277,10 +274,10 @@ function matchAdvisoriesForTechStack(stack,index,options={}) {
   matches.sort((a,b)=>(rank[a.applicability.state]??9)-(rank[b.applicability.state]??9)||String(a.advisoryId).localeCompare(String(b.advisoryId)));
   const limited=matches.slice(0,Math.max(1,Math.min(Number(options.topK)||80,400)));
   const summary={affected:limited.filter((x)=>x.applicability.state==='affected').length,notAffected:limited.filter((x)=>x.applicability.state==='not-affected').length,unknown:limited.filter((x)=>x.applicability.state==='unknown').length};
-  return {indexAvailable:true,indexGeneratedAt:index.generatedAt||null,indexStats:index.stats||null,matches:limited,summary,note:'affected/not-affected 仅基于本地 advisory 的明确 package + version/range 证据；无法可靠比较时保持 unknown。'};
+  return {indexAvailable:true,indexGeneratedAt:index.generatedAt||null,indexStats:index.stats||null,matches:limited,summary,note:'affected/not-affected 仅基于本地 advisory 的明确 package + version/range 证据；PEP 440、Maven、Go/semver 使用各自版本语义，GIT range 没有 ancestry 时保持 unknown。'};
 }
 
 module.exports={
-  INDEX_SCHEMA,normalizeEcosystem,compareVersion,rangesToIntervals,normalizeAdvisory,
+  INDEX_SCHEMA,normalizeEcosystem,compareVersion,intervalContains,rangesToIntervals,normalizeAdvisory,
   buildAdvisoryIndexFromDirectory,loadAdvisoryIndexFile,buildPackageIndex,evaluateAffected,matchAdvisoriesForTechStack
 };
