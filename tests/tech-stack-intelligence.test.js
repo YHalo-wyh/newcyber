@@ -9,7 +9,7 @@ const { parseManifest,scanBannerText,analyzeWorkspaceTechStack }=require('../src
 const { normalizeCveEntry,INDEX_SCHEMA }=require('../src/core/poc_reference_index');
 const { scanWorkspace }=require('../src/core/finals_analyzer_batch18');
 
-test('manifest parsers recover resolved package versions, PURL and known CPE candidates',()=>{
+test('manifest parsers recover resolved package versions, canonical PURL and known CPE candidates',()=>{
   const lock=parseManifest('npm-lock',JSON.stringify({
     lockfileVersion:3,
     packages:{
@@ -19,13 +19,23 @@ test('manifest parsers recover resolved package versions, PURL and known CPE can
     }
   }),'package-lock.json');
   assert.ok(lock.some((item)=>item.name==='express'&&item.version==='4.18.2'&&item.purl==='pkg:npm/express@4.18.2'));
-  assert.ok(lock.some((item)=>item.name==='@scope/pkg'&&item.version==='2.3.4'));
+  assert.ok(lock.some((item)=>item.name==='@scope/pkg'&&item.version==='2.3.4'&&item.purl==='pkg:npm/%40scope/pkg@2.3.4'));
 
   const pom=parseManifest('maven-pom',`<project><dependencies><dependency><groupId>org.apache.logging.log4j</groupId><artifactId>log4j-core</artifactId><version>2.14.1</version></dependency></dependencies></project>`,'pom.xml');
   const log4j=pom.find((item)=>item.name==='org.apache.logging.log4j:log4j-core');
   assert.equal(log4j.version,'2.14.1');
-  assert.equal(log4j.purl,'pkg:maven/org.apache.logging.log4j%3Alog4j-core@2.14.1');
+  assert.equal(log4j.purl,'pkg:maven/org.apache.logging.log4j/log4j-core@2.14.1');
   assert.match(log4j.cpe.uri,/cpe:2\.3:a:apache:log4j:2\.14\.1/);
+});
+
+test('expanded lockfile parsers cover Yarn, pnpm and Go module versions',()=>{
+  const yarn=parseManifest('yarn-lock','express@^4.18.0:\n  version "4.18.2"\n','yarn.lock');
+  assert.ok(yarn.some((item)=>item.name==='express'&&item.version==='4.18.2'));
+  const pnpm=parseManifest('pnpm-lock','packages:\n  express@4.18.2:\n    resolution: {}\n','pnpm-lock.yaml');
+  assert.ok(pnpm.some((item)=>item.name==='express'&&item.version==='4.18.2'));
+  const go=parseManifest('go-mod','module demo\nrequire github.com/gin-gonic/gin v1.9.1\nrequire (\n  golang.org/x/net v0.17.0\n)\n','go.mod');
+  assert.ok(go.some((item)=>item.name==='github.com/gin-gonic/gin'&&item.version==='1.9.1'));
+  assert.ok(go.some((item)=>item.name==='golang.org/x/net'&&item.version==='0.17.0'));
 });
 
 test('banner scanner extracts exact service versions conservatively',()=>{
