@@ -95,3 +95,17 @@ test('compatibility entrypoint now targets Batch19',()=>{
   const entry=fssync.readFileSync(path.join(__dirname,'..','src/core/finals_analyzer_batch15.js'),'utf8');
   assert.match(entry,/finals_analyzer_batch19/);
 });
+
+test('Electron bridge persists advisory index and workspace renderer exposes one-click import',()=>{
+  const root=path.join(__dirname,'..');
+  const main=fssync.readFileSync(path.join(root,'main.js'),'utf8');
+  const preload=fssync.readFileSync(path.join(root,'preload.js'),'utf8');
+  const renderer=fssync.readFileSync(path.join(root,'renderer/workspace_autopilot.js'),'utf8');
+  assert.doesNotThrow(()=>new Function(renderer));
+  assert.match(main,/advisory:index-import/);
+  assert.match(main,/advisoryIndexCache/);
+  assert.match(main,/advisoryIndex:advisoryIndexCache/);
+  assert.match(preload,/importAdvisoryIndex/);
+  assert.match(renderer,/离线 Advisory 版本适用性/);
+  assert.match(renderer,/data-advisory-index-import/);
+});
