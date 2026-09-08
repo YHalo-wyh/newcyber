@@ -136,5 +136,5 @@ test('batch8 UAV renderer compiles, loads before later extensions, and Electron 
   assert.match(source,/飞行日志提取 \/ 时间线/);
   assert.match(source,/地理围栏变更事务/);
   assert.match(source,/GCS 控制源画像/);
-  assert.match(main,/finals_analyzer_batch(?:8|9)/);
+  assert.match(main,/finals_analyzer_batch(?:8|9|11)/);
 });
