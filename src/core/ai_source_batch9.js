@@ -1,5 +1,6 @@
 const base=require('./ai_source');
 const { auditAiSupplyChain }=require('./ai_supply_chain');
+const { auditPromptInjectionSource }=require('./ai_prompt_injection');
 
 const FIXES=Object.freeze({
   'ai-output-shell-injection':{
@@ -27,6 +28,21 @@ const FIXES=Object.freeze({
     action:'把 trusted instruction 与 untrusted content 分离成明确字段/消息角色；工具调用前再做结构化授权。',
     regression:'把“忽略上文/调用工具”等内容放入文档或用户字段时，不能覆盖系统策略或直接触发高权限动作。'
   },
+  'prompt-injection-untrusted-prompt-flow':{
+    target:'Untrusted content → prompt/messages → model',
+    action:'按真实消息角色分离 trusted instruction、user data、RAG context 和 tool output；不要依赖 XML/Markdown 分隔符本身充当安全边界。',
+    regression:'direct/role-smuggling/delimiter-escape 模板不能改变系统策略；输出不得命中训练 marker/canary。'
+  },
+  'prompt-injection-rag-surface':{
+    target:'RAG/retrieved context → model',
+    action:'把检索片段视为不可信知识数据；系统授权逻辑、工具权限与秘密材料不得由检索文本决定。',
+    regression:'indirect-document/rag-retrieval 模板进入 top-k 后，只能被总结/引用，不能升级为行为指令。'
+  },
+  'prompt-injection-tool-policy-candidate':{
+    target:'Model/agent → tool dispatch',
+    action:'在模型之外增加 tool allowlist、参数 schema、资源级权限检查和必要的人机确认；工具返回值再次按不可信数据处理。',
+    regression:'tool-output-injection 模板不能触发 training_noop 或任何未声明 authorizedTools。'
+  },
   'llm-derived-crypto-key':{
     target:'模型输出 → KDF/key derivation',
     action:'若该值用于安全边界，改用密码学随机源或独立 secret；模型输出只能作为非秘密业务数据。',
@@ -48,13 +64,16 @@ function attachFix(finding) {
 function auditAiChallengeSource(input) {
   const result=base.auditAiChallengeSource(input);
   const supply=auditAiSupplyChain(input);
+  const promptInjection=auditPromptInjectionSource(input);
   const existing=new Set((result.findings||[]).map((x)=>`${x.id}:${x.line||0}`));
   const findings=(result.findings||[]).map(attachFix);
-  for (const finding of supply.findings||[]) {
-    const key=`${finding.id}:${finding.line||0}`;
-    if (existing.has(key)) continue;
-    findings.push(finding);
-    existing.add(key);
+  for (const source of [supply,promptInjection]) {
+    for (const finding of source.findings||[]) {
+      const key=`${finding.id}:${finding.line||0}`;
+      if (existing.has(key)) continue;
+      findings.push(attachFix(finding));
+      existing.add(key);
+    }
   }
   const order={high:0,medium:1,low:2,info:3};
   findings.sort((a,b)=>(order[a.severity]??9)-(order[b.severity]??9)||(a.line||0)-(b.line||0));
@@ -62,6 +81,7 @@ function auditAiChallengeSource(input) {
     ...result,
     findings,
     supplyChain:supply,
+    promptInjection,
     remediationSummary:{
       actionable:findings.filter((x)=>x.fix?.action).length,
       regressions:findings.filter((x)=>x.fix?.regression).length
