@@ -6,6 +6,7 @@ contextBridge.exposeInMainWorld('newcyber', {
   inspectFile: (rootPath, relativePath) => ipcRenderer.invoke('workspace:inspect', rootPath, relativePath),
   saveReport: (payload) => ipcRenderer.invoke('report:save', payload),
   saveArtifact: (artifact) => ipcRenderer.invoke('artifact:save', artifact),
+  exportAutopilotBundle: (payload) => ipcRenderer.invoke('autopilot:export-bundle', payload),
   chooseAndAnalyzeFirmware: () => ipcRenderer.invoke('firmware:choose-analyze'),
   analyzeDroppedFirmware: (file) => {
     const filePath = file ? webUtils.getPathForFile(file) : '';
