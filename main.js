@@ -3,7 +3,7 @@ const path = require('path');
 const fs = require('fs/promises');
 const { execFile } = require('child_process');
 const { promisify } = require('util');
-const { scanWorkspace, inspectFile, buildMarkdownReport } = require('./src/core/finals_analyzer_batch12');
+const { scanWorkspace, inspectFile, buildMarkdownReport } = require('./src/core/finals_analyzer_batch13');
 const { runTool } = require('./src/core/tool_router');
 const { bufferFromArtifact } = require('./src/core/artifacts');
 const { analyzeFirmwareBuffer, MAX_FIRMWARE_BYTES } = require('./src/core/firmware_workbench');
@@ -128,6 +128,31 @@ async function runAiModelScan(filePath) {
   };
 }
 
+function compactRecursiveAnalysis(analysis) {
+  const captureFiles = (analysis.files || []).filter((file) => file.metadata?.captureIntelligence);
+  const credentialCount = captureFiles.reduce((sum,file)=>sum+(file.metadata.captureIntelligence.network?.credentials?.length||0),0);
+  const rtspCount = captureFiles.reduce((sum,file)=>sum+(file.metadata.captureIntelligence.network?.rtspEndpoints?.length||0),0);
+  const mavlinkFrames = captureFiles.reduce((sum,file)=>sum+(file.metadata.captureIntelligence.network?.mavlink?.parsedFrames||0),0);
+  const canFrames = captureFiles.reduce((sum,file)=>sum+(file.metadata.captureIntelligence.can?.parsedFrames||0),0);
+  return {
+    workspaceName:analysis.workspaceName,
+    fileCount:analysis.files?.length || 0,
+    findingCount:analysis.findings?.length || 0,
+    captureFiles:captureFiles.map((file)=>({
+      path:file.path,
+      format:file.metadata.captureIntelligence.format,
+      packetCount:file.metadata.captureIntelligence.packetCount,
+      highlights:(file.metadata.captureIntelligence.highlights||[]).slice(0,12)
+    })).slice(0,80),
+    credentialCount,
+    rtspCount,
+    mavlinkFrames,
+    canFrames,
+    recommendations:(analysis.recommendations||[]).slice(0,20),
+    topFindings:(analysis.findings||[]).slice(0,40).map((finding)=>({ severity:finding.severity, title:finding.title, file:finding.file, evidence:finding.evidence }))
+  };
+}
+
 function registerIpc() {
   ipcMain.handle('workspace:choose', async () => {
     const result = await dialog.showOpenDialog(win, { title: '选择赛题目录', properties: ['openDirectory'] });
@@ -213,7 +238,15 @@ function registerIpc() {
         maxBuffer: 4 * 1024 * 1024,
         shell: false
       });
-      return { ok: true, outputDir, stdout: String(stdout || '').slice(-12000), stderr: String(stderr || '').slice(-4000) };
+      approvedRoots.add(outputDir);
+      let recursive = null;
+      try {
+        const analysis = await scanWorkspace(outputDir);
+        recursive = compactRecursiveAnalysis(analysis);
+      } catch (error) {
+        recursive = { error:error?.message || String(error) };
+      }
+      return { ok: true, outputDir, stdout: String(stdout || '').slice(-12000), stderr: String(stderr || '').slice(-4000), recursive };
     } catch (error) {
       if (error?.code === 'ENOENT') return { ok: false, missingTool: 'binwalk', outputDir, error: '未找到 binwalk；仍可导出内置解析器恢复出的完整段。' };
       return { ok: false, outputDir, error: error?.message || String(error), stdout: String(error?.stdout || '').slice(-12000), stderr: String(error?.stderr || '').slice(-4000) };
