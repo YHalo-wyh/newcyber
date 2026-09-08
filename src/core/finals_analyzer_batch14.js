@@ -5,6 +5,7 @@ const { analyzeModelExtractionTranscript }=require('./ai_model_extraction');
 const { analyzeModelInversion }=require('./ai_model_inversion');
 const { scanRegulatoryApi }=require('./low_altitude_regulatory');
 const { analyzeGnssLog }=require('./gnss_audit');
+const { analyzeGnssSpectrum }=require('./gnss_sdr');
 const { auditFirmwareUpdate }=require('./firmware_update_audit');
 const { buildInvestigationGraph }=require('./investigation_graph');
 
@@ -33,6 +34,13 @@ function pushFindings(file,prefix,result) {
 function looksGnss(text,file) {
   if (['.nmea','.gps'].includes(file.extension)) return true;
   return (text.match(/^\$[A-Z]{2}(?:GGA|RMC|GSV|GSA),/gm)||[]).length>=2;
+}
+
+function looksSpectrum(text,file) {
+  if (!['.csv','.tsv','.txt','.log','.json'].includes(file.extension)) return false;
+  const header=/(?:frequency|freq)(?:_hz)?[^\r\n]{0,80}(?:power|dbm|power_db|level)/i.test(text.slice(0,1200));
+  const gnssFreq=/(?:1176\d{3,}|1227\d{3,}|1561\d{3,}|1575\d{3,}|1602\d{3,})/.test(text.slice(0,200000));
+  return header&&gnssFreq;
 }
 
 function looksRegulatory(text,file) {
@@ -75,6 +83,14 @@ async function enrichExamDirections(rootPath,file) {
         pushFindings(file,'gnss',result); changed=true;
       }
     } catch (error) { metadata.gnssAuditError=error.message; }
+  }
+
+  if (looksSpectrum(text,file)) {
+    try {
+      const result=analyzeGnssSpectrum(text);
+      metadata.gnssSpectrumAudit={ ...result, bands:(result.bands||[]).slice(0,20) };
+      pushFindings(file,'gnss-spectrum',result); changed=true;
+    } catch (error) { metadata.gnssSpectrumAuditError=error.message; }
   }
 
   if (looksRegulatory(text,file)) {
@@ -122,11 +138,12 @@ function refresh(analysis) {
 
 async function scanWorkspace(rootPath) {
   const analysis=await base.scanWorkspace(rootPath);
-  const counts={gnss:0,regulatory:0,update:0,extraction:0,inversion:0};
+  const counts={gnss:0,gnssSpectrum:0,regulatory:0,update:0,extraction:0,inversion:0};
   for (const file of analysis.files) {
     try {
       if (!(await enrichExamDirections(rootPath,file))) continue;
       if (file.metadata?.gnssAudit) counts.gnss+=1;
+      if (file.metadata?.gnssSpectrumAudit) counts.gnssSpectrum+=1;
       if (file.metadata?.regulatoryAudit) counts.regulatory+=1;
       if (file.metadata?.firmwareUpdateAudit) counts.update+=1;
       if (file.metadata?.modelExtractionAudit) counts.extraction+=1;
@@ -134,6 +151,7 @@ async function scanWorkspace(rootPath) {
     } catch (error) { file.metadata={...(file.metadata||{}),examDirectionError:error.message}; }
   }
   if (counts.gnss) analysis.recommendations.push(`GNSS：${counts.gnss} 个 NMEA/GPS 证据文件已自动检查 checksum、时间轴、物理位置速度和卫星状态。`);
+  if (counts.gnssSpectrum) analysis.recommendations.push(`GNSS SDR：${counts.gnssSpectrum} 个 FFT/功率谱已检查 L1/L2/L5/B1/GLONASS L1 的窄带峰与宽带噪声抬升。`);
   if (counts.regulatory) analysis.recommendations.push(`低空监管：${counts.regulatory} 个 API/源码文件已进入许可/空域/对象授权/重放/审批状态机审计。`);
   if (counts.update) analysis.recommendations.push(`固件升级：${counts.update} 个脚本/源码已自动恢复 download→verify→extract→flash→rollback 信任链。`);
   if (counts.extraction) analysis.recommendations.push(`模型窃取：${counts.extraction} 个 query transcript 已检查 soft-label/logit 暴露、重复查询稳定性和类别覆盖。`);
@@ -149,6 +167,7 @@ function buildExamDirectionSection(analysis) {
   for (const file of analysis.files||[]) {
     const m=file.metadata||{};
     if (m.gnssAudit) lines.push(`### GNSS：\`${file.path}\``,'',`- records=${m.gnssAudit.records}, jumps=${m.gnssAudit.jumps?.length||0}, checksumFailed=${m.gnssAudit.checksumFailed||0}`,'');
+    if (m.gnssSpectrumAudit) lines.push(`### GNSS SDR Spectrum：\`${file.path}\``,'',`- samples=${m.gnssSpectrumAudit.samples}, bands=${m.gnssSpectrumAudit.bands?.length||0}, findings=${m.gnssSpectrumAudit.findings?.length||0}`,'');
     if (m.regulatoryAudit) lines.push(`### Low-altitude Regulatory API：\`${file.path}\``,'',`- high=${m.regulatoryAudit.summary?.high||0}, medium=${m.regulatoryAudit.summary?.medium||0}, endpoints=${m.regulatoryAudit.endpoints?.length||0}`,'');
     if (m.firmwareUpdateAudit) lines.push(`### Firmware Update Trust Chain：\`${file.path}\``,'',`- stages=${Object.entries(m.firmwareUpdateAudit.stages||{}).filter(([,v])=>v).map(([k])=>k).join(' → ')||'unknown'}`,`- high=${m.firmwareUpdateAudit.summary?.high||0}, medium=${m.firmwareUpdateAudit.summary?.medium||0}`,'');
     if (m.modelExtractionAudit) lines.push(`### Model Extraction：\`${file.path}\``,'',`- queries=${m.modelExtractionAudit.rows}, unique=${m.modelExtractionAudit.uniqueQueries}, classes=${m.modelExtractionAudit.classCount}, exposure=${m.modelExtractionAudit.extractionExposure}`,'');
