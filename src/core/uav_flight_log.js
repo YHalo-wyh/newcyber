@@ -1,3 +1,5 @@
+const { parseUlog } = require('./uav_ulog');
+
 function splitCsv(line) {
   const out=[]; let cur=''; let quoted=false;
   for (let i=0;i<line.length;i+=1) {
@@ -81,15 +83,8 @@ function analyzeDataFlashText(text) {
 
 function analyzeFlightLog(input) {
   const buffer=Buffer.isBuffer(input) ? input : Buffer.from(String(input||''),'utf8');
-  if (buffer.length>=8 && buffer.subarray(0,4).toString('ascii')==='ULog') {
-    return {
-      format:'px4-ulog',
-      size:buffer.length,
-      version:buffer[7] ?? null,
-      messageCounts:{}, modes:[], params:[], gps:[], attitude:[], events:[], findings:[{ id:'ulog-detected', severity:'info', evidence:`size=${buffer.length}`, meaning:'识别到 PX4 ULog 容器；当前仅做安全识别，后续应由专用 ULog message parser 展开。' }],
-      notes:['未对 ULog payload 做猜测式解码。']
-    };
-  }
+  const ulog=parseUlog(buffer);
+  if (ulog) return ulog;
   const text=buffer.toString('utf8');
   if (/^FMT\s*,/m.test(text) || /^(?:ATT|GPS|MODE|PARM|ERR|EV)\s*,/m.test(text)) return analyzeDataFlashText(text);
   return { format:'unknown', size:buffer.length, messageCounts:{}, modes:[], params:[], gps:[], attitude:[], events:[], findings:[], notes:['未识别为 ArduPilot DataFlash 文本或 PX4 ULog。'] };
