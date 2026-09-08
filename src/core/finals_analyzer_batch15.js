@@ -5,6 +5,7 @@ const { analyzeOcrExtractionTranscript }=require('./ai_ocr_extraction');
 const { scanRegulatoryApi }=require('./low_altitude_regulatory');
 const { analyzeDatalinkCapture }=require('./uav_datalink');
 const { buildInvestigationGraph }=require('./investigation_graph');
+const { buildWorkspaceAutopilot }=require('./workspace_autopilot');
 
 const TEXT_EXTENSIONS=new Set(['.txt','.log','.json','.jsonl','.csv','.tsv','.yaml','.yml','.py','.js','.ts','.sh','.bash','.c','.cc','.cpp','.h','.hpp','.md','.cfg','.conf','.ini','.trace','.http']);
 const CAPTURE_EXTENSIONS=new Set(['.pcap','.pcapng','.cap']);
@@ -113,6 +114,9 @@ async function scanWorkspace(rootPath) {
   if (counts.datalink) analysis.recommendations.push(`无人机数据链：${counts.datalink} 个抓包已做被动流量画像；${counts.proprietaryDatalink} 个出现 DJI/Lightbridge/OcuSync 明确指纹。`);
   if (counts.h265) analysis.recommendations.push(`图传：${counts.h265} 个抓包恢复出 H265 RTP 会话，已按 Annex-B artifact 进入后续视频取证。`);
   refresh(analysis);
+  analysis.autopilot=buildWorkspaceAutopilot(analysis);
+  const first=analysis.autopilot.actions?.[0];
+  if (first) analysis.recommendations.unshift(`自动优先级：${first.title}${first.detail?` —— ${first.detail}`:''}`);
   analysis.version=Math.max(Number(analysis.version)||1,15);
   analysis.batch15Counts=counts;
   return analysis;
@@ -129,10 +133,32 @@ function buildBatch15Section(analysis) {
   return lines.length?['## Batch 15 · OCR / Datalink','',...lines].join('\n'):'';
 }
 
-function buildMarkdownReport(analysis,notes='') {
-  const report=base.buildMarkdownReport(analysis,notes);
-  const section=buildBatch15Section(analysis);
-  return section?`${report.trim()}\n\n${section}\n`:report;
+function buildAutopilotSection(analysis) {
+  const a=analysis.autopilot;
+  if (!a) return '';
+  const lines=['## 自动赛题工作流',''];
+  if (a.track) lines.push(`- 最可能方向：${a.track.title}（score=${a.track.score}）`);
+  lines.push(`- 自动检查：${a.summary?.automaticCheckKinds||0} 类 / ${a.summary?.automaticCheckHits||0} 次命中`);
+  lines.push(`- 高危线索：${a.summary?.highFindings||0}`);
+  lines.push(`- Flag 候选：${a.summary?.flagCandidates||0}`);
+  lines.push(`- 可导出产物：${a.summary?.exportableArtifacts||0}`,'');
+  if (a.actions?.length) {
+    lines.push('### 最短处理顺序','');
+    a.actions.forEach((item,index)=>lines.push(`${index+1}. **${item.title}**${item.detail?` — ${item.detail}`:''}`));
+    lines.push('');
+  }
+  if (a.automaticChecks?.length) {
+    lines.push('### 已自动运行/命中的分析器','');
+    a.automaticChecks.forEach((item)=>lines.push(`- ${item.title}: ${item.hits}`));
+    lines.push('');
+  }
+  return lines.join('\n');
 }
 
-module.exports={...base,scanWorkspace,buildMarkdownReport,enrichBatch15,buildBatch15Section};
+function buildMarkdownReport(analysis,notes='') {
+  const report=base.buildMarkdownReport(analysis,notes);
+  const sections=[buildBatch15Section(analysis),buildAutopilotSection(analysis)].filter(Boolean);
+  return sections.length?`${report.trim()}\n\n${sections.join('\n\n')}\n`:report;
+}
+
+module.exports={...base,scanWorkspace,buildMarkdownReport,enrichBatch15,buildBatch15Section,buildAutopilotSection};
