@@ -2,11 +2,11 @@ function lineNumberAt(text,index) { return text.slice(0,Math.max(0,index)).split
 function evidenceAt(text,index,radius=260) { return text.slice(Math.max(0,index-100),Math.min(text.length,index+radius)).trim(); }
 
 const SURFACE_PATTERNS = Object.freeze([
-  ['flight-permit',/(?:flight[_ -]?(?:permit|plan|approval)|飞行(?:许可|计划|审批))/gi],
+  ['flight-permit',/(?:flight(?:[_ /-]?)(?:permit|plan|approval)|(?:permit|approval)(?:[_ /-]?)flight|\/flights?\/|飞行(?:许可|计划|审批))/gi],
   ['airspace',/(?:airspace|geofence|no[_ -]?fly|禁飞区|空域)/gi],
   ['drone-identity',/(?:drone[_ -]?id|uas[_ -]?id|aircraft[_ -]?id|serial[_ -]?number|无人机编号)/gi],
   ['operator',/(?:operator[_ -]?id|pilot[_ -]?id|owner[_ -]?id|飞手|运营人)/gi],
-  ['approval-state',/(?:approved|rejected|pending|status|审批状态)/gi]
+  ['approval-state',/(?:approved|rejected|pending|status|approve|approval|审批状态|审批)/gi]
 ]);
 
 function scanRegulatoryApi(input) {
@@ -16,6 +16,7 @@ function scanRegulatoryApi(input) {
   const surfaces={};
 
   for (const [name,regex] of SURFACE_PATTERNS) {
+    regex.lastIndex=0;
     const matches=[...text.matchAll(regex)];
     surfaces[name]=matches.length;
   }
@@ -28,13 +29,13 @@ function scanRegulatoryApi(input) {
   const signatureEvidence=/(?:signature|verify_signature|hmac|ed25519|ecdsa|rsa|public[_ -]?key|signed)/i.test(text);
 
   for (const match of idPaths.slice(0,80)) {
-    const path=match[1];
-    if (/\{(?:id|permit_id|flight_id|drone_id|operator_id|airspace_id)\}/i.test(path) && !ownerEvidence) {
+    const route=match[1];
+    if (/\{(?:id|permit_id|flight_id|drone_id|operator_id|airspace_id)\}/i.test(route) && !ownerEvidence) {
       findings.push({
         id:'regulatory-object-authorization-candidate',severity:'high',title:'对象级授权/BOLA 候选',line:lineNumberAt(text,match.index),
         evidence:evidenceAt(text,match.index),
-        meaning:`接口 ${path} 暴露对象标识，但当前文本中未找到明确 owner/tenant/object authorization 约束；需核对是否仅凭 ID 读取或修改他人飞行许可/无人机对象。`,
-        fix:{target:path,action:'服务端按认证主体重新解析对象归属/租户/角色，不能只信客户端传入 ID。',regression:'更换为其他主体拥有的 object ID 时必须稳定拒绝，且错误响应不泄露对象详情。'}
+        meaning:`接口 ${route} 暴露对象标识，但当前文本中未找到明确 owner/tenant/object authorization 约束；需核对是否仅凭 ID 读取或修改他人飞行许可/无人机对象。`,
+        fix:{target:route,action:'服务端按认证主体重新解析对象归属/租户/角色，不能只信客户端传入 ID。',regression:'更换为其他主体拥有的 object ID 时必须稳定拒绝，且错误响应不泄露对象详情。'}
       });
     }
   }
@@ -45,7 +46,7 @@ function scanRegulatoryApi(input) {
     meaning:'这只是静态候选；需要结合路由中间件或网关配置确认真实认证是否在其他层实现。'
   });
 
-  if (roleEvidence && /(approved|rejected|approval|status|审批)/i.test(text) && !/(?:require.*(?:admin|reviewer|approver)|hasRole|has_role|scope.*(?:approve|review)|permission.*(?:approve|review))/i.test(text)) findings.push({
+  if (roleEvidence && /(approved|rejected|approval|approve|status|审批)/i.test(text) && !/(?:require.*(?:admin|reviewer|approver)|hasRole|has_role|scope.*(?:approve|review)|permission.*(?:approve|review))/i.test(text)) findings.push({
     id:'regulatory-approval-role-candidate',severity:'medium',title:'审批状态变更缺少明确角色约束候选',
     evidence:'存在角色/审批语义，但未识别到 approve/review 专项角色或 scope 校验。',
     meaning:'重点核对普通 operator/pilot 是否能直接写 approved/status 字段。'
