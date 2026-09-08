@@ -1,9 +1,12 @@
 const test=require('node:test');
 const assert=require('node:assert/strict');
 const fs=require('node:fs');
+const path=require('node:path');
 const vm=require('node:vm');
 const { buildWorkspaceAutopilot }=require('../src/core/workspace_autopilot');
 const { buildAutopilotSection }=require('../src/core/finals_analyzer_batch15');
+
+const root=path.join(__dirname,'..');
 
 function artifact(name='video.h265') {
   return {name,size:4096,sha256:`sha-${name}`,completeness:'complete',mediaType:'video/H265'};
@@ -48,7 +51,7 @@ test('renderer removes legacy competition-mode wording and shows automatic scan 
     esc:(x)=>String(x),
     toast:()=>{},
     render:()=>{},
-    window:{newcyber:{saveArtifact:async()=>null}},
+    window:{newcyber:{saveArtifact:async()=>null,exportAutopilotBundle:async()=>({ok:true,artifacts:1,flags:1})}},
     document:{addEventListener:()=>{}},
     Number,console
   };
@@ -61,4 +64,19 @@ test('renderer removes legacy competition-mode wording and shows automatic scan 
   assert.doesNotMatch(workspace,/COMPETITION MODE|比赛模式/);
   assert.match(workspace,/一键自动分析已完成/);
   assert.match(workspace,/GNSS\/GPS 异常审计/);
+  assert.match(workspace,/一键导出结果包/);
+  assert.match(source,/exportAutopilotBundle/);
+});
+
+test('Electron bridge exports one result directory with report, manifest, flags and complete artifacts',()=>{
+  const main=fs.readFileSync(path.join(root,'main.js'),'utf8');
+  const preload=fs.readFileSync(path.join(root,'preload.js'),'utf8');
+  assert.match(main,/autopilot:export-bundle/);
+  assert.match(main,/bufferFromArtifact\(entry\.artifact,\{requireComplete:true\}\)/);
+  assert.match(main,/report\.md/);
+  assert.match(main,/manifest\.json/);
+  assert.match(main,/flags\.txt/);
+  assert.match(main,/safeBundleName/);
+  assert.match(preload,/exportAutopilotBundle/);
+  assert.match(preload,/autopilot:export-bundle/);
 });
