@@ -1,6 +1,6 @@
 const fsp = require('fs/promises');
 const path = require('path');
-const base = require('./finals_analyzer_batch15');
+const base = require('./finals_analyzer_batch15_base');
 const { analyzeArtifactTree } = require('./recursive_artifact_analysis');
 const { analyzeFirmwareBuffer } = require('./firmware_workbench');
 const { buildInvestigationGraph } = require('./investigation_graph');
