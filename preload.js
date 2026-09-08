@@ -1,4 +1,4 @@
-const { contextBridge, ipcRenderer } = require('electron');
+const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
 contextBridge.exposeInMainWorld('newcyber', {
   chooseWorkspace: () => ipcRenderer.invoke('workspace:choose'),
@@ -7,6 +7,10 @@ contextBridge.exposeInMainWorld('newcyber', {
   saveReport: (payload) => ipcRenderer.invoke('report:save', payload),
   saveArtifact: (artifact) => ipcRenderer.invoke('artifact:save', artifact),
   chooseAndAnalyzeFirmware: () => ipcRenderer.invoke('firmware:choose-analyze'),
+  analyzeDroppedFirmware: (file) => {
+    const filePath = file ? webUtils.getPathForFile(file) : '';
+    return ipcRenderer.invoke('firmware:analyze-dropped', filePath);
+  },
   exportFirmwareRecovered: (filePath) => ipcRenderer.invoke('firmware:export-recovered', filePath),
   extractFirmwareWithBinwalk: (filePath) => ipcRenderer.invoke('firmware:extract-binwalk', filePath),
   getAiBackendStatus: () => ipcRenderer.invoke('ai:backend-status'),
