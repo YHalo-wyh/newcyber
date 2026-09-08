@@ -1,7 +1,7 @@
 const fsp = require('fs/promises');
 const path = require('path');
 const base = require('./finals_analyzer_batch12');
-const { analyzeCaptureIntelligence } = require('./capture_intelligence');
+const { analyzeCaptureIntelligence } = require('./capture_intelligence_v2');
 const { buildInvestigationGraph } = require('./investigation_graph');
 
 const CAPTURE_EXTENSIONS = new Set(['.pcap','.pcapng','.cap']);
@@ -39,6 +39,12 @@ function compactCapture(result) {
       eventCandidates:(result.can.eventCandidates||[]).slice(0,160),
       isoTpSessions:(result.can.isoTpSessions||[]).slice(0,120),
       udsProgramming:result.can.udsProgramming || null
+    } : null,
+    video:result.video ? {
+      sessions:(result.video.sessions||[]).slice(0,40),
+      artifacts:(result.video.artifacts||[]).slice(0,20),
+      findings:(result.video.findings||[]).slice(0,80),
+      notes:(result.video.notes||[]).slice(0,20)
     } : null
   };
 }
@@ -55,6 +61,11 @@ async function enrichCapture(rootPath, file) {
     const id = `capture-intel:${finding.id}:${file.path}`;
     if (existing.has(id)) continue;
     file.findings.push({ ...finding, id, file:file.path, count:1 });
+  }
+  if (result.video?.artifacts?.length) {
+    file.artifacts ||= [];
+    const seen=new Set(file.artifacts.map((a)=>a.sha256));
+    for (const artifact of result.video.artifacts) if (artifact?.sha256&&!seen.has(artifact.sha256)) { file.artifacts.push(artifact); seen.add(artifact.sha256); }
   }
   return true;
 }
@@ -73,6 +84,7 @@ async function scanWorkspace(rootPath) {
   let rtsp = 0;
   let mavlink = 0;
   let can = 0;
+  let videoSessions=0;
   for (const file of analysis.files) {
     try {
       if (!(await enrichCapture(rootPath, file))) continue;
@@ -82,11 +94,12 @@ async function scanWorkspace(rootPath) {
       rtsp += intel.network?.rtspEndpoints?.length || 0;
       mavlink += intel.network?.mavlink?.parsedFrames || 0;
       can += intel.can?.parsedFrames || 0;
+      videoSessions += intel.video?.sessions?.length || 0;
     } catch (error) {
       file.metadata={...(file.metadata||{}),captureIntelligenceError:error.message};
     }
   }
-  if (captures) analysis.recommendations.push(`抓包自动解析：${captures} 个 PCAP/PCAPNG 已进入协议链；明文认证材料 ${credentials}、RTSP endpoint ${rtsp}、MAVLink ${mavlink} 帧、CAN ${can} 帧。`);
+  if (captures) analysis.recommendations.push(`抓包自动解析：${captures} 个 PCAP/PCAPNG 已进入协议链；明文认证材料 ${credentials}、RTSP endpoint ${rtsp}、MAVLink ${mavlink} 帧、CAN ${can} 帧、RTP/H264 session ${videoSessions}。`);
   refresh(analysis);
   analysis.version=Math.max(Number(analysis.version)||1,13);
   return analysis;
@@ -104,6 +117,7 @@ function buildCaptureSection(analysis) {
       for (const item of intel.network.credentials.slice(0,20)) lines.push(`  - packet=${item.packetIndex}, type=${item.type}, value=\`${String(item.value||'').replace(/`/g,"'")}\`, flow=${item.flow}`);
     }
     if (intel.network?.rtspEndpoints?.length) lines.push(`- RTSP：${intel.network.rtspEndpoints.slice(0,20).join(', ')}`);
+    if (intel.video?.sessions?.length) lines.push(`- RTP/H264：sessions=${intel.video.sessions.length}, artifacts=${intel.video.artifacts?.length||0}, frames=${intel.video.sessions.reduce((sum,x)=>sum+(x.frames||0),0)}`);
     lines.push('');
   }
   return lines.length ? ['## Capture Intelligence','',...lines].join('\n') : '';
