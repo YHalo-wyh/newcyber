@@ -8,6 +8,7 @@ const { auditAiSupplyChain } = require('../src/core/ai_supply_chain');
 const { decodeUdsAdvanced } = require('../src/core/vehicle_final');
 const { analyzeMavlinkAdvanced } = require('../src/core/low_altitude_final');
 const { decryptCryptoContext } = require('../src/core/context_crypto');
+const { buildInvestigationGraph } = require('../src/core/investigation_graph');
 const { generateSuite } = require('./generate-generalization-corpus');
 
 function findingIds(result) {
@@ -125,6 +126,34 @@ function evaluateCase(item) {
   return { pass: false, reason: 'unsupported-track' };
 }
 
+function findingsForRouting(item) {
+  if (!item.positive) return null;
+  if (item.track === 'web3') return { findings:auditSolidity(item.input).findings || [], file:'Challenge.sol', expectedTrack:'web3', tools:new Set(['evm-disasm','evm-calldata']) };
+  if (item.family === 'model-output-shell') return { findings:auditAiChallengeSource(item.input).findings || [], file:'service.py', expectedTrack:'ai', tools:new Set(['ai-source-scan']) };
+  if (item.family === 'adversarial-budget') return { findings:analyzeAdversarialPair(item.input).findings || [], file:'candidate.json', expectedTrack:'ai', tools:new Set(['ai-adversarial-audit']) };
+  if (item.family === 'membership-inference') return { findings:analyzePrivacyTranscript(item.input).findings || [], file:'queries.csv', expectedTrack:'ai', tools:new Set(['ai-privacy-audit']) };
+  if (item.family === 'dataset-backdoor') return { findings:analyzeDatasetSecurity(item.input).findings || [], file:'train.csv', expectedTrack:'ai', tools:new Set(['ai-dataset-security']) };
+  if (item.family === 'model-supply-chain') return { findings:auditAiSupplyChain(item.input).findings || [], file:'service.py', expectedTrack:'ai', tools:new Set(['ai-supply-chain']) };
+  return null;
+}
+
+function evaluateInvestigationRouting(item) {
+  const source = findingsForRouting(item);
+  if (!source) return null;
+  if (!source.findings.length) return { pass:false, reason:'no-findings-for-routing' };
+  const findings = source.findings.map((finding, index) => ({ ...finding, file:finding.file || source.file, id:finding.id || `route-${index}` }));
+  const graph = buildInvestigationGraph({ findings, files:[{ path:source.file, metadata:{} }], stats:{ findings:findings.length } });
+  const routed = graph.focus.find((node) => node.track === source.expectedTrack && source.tools.has(node.recommendedTool));
+  if (!routed) {
+    const observed = graph.focus.map((node) => `${node.track || 'none'}:${node.recommendedTool || 'none'}:${node.findingId || node.title}`).join('|');
+    return { pass:false, reason:`route-miss:${observed || 'empty'}` };
+  }
+  if (routed.exploitability === 'confirmed' && !/(confirmed|accepted|valid|complete|found flag|回读确认)/i.test(`${routed.evidence} ${routed.title}`)) {
+    return { pass:false, reason:`route-overclaimed-confirmed:${routed.findingId || routed.title}` };
+  }
+  return { pass:true, reason:`route:${routed.track}:${routed.recommendedTool}` };
+}
+
 function emptyStats() {
   return { passed: 0, total: 0, positivePassed: 0, positiveTotal: 0, negativePassed: 0, negativeTotal: 0 };
 }
@@ -152,7 +181,9 @@ function scoreSuite(options = {}) {
   const suite = generateSuite({ seed, count });
   const tracks = {};
   const families = {};
+  const routing = emptyStats();
   const failures = [];
+  const routingFailures = [];
 
   for (const item of suite.cases) {
     const result = evaluateCase(item);
@@ -161,6 +192,12 @@ function scoreSuite(options = {}) {
     record(tracks[item.track], item, result.pass);
     record(families[item.family], item, result.pass);
     if (!result.pass) failures.push({ id: item.id, track: item.track, family: item.family, positive: item.positive, reason: result.reason });
+
+    const route = evaluateInvestigationRouting(item);
+    if (route) {
+      record(routing, item, route.pass);
+      if (!route.pass) routingFailures.push({ id:item.id, track:item.track, family:item.family, reason:route.reason });
+    }
   }
 
   let passed = 0;
@@ -171,6 +208,7 @@ function scoreSuite(options = {}) {
     total += stats.total;
   }
   for (const stats of Object.values(families)) finalize(stats);
+  finalize(routing);
 
   return {
     version: suite.version || 2,
@@ -178,8 +216,10 @@ function scoreSuite(options = {}) {
     countPerFamily: count,
     tracks,
     families,
+    investigationRouting:routing,
     overall: { passed, total, score: total ? Number((passed / total).toFixed(4)) : 0 },
-    failures
+    failures,
+    routingFailures
   };
 }
 
@@ -199,7 +239,8 @@ if (require.main === module) {
   process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
   const weakTrack = Object.entries(report.tracks).find(([, stats]) => stats.score < options.minScore);
   const weakFamily = Object.entries(report.families).find(([, stats]) => stats.score < options.minScore);
-  if (report.overall.score < options.minScore || weakTrack || weakFamily || report.failures.length) process.exitCode = 1;
+  const weakRouting = report.investigationRouting.total > 0 && report.investigationRouting.score < options.minScore;
+  if (report.overall.score < options.minScore || weakTrack || weakFamily || weakRouting || report.failures.length || report.routingFailures.length) process.exitCode = 1;
 }
 
-module.exports = { findingIds, evaluateAiCase, evaluateCase, scoreSuite };
+module.exports = { findingIds, evaluateAiCase, evaluateCase, evaluateInvestigationRouting, scoreSuite };
