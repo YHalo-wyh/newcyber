@@ -41,6 +41,12 @@ function attitude(timeMs,roll,pitch,yaw,rollSpeed=0,pitchSpeed=0,yawSpeed=0) {
   return p;
 }
 
+function assertAnalyzerAtLeast(main,minimum) {
+  const match=main.match(/finals_analyzer_batch(\d+)/);
+  assert.ok(match,'main.js should load a finals analyzer wrapper');
+  assert.ok(Number(match[1])>=minimum,`expected analyzer batch >= ${minimum}, got ${match[1]}`);
+}
+
 test('Wi-Fi workbench reconstructs identity, offline auth material, Deauth and key candidate',()=>{
   const input=`BSSID: AA:BB:CC:DD:EE:FF  SSID: DroneNet  channel 6 WPA2\nWPA handshake: AA:BB:CC:DD:EE:FF\nDeauthentication reason code 7\nKEY FOUND! [ drone-pass-2026 ]`;
   const result=parseWifiEvidence(input);
@@ -136,5 +142,5 @@ test('batch8 UAV renderer compiles, loads before later extensions, and Electron 
   assert.match(source,/飞行日志提取 \/ 时间线/);
   assert.match(source,/地理围栏变更事务/);
   assert.match(source,/GCS 控制源画像/);
-  assert.match(main,/finals_analyzer_batch(?:8|9|11|12)/);
+  assertAnalyzerAtLeast(main,8);
 });

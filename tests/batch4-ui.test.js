@@ -7,6 +7,12 @@ const vm = require('node:vm');
 const root = path.join(__dirname, '..');
 const read = (relative) => fs.readFileSync(path.join(root, relative), 'utf8');
 
+function assertAnalyzerAtLeast(main, minimum) {
+  const match = main.match(/finals_analyzer_batch(\d+)/);
+  assert.ok(match, 'main.js should load a finals analyzer wrapper');
+  assert.ok(Number(match[1]) >= minimum, `expected analyzer batch >= ${minimum}, got ${match[1]}`);
+}
+
 test('batch-four renderer extension stays compilable', () => {
   const source = read('renderer/batch4_tools.js');
   assert.doesNotThrow(() => new vm.Script(source, { filename: 'renderer/batch4_tools.js' }));
@@ -30,5 +36,5 @@ test('batch4 UI exposes model structure, proxy implementation and MAVLink CRC ev
 
 test('Electron workspace keeps batch-four capability through a later analyzer wrapper', () => {
   const main = read('main.js');
-  assert.match(main, /finals_analyzer_batch(?:4|5|6|7|8|9|11|12)/);
+  assertAnalyzerAtLeast(main,4);
 });

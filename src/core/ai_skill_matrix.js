@@ -343,7 +343,7 @@ function diagnoseAiSkillMatrix(input) {
   for (const skill of skills) counts[skill.status]=(counts[skill.status]||0)+1;
   const nextQueue=skills
     .filter((x)=>x.status!=='evidence')
-    .sort((a,b)=>({candidate:0,'no-explicit-finding':1,'data-needed':2}[a.status]-({candidate:0,'no-explicit-finding':1,'data-needed':2}[b.status]))
+    .sort((a,b)=>({candidate:0,'no-explicit-finding':1,'data-needed':2}[a.status]-({candidate:0,'no-explicit-finding':1,'data-needed':2}[b.status])))
     .map((x)=>({ skill:x.id,title:x.title,status:x.status,nextAction:x.nextAction,tools:x.tools }));
   return {
     schema:'newcyber.ai-skill-matrix.v1',
