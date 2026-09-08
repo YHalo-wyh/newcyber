@@ -1,5 +1,5 @@
 const base = require('./firmware_unpack');
-const { scanEmbeddedCaptures } = require('./capture_intelligence');
+const { scanEmbeddedCaptures } = require('./capture_intelligence_v2');
 
 function extractAscii(buffer, minLength = 6, maxItems = 6000) {
   const items = [];
@@ -81,11 +81,13 @@ function analyzeFirmwareBuffer(input, options = {}) {
   if (embeddedCaptures.length) {
     const packetCount = embeddedCaptures.reduce((sum, item) => sum + (item.analysis?.packetCount || item.packetCount || 0), 0);
     const important = embeddedCaptures.flatMap((item) => item.analysis?.highlights || []).slice(0, 8);
+    const videoSessions = embeddedCaptures.reduce((sum,item)=>sum+(item.analysis?.video?.sessions?.length||0),0);
     nextActions.unshift(`已从固件自动切出 ${embeddedCaptures.length} 个抓包（${packetCount} packets）并继续解析协议；优先查看其中的认证材料、MAVLink/CAN、HTTP/FTP/RTSP 和明文敏感信息。`);
+    if (videoSessions) nextActions.unshift(`图传链已继续重组 ${videoSessions} 个 RTP/H264 session；完整/部分 Annex-B 产物已进入可导出 artifact。`);
     if (important.length) nextActions.unshift(...important);
   }
 
-  const captureArtifacts = embeddedCaptures.map((item) => item.artifact).filter(Boolean);
+  const captureArtifacts = embeddedCaptures.flatMap((item) => [item.artifact, ...(item.videoArtifacts || [])]).filter(Boolean);
   const artifacts = [];
   const seenArtifact = new Set();
   for (const artifact of [...(result.artifacts || []), ...captureArtifacts]) {
@@ -105,6 +107,8 @@ function analyzeFirmwareBuffer(input, options = {}) {
     })))
   ];
 
+  const videoSessions=embeddedCaptures.reduce((sum,item)=>sum+(item.analysis?.video?.sessions?.length||0),0);
+  const videoArtifacts=embeddedCaptures.reduce((sum,item)=>sum+(item.videoArtifacts?.length||0),0);
   return {
     ...result,
     artifacts,
@@ -117,7 +121,8 @@ function analyzeFirmwareBuffer(input, options = {}) {
         { id:'firmware-structure', status:'done', summary:`magic=${result.magic?.length || 0}, structures=${result.structures?.length || 0}` },
         { id:'security-strings', status:'done', summary:`clues=${securityStrings.length}` },
         { id:'embedded-captures', status:'done', summary:`captures=${embeddedCaptures.length}` },
-        { id:'capture-intelligence', status:embeddedCaptures.length ? 'done' : 'idle', summary:embeddedCaptures.length ? `packets=${embeddedCaptures.reduce((sum,item)=>sum+(item.analysis?.packetCount || 0),0)}` : 'no validated capture carved' }
+        { id:'capture-intelligence', status:embeddedCaptures.length ? 'done' : 'idle', summary:embeddedCaptures.length ? `packets=${embeddedCaptures.reduce((sum,item)=>sum+(item.analysis?.packetCount || 0),0)}` : 'no validated capture carved' },
+        { id:'rtp-h264', status:videoSessions ? 'done' : 'idle', summary:videoSessions ? `sessions=${videoSessions}, artifacts=${videoArtifacts}` : 'no reconstructable H264 RTP session' }
       ]
     },
     nextActions: [...new Set(nextActions)]
