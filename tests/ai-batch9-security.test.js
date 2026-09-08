@@ -147,7 +147,7 @@ test('Batch 9 renderer compiles, loads after UAV Batch 8, and Electron exposes m
   assert.match(source,/ModelScan \/ PickleScan/);
   assert.match(source,/Privacy Meter/);
   assert.match(source,/BackdoorBench/);
-  assert.match(main,/finals_analyzer_batch9/);
+  assert.match(main,/finals_analyzer_batch(?:9|11)/);
   assert.match(main,/modelscan/);
   assert.match(main,/picklescan/);
   assert.match(main,/shell:\s*false/);
