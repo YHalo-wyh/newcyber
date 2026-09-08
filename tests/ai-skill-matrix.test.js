@@ -60,7 +60,25 @@ test('AI skill matrix can close all six official training points with explicit e
   assert.equal(skill(result,'model-inversion').status,'evidence');
   assert.equal(skill(result,'backdoor').status,'evidence');
   assert.equal(skill(result,'model-extraction').metrics.holdoutFidelity,0.92);
+  assert.equal(skill(result,'backdoor').metrics.targetASR,1);
+  assert.equal(skill(result,'backdoor').metrics.flipRate,1);
+  assert.equal(skill(result,'backdoor').metrics.controlTargetRate,0);
+  assert.equal(skill(result,'backdoor').metrics.triggerSpecificity,1);
   assert.ok(skill(result,'backdoor').findings.some((x)=>x.id==='backdoor-control-specificity'));
+});
+
+test('matrix keeps a high-ASR backdoor run as candidate when control evidence is absent',()=>{
+  const rows=[];
+  for (let i=0;i<6;i+=1) {
+    const truth=i%2?2:0;
+    rows.push({true_label:truth,clean_pred:truth,triggered_pred:1,target_label:1});
+  }
+  const result=diagnoseAiSkillMatrix({backdoor:{targetLabel:1,rows}});
+  const backdoor=skill(result,'backdoor');
+  assert.equal(backdoor.status,'candidate');
+  assert.equal(backdoor.confidence,'high');
+  assert.equal(backdoor.metrics.targetASR,1);
+  assert.equal(backdoor.metrics.controlTargetRate,null);
 });
 
 test('matrix auto-routes a single CSV dataset and does not call unrelated analyzers',()=>{
