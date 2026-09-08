@@ -11,6 +11,12 @@ const { scanWorkspace, buildMarkdownReport } = require('../src/core/finals_analy
 const root = path.join(__dirname, '..');
 const read = (relative) => fs.readFileSync(path.join(root, relative), 'utf8');
 
+function assertAnalyzerAtLeast(main, minimum) {
+  const match = main.match(/finals_analyzer_batch(\d+)/);
+  assert.ok(match, 'main.js should load a finals analyzer wrapper');
+  assert.ok(Number(match[1]) >= minimum, `expected analyzer batch >= ${minimum}, got ${match[1]}`);
+}
+
 const SOURCE = `
 from Crypto.Cipher import AES
 key = b"0123456789abcdef"
@@ -68,5 +74,5 @@ test('batch6 renderer extensions compile and load after auto decode', () => {
 test('Electron entrypoint compiles and keeps batch6 or later workspace wrapper', () => {
   const main = read('main.js');
   assert.doesNotThrow(() => new vm.Script(main, { filename: 'main.js' }));
-  assert.match(main, /finals_analyzer_batch(?:6|7|8|9|11|12)/);
+  assertAnalyzerAtLeast(main,6);
 });
