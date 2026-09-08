@@ -66,6 +66,19 @@ async function loadCachedPocIndex() {
   return pocIndexCache;
 }
 
+async function replaceIndexCacheFile(temp, target) {
+  try {
+    await fs.rename(temp, target);
+  } catch (error) {
+    if (!['EEXIST','EPERM','EACCES'].includes(error?.code)) {
+      await fs.rm(temp, { force:true }).catch(() => {});
+      throw error;
+    }
+    await fs.rm(target, { force:true });
+    await fs.rename(temp, target);
+  }
+}
+
 async function importPocIndex() {
   const result = await dialog.showOpenDialog(win, {
     title:'选择 nomi-sec/PoC-in-GitHub 本地仓库根目录',
@@ -78,7 +91,7 @@ async function importPocIndex() {
   const temp = `${target}.tmp-${process.pid}-${Date.now()}`;
   await fs.mkdir(path.dirname(target), { recursive:true });
   await fs.writeFile(temp, JSON.stringify(index), 'utf8');
-  await fs.rename(temp, target);
+  await replaceIndexCacheFile(temp, target);
   pocIndexCache = index;
   pocIndexError = null;
   return { ...pocIndexStatus(), importedFrom:sourceRoot };
