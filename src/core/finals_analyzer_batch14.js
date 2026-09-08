@@ -44,8 +44,8 @@ function looksSpectrum(text,file) {
 }
 
 function looksRegulatory(text,file) {
-  const api=/(?:\/api\/|openapi|swagger|request\.|req\.|router\.|@app\.|paths:|authorization)/i.test(text);
-  const lowalt=/(?:flight[_ -]?(?:permit|plan|approval)|airspace|geofence|drone[_ -]?id|operator[_ -]?id|无人机|空域|飞行许可|审批)/i.test(text);
+  const api=/(?:\/api\/|openapi|swagger|request\.|req\.|router\.|@app\.|paths:|authorization|bearer\s|jwt)/i.test(text);
+  const lowalt=/(?:\/flights?\/|\/permits?\/|flight(?:[_ /-]?)(?:permit|plan|approval)|(?:permit|approval)(?:[_ /-]?)flight|airspace|geofence|drone[_ -]?id|operator[_ -]?id|approve|approval|utm\b|u-space|无人机|空域|飞行许可|审批)/i.test(text);
   return api&&lowalt;
 }
 
