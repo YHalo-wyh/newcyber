@@ -1,6 +1,7 @@
 const base=require('./capture_intelligence');
 const { parseClassicPcap,parsePcapngPackets }=require('./uav_wifi_pcap');
 const { analyzeVideoCapture }=require('./uav_video_v2');
+const { analyzeDatalinkCapture }=require('./uav_datalink');
 
 function compactVideo(video) {
   return {
@@ -13,18 +14,33 @@ function compactVideo(video) {
   };
 }
 
+function compactDatalink(result) {
+  return {
+    format:result.format,
+    flows:(result.flows||[]).slice(0,120),
+    vendorEvidence:(result.vendorEvidence||[]).slice(0,120),
+    pairedFlows:(result.pairedFlows||[]).slice(0,80),
+    findings:result.findings||[],
+    nextActions:result.nextActions||[],
+    notes:result.notes||[]
+  };
+}
+
 function analyzeCaptureIntelligence(buffer) {
   const result=base.analyzeCaptureIntelligence(buffer);
   if (result.format==='unknown') return result;
   const container=parseClassicPcap(buffer)||parsePcapngPackets(buffer);
   if (!container) return result;
   let video=null;
+  let datalink=null;
   try { video=analyzeVideoCapture(container.packets||[]); }
   catch (error) { video={sessions:[],artifacts:[],findings:[],error:error.message}; }
+  try { datalink=compactDatalink(analyzeDatalinkCapture(buffer)); }
+  catch (error) { datalink={flows:[],vendorEvidence:[],pairedFlows:[],findings:[],nextActions:[],error:error.message}; }
   const compact=compactVideo(video);
-  const findings=[...(result.findings||[]),...(compact.findings||[])];
+  const findings=[...(result.findings||[]),...(compact.findings||[]),...(datalink.findings||[])];
   const highlights=[...(result.highlights||[])];
-  const nextActions=[...(result.nextActions||[])];
+  const nextActions=[...(result.nextActions||[]),...(datalink.nextActions||[])];
   if (compact.sessions.length) {
     const frames=compact.sessions.reduce((sum,x)=>sum+(x.frames||0),0);
     const gaps=compact.sessions.reduce((sum,x)=>sum+(x.gaps?.length||0),0);
@@ -33,7 +49,12 @@ function analyzeCaptureIntelligence(buffer) {
     if (gaps) nextActions.push(`RTP/${codecs} 存在 ${gaps} 个 sequence gap；先区分抓包丢包与真实视频链路中断。`);
     else nextActions.push(`RTP/${codecs} 已重组为 Annex-B artifact，可直接交给 ffplay/ffmpeg 或视频取证继续检查。`);
   }
-  return { ...result,video:compact,findings,highlights,nextActions };
+  if (datalink.vendorEvidence?.length) {
+    const vendors=[...new Set(datalink.vendorEvidence.map((x)=>x.vendor))];
+    highlights.push(`数据链：发现厂商/协议指纹 ${vendors.join(', ')}；已保留 packet/flow 证据。`);
+  }
+  if (datalink.pairedFlows?.length) highlights.push(`数据链：识别 ${datalink.pairedFlows.length} 组控制/遥测 ↔ 高带宽媒体流候选。`);
+  return { ...result,video:compact,datalink,findings,highlights,nextActions:[...new Set(nextActions)] };
 }
 
 function scanEmbeddedCaptures(input,options={}) {
