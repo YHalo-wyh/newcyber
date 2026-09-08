@@ -74,7 +74,7 @@ function parseTypedValue(payload, offset=0) {
   if (keyEnd>payload.length) return null;
   const key=payload.subarray(keyStart,keyEnd).toString('utf8'); const split=key.indexOf(' '); if (split<=0) return null;
   const typeRaw=key.slice(0,split); const name=key.slice(split+1); const t=parseType(typeRaw); if (!t) return { type:typeRaw,name,value:payload.subarray(keyEnd).toString('hex') };
-  if (t.type==='char' || t.base==='char') return { type:typeRaw,name,value:payload.subarray(keyEnd,keyEnd+t.count).toString('utf8').replace(/\0.*$/s,'') };
+  if (t.base==='char') return { type:typeRaw,name,value:payload.subarray(keyEnd,keyEnd+t.count).toString('utf8').replace(/\0.*$/s,'') };
   const spec=BASIC[t.base]; if (!spec) return { type:typeRaw,name,value:payload.subarray(keyEnd).toString('hex') };
   if (t.count===1 && keyEnd+spec.size<=payload.length) return { type:typeRaw,name,value:spec.read(payload,keyEnd) };
   const values=[]; for (let i=0;i<t.count && keyEnd+(i+1)*spec.size<=payload.length;i+=1) values.push(spec.read(payload,keyEnd+i*spec.size));
@@ -84,7 +84,7 @@ function parseTypedValue(payload, offset=0) {
 function timestampSec(row) {
   const value=Number(row?.timestamp ?? row?.timestamp_sample ?? row?.time_utc_usec);
   if (!Number.isFinite(value)) return null;
-  return value>1e10 ? value/1e6 : value>1e7 ? value/1e6 : value;
+  return value/1e6;
 }
 
 function deg(value) {
