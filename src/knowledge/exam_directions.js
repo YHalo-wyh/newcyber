@@ -11,6 +11,17 @@ module.exports=[
     mutations:['top1-only','rounded-confidence','full-probability','stochastic-output','class-coverage-gap']
   },
   {
+    id:'ai.ocr-extraction',track:'ai',domain:'人工智能',title:'OCR 黑盒模型窃取',
+    tags:['ocr','model-extraction','char-confidence','bounding-box','layout','cer','wer','fidelity'],
+    summary:'OCR 黑盒题除了最终文本，还要审计字符/词级置信度、logit、检测框和版式信息。替代模型必须按源图像/文档分组划分独立 holdout，并分别报告文本与布局 fidelity。',
+    evidence:['image_id→recognized text transcript','char/word confidence','bounding boxes/polygons','重复 OCR query'],
+    prerequisites:['只使用赛题/授权 transcript','复现 resize/normalize/tokenization'],
+    verify:['文本 exact agreement/CER/WER','检测框 IoU/匹配率','单独统计 victim query 数量'],
+    falsePositives:['字符集覆盖高不代表模型结构已恢复','训练集 OCR 准确率不能代表黑盒 fidelity'],
+    actions:['统计字符覆盖','比较 final-text 与 soft-label 暴露收益','按文档来源隔离 holdout'],
+    mutations:['char-confidence-disabled','box-quantization','charset-gap','stochastic-ocr','layout-only']
+  },
+  {
     id:'ai.model-inversion',track:'ai',domain:'人工智能',title:'模型反演 / 输入重建',
     tags:['model-inversion','reconstruction','embedding','gradient','logits','privacy'],
     summary:'模型反演关注从概率、logit、embedding、gradient 等输出恢复输入特征或代表性样本，与 membership inference 不同。重建结果应同时用数值与任务指标验证。',
@@ -44,6 +55,17 @@ module.exports=[
     mutations:['time-rollback','position-jump','satellite-count-jump','narrowband-peak','wideband-noise-rise']
   },
   {
+    id:'lowalt.datalink-passive',track:'lowalt',domain:'低空经济',title:'无人机数据链 / Lightbridge / OcuSync 被动证据',
+    tags:['datalink','lightbridge','ocusync','dji','control-link','telemetry','media-flow','udp'],
+    summary:'专有数据链未知时先做被动流量画像：厂商字符串、主机对、UDP 包长/速率、控制小包与高带宽媒体流组合，再决定是否需要私有协议适配器。不能仅凭高带宽 UDP 就声称 OcuSync/Lightbridge。',
+    evidence:['DJI/Lightbridge/OcuSync 明确字符串','同主机对控制与媒体流','未知高带宽 UDP'],
+    prerequisites:['有离线 PCAP/PCAPNG 或固件内恢复抓包'],
+    verify:['明确 vendor/protocol evidence','固定头/计数器/长度分布','与 MAVLink/RTSP/RTP 时间线交叉'],
+    falsePositives:['普通 RTP/媒体流可呈高带宽 UDP','端口号本身不足以识别厂商协议'],
+    actions:['按 flow 聚合','分析固定头/计数器/熵','关联断链与控制事件'],
+    mutations:['vendor-string-absent','unknown-high-rate-flow','control-media-pair','flow-direction-change']
+  },
+  {
     id:'lowalt.firmware-update-chain',track:'lowalt',domain:'低空经济',title:'飞控/机载固件升级信任链',
     tags:['firmware-update','ota','signature','rollback','manifest','flash','bootloader','sysupgrade'],
     summary:'升级安全必须沿 download→manifest→signature/hash→extract/decrypt→flash→boot slot/rollback 全链审计。仅存在 SHA256 或 verify 调用不等于最终写入字节已被可信发布者绑定。',
@@ -55,14 +77,14 @@ module.exports=[
     mutations:['plain-http','tls-insecure','signature-before-transform','downgrade','archive-path-change']
   },
   {
-    id:'lowalt.rtp-video-recovery',track:'lowalt',domain:'低空经济',title:'RTP/H264 图传恢复与中断分析',
-    tags:['rtp','rtsp','h264','fu-a','stap-a','annex-b','video','ssrc','sequence'],
-    summary:'图传抓包先按 RTP SSRC/PT/sequence 建会话，再对 H264 single NAL/STAP-A/FU-A 重组 Annex-B；sequence gap 与未闭合 FU 必须标记 partial，不能把残缺码流冒充完整视频。',
-    evidence:['RTP v2 header','动态 payload type','H264 NAL/FU-A','RTSP endpoint'],
+    id:'lowalt.rtp-video-recovery',track:'lowalt',domain:'低空经济',title:'RTP/H264/H265 图传恢复与中断分析',
+    tags:['rtp','rtsp','h264','h265','fu-a','stap-a','aggregation-packet','annex-b','video','ssrc','sequence'],
+    summary:'图传抓包先按 RTP SSRC/PT/sequence 建会话；H264 支持 single NAL/STAP-A/FU-A，H265 支持 single NAL/AP/FU，并重组 Annex-B。sequence gap 与未闭合 FU 必须标记 partial。',
+    evidence:['RTP v2 header','H264/H265 NAL/FU','RTSP endpoint','VPS/SPS/PPS'],
     prerequisites:['抓包包含未加密 RTP payload'],
-    verify:['RTP sequence 连续','FU-A start/end 闭合','导出 Annex-B 可由 ffmpeg/ffplay 复核'],
-    falsePositives:['动态 RTP payload 不一定是 H264','抓包缺包不一定代表真实链路中断'],
-    actions:['按 SSRC 重组','导出 H264 artifact','与 RTSP TEARDOWN/网络异常对齐'],
-    mutations:['rtp-gap','fu-a-fragment','ssrc-change','payload-type-change']
+    verify:['RTP sequence 连续','FU start/end 闭合','导出 Annex-B 可由 ffmpeg/ffplay 复核'],
+    falsePositives:['动态 RTP payload 不一定是 H264/H265','抓包缺包不一定代表真实链路中断'],
+    actions:['按 SSRC/PT 重组','导出 H264/H265 artifact','与 RTSP TEARDOWN/网络异常对齐'],
+    mutations:['rtp-gap','fu-fragment','ssrc-change','payload-type-change','codec-switch']
   }
 ];
