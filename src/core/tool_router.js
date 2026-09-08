@@ -5,6 +5,7 @@ const { analyzeTabularDataset, evaluateTabularCandidate } = require('./ai_tabula
 const { analyzeAdversarialPair, buildAdversarialHarness } = require('./ai_adversarial');
 const { analyzePrivacyTranscript, buildPrivacyHarness } = require('./ai_privacy');
 const { analyzeDatasetSecurity, buildDatasetHarness } = require('./ai_dataset_security');
+const { analyzePoisoningImpact, analyzeBackdoorBehavior } = require('./ai_poison_backdoor_validation');
 const { auditAiSupplyChain } = require('./ai_supply_chain');
 const { buildPromptInjectionSuite, evaluatePromptInjectionRun, auditPromptInjectionSource } = require('./ai_prompt_injection');
 const { analyzeModelExtractionTranscript, buildModelExtractionHarness } = require('./ai_model_extraction');
@@ -58,6 +59,8 @@ function runTool(tool, payload = {}) {
   if (tool === 'ai-model-inversion') return analyzeModelInversion(payload.input);
   if (tool === 'ai-dataset-security') return analyzeDatasetSecurity(payload.input);
   if (tool === 'ai-dataset-harness') return buildDatasetHarness(payload.input || payload);
+  if (tool === 'ai-poisoning-impact') return analyzePoisoningImpact(payload.input || payload);
+  if (tool === 'ai-backdoor-behavior') return analyzeBackdoorBehavior(payload.input || payload);
   if (tool === 'ai-supply-chain') return auditAiSupplyChain(payload.input);
   if (tool === 'ai-tooling-catalog') return { tools: toolingCatalog() };
   if (tool === 'evm-disasm') return analyzeEvmRuntime(payload.input);
