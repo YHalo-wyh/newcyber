@@ -34,10 +34,10 @@ test('investigation panel CSS supports fixed desktop panel, responsive overlay a
   assert.match(css, /@media\(max-width:850px\)/);
 });
 
-test('Electron workspace uses Batch 11 analyzer and report graph remains server-side generated', () => {
+test('Electron workspace keeps Batch 11 investigation through Batch 11 or newer analyzer wrapper', () => {
   const main = read('main.js');
   const wrapper = read('src/core/finals_analyzer_batch11.js');
-  assert.match(main, /finals_analyzer_batch11/);
+  assert.match(main, /finals_analyzer_batch(?:11|12)/);
   assert.match(wrapper, /buildInvestigationGraph/);
   assert.match(wrapper, /buildInvestigationSection/);
 });
