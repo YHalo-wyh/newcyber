@@ -11,11 +11,19 @@ function lowerFinding(finding) {
 }
 
 function inferTrack(finding, file = null) {
-  const hay = `${lowerFinding(finding)} ${(file?.path || '').toLowerCase()} ${(file?.type || '').toLowerCase()}`;
-  if (/(mavlink|uav|drone|ardupilot|px4|gps|attitude|gcs|mission_|param_|flight|wifi|eapol|pmkid|firmware|ulog|dataflash)/.test(hay)) return 'lowalt';
+  const hay = lowerFinding(finding);
+  const filePath = String(file?.path || finding?.file || '').toLowerCase();
+  const ext = String(file?.extension || '').toLowerCase() || (/\.[a-z0-9]+$/i.exec(filePath)?.[0] || '');
+
+  if (/(?:^|\s)(?:vehicle|can|uds|canopen|isotp|doip|someip)[-:]/.test(hay)) return 'vehicle';
+  if (/(?:^|\s)(?:web3|evm|solidity|solana|anchor)[-:]/.test(hay) || ['.sol', '.vy'].includes(ext)) return 'web3';
+  if (/(?:^|\s)(?:ai|model|prompt|rag|privacy|adversarial|dataset)[-:]/.test(hay) || ['.pt','.pth','.safetensors','.npy','.onnx','.gguf'].includes(ext)) return 'ai';
+  if (/(?:^|\s)(?:uav|mavlink|lowalt|ardupilot|px4)[-:]/.test(hay) || ['.tlog','.ulg','.eeprom'].includes(ext)) return 'lowalt';
+
   if (/(can\b|uds\b|isotp|iso-tp|canopen|ecu|doip|some\/ip|vehicle)/.test(hay)) return 'vehicle';
-  if (/(solidity|evm|delegatecall|eip-1967|eip1967|eip-1167|proxy|storage|calldata|anchor|solana|abi|flashloan|oracle|reentr)/.test(hay)) return 'web3';
+  if (/(web3|solidity|smart contract|external contract|evm|delegatecall|eip-1967|eip1967|eip-1167|proxy|storage|calldata|anchor|solana|abi|flashloan|oracle|reentr)/.test(hay)) return 'web3';
   if (/(model|prompt|rag|llm|torch|pickle|safetensor|adversarial|membership|privacy|dataset|poison|backdoor|hugging|dependency|nan|infinity|ai\b)/.test(hay)) return 'ai';
+  if (/(mavlink|uav|drone|ardupilot|px4|gps|attitude|gcs|mission_|param_|flight|wifi|eapol|pmkid|ulog|dataflash)/.test(hay)) return 'lowalt';
   if (/(aes|sm4|base64|hex|xor|crypto|cipher|decode)/.test(hay)) return 'common';
   return null;
 }
@@ -100,7 +108,7 @@ function inferNextAction(finding, tool) {
   if (/(membership|privacy)/.test(hay)) return '把查询 transcript 送入成员推断审计，优先看 AUC、阈值和独立 holdout。';
   if (/(adversarial|epsilon|fgsm|pgd)/.test(hay)) return '把 clean/adv 样本送入对抗样本验证，先检查预算与 preprocessing 空间。';
   if (/(dataset|trigger|poison|backdoor)/.test(hay)) return '对可疑 trigger 做删除/替换/跨样本验证，再决定是否构成后门。';
-  if (/(proxy|delegatecall|storage|calldata)/.test(hay)) return '打开 EVM 分析，确认 selector/slot/target 的真实数据流，不只看 opcode 命中。';
+  if (/(proxy|delegatecall|storage|calldata|external contract)/.test(hay)) return '打开 EVM 分析，确认 selector/slot/target/外部依赖的真实数据流，不只看规则命中。';
   if (/(shell|tool call|rag|model output)/.test(hay)) return '打开 AI Pipeline 审计，从 source → model/RAG → sink 复核可控性。';
   if (tool) return '打开推荐工具复核原始证据，并把结果继续送入下一分析阶段。';
   return '查看原始文件与证据上下文，先验证成立前提。';
@@ -138,7 +146,8 @@ function buildInvestigationGraph(analysis) {
     const file = fileMap.get(finding.file) || null;
     const track = inferTrack(finding, file);
     const tool = inferTool(finding, track);
-    const node = {
+    const exploitability = inferExploitability(finding);
+    return {
       id: `finding:${index}:${String(finding.id || finding.title || 'evidence')}`,
       findingId: finding.id || null,
       originalId: finding.originalId || null,
@@ -149,15 +158,14 @@ function buildInvestigationGraph(analysis) {
       evidence: text(finding.evidence ?? finding.description ?? finding.patterns ?? '').slice(0, 12000),
       meaning: finding.meaning || finding.message || null,
       prerequisite: inferPrerequisite(finding),
-      exploitability: inferExploitability(finding),
+      exploitability,
       fix: inferFix(finding),
       regression: inferRegression(finding),
       nextAction: inferNextAction(finding, tool),
       recommendedTool: tool,
       track,
-      score: (SEVERITY_SCORE[finding.severity] || 0) + (inferExploitability(finding) === 'confirmed' ? 25 : 0)
+      score: (SEVERITY_SCORE[finding.severity] || 0) + (exploitability === 'confirmed' ? 25 : 0)
     };
-    return node;
   }).sort((a,b)=>b.score-a.score || String(a.file||'').localeCompare(String(b.file||'')));
 
   const top = nodes.slice(0, 12);
@@ -178,7 +186,7 @@ function buildInvestigationGraph(analysis) {
       total:nodes.length,
       high:nodes.filter((x)=>x.severity==='high').length,
       confirmed:nodes.filter((x)=>x.exploitability==='confirmed').length,
-      pending:nodes.filter((x)=>!['confirmed'].includes(x.exploitability)).length,
+      pending:nodes.filter((x)=>x.exploitability!=='confirmed').length,
       artifacts:artifacts.length
     },
     focus:top,
