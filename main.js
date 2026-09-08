@@ -3,7 +3,7 @@ const path = require('path');
 const fs = require('fs/promises');
 const { execFile } = require('child_process');
 const { promisify } = require('util');
-const { scanWorkspace, inspectFile, buildMarkdownReport } = require('./src/core/finals_analyzer_batch14');
+const { scanWorkspace, inspectFile, buildMarkdownReport } = require('./src/core/finals_analyzer_batch15');
 const { runTool } = require('./src/core/tool_router');
 const { bufferFromArtifact } = require('./src/core/artifacts');
 const { analyzeFirmwareBuffer, MAX_FIRMWARE_BYTES } = require('./src/core/firmware_workbench');
@@ -134,6 +134,8 @@ function compactRecursiveAnalysis(analysis) {
   const rtspCount = captureFiles.reduce((sum,file)=>sum+(file.metadata.captureIntelligence.network?.rtspEndpoints?.length||0),0);
   const mavlinkFrames = captureFiles.reduce((sum,file)=>sum+(file.metadata.captureIntelligence.network?.mavlink?.parsedFrames||0),0);
   const canFrames = captureFiles.reduce((sum,file)=>sum+(file.metadata.captureIntelligence.can?.parsedFrames||0),0);
+  const videoSessions = captureFiles.reduce((sum,file)=>sum+(file.metadata.captureIntelligence.video?.sessions?.length||0),0);
+  const datalinkFiles = captureFiles.filter((file)=>file.metadata.captureIntelligence.datalink).length;
   return {
     workspaceName:analysis.workspaceName,
     fileCount:analysis.files?.length || 0,
@@ -148,8 +150,11 @@ function compactRecursiveAnalysis(analysis) {
     rtspCount,
     mavlinkFrames,
     canFrames,
+    videoSessions,
+    datalinkFiles,
     examDirectionCounts:analysis.examDirectionCounts || null,
-    recommendations:(analysis.recommendations||[]).slice(0,20),
+    batch15Counts:analysis.batch15Counts || null,
+    recommendations:(analysis.recommendations||[]).slice(0,24),
     topFindings:(analysis.findings||[]).slice(0,40).map((finding)=>({ severity:finding.severity, title:finding.title, file:finding.file, evidence:finding.evidence }))
   };
 }
