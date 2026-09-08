@@ -3,6 +3,7 @@ const { bufferFromArtifact, createBinaryArtifact } = require('./artifacts');
 const { scoreBuffer, magicName, printableRatio } = require('./auto_decode');
 const { extractSuspiciousEncodings, decodeSuspiciousEncoding } = require('./encoding_probe');
 const { analyzeCaptureIntelligence, scanEmbeddedCaptures } = require('./capture_intelligence_v2');
+const { parseZipCentralDirectory, extractZipEntry } = require('./model');
 
 const MAX_NODE_BYTES = 8 * 1024 * 1024;
 const MAX_TOTAL_BYTES = 32 * 1024 * 1024;
@@ -10,6 +11,7 @@ const MAX_NODES = 24;
 const MAX_DEPTH = 2;
 const MAX_TEXT_BYTES = 768 * 1024;
 const MAX_TEXT_CANDIDATES = 8;
+const MAX_ZIP_ENTRIES = 16;
 
 function uniquePushArtifact(out, seen, artifact) {
   if (!artifact || artifact.completeness !== 'complete' || !artifact.sha256 || seen.has(artifact.sha256)) return false;
@@ -65,6 +67,12 @@ function keepDecode(item) {
   return item.score >= 230 && /(?:flag|ctf|key|secret|password|token|admin|success|accepted)/i.test(item.preview || '');
 }
 
+function safeEntryName(name, index) {
+  const value = String(name || '').replace(/\\/g, '/');
+  const base = value.split('/').filter(Boolean).pop() || `entry-${index + 1}.bin`;
+  return base.replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').replace(/[. ]+$/g, '').slice(0, 120) || `entry-${index + 1}.bin`;
+}
+
 function makeDecompressedArtifact(buffer, parent, kind) {
   const ext = magicName(buffer)?.toLowerCase() || 'bin';
   return createBinaryArtifact({
@@ -79,6 +87,25 @@ function makeDecompressedArtifact(buffer, parent, kind) {
   });
 }
 
+function makeZipEntryArtifact(buffer, parent, entry, index) {
+  return createBinaryArtifact({
+    name: safeEntryName(entry.name, index),
+    buffer,
+    completeness: 'complete',
+    provenance: [
+      ...(Array.isArray(parent.provenance) ? parent.provenance : []),
+      { source: 'recursive-zip', parentSha256: parent.sha256, entry: entry.name, compression: entry.compression }
+    ],
+    metadata: {
+      kind: 'recursive-zip-entry',
+      parentSha256: parent.sha256,
+      archiveEntry: entry.name,
+      compression: entry.compression,
+      magic: magicName(buffer)
+    }
+  });
+}
+
 function analyzeArtifactTree(seedArtifacts, options = {}) {
   const maxDepth = Math.max(1, Math.min(Number(options.maxDepth) || MAX_DEPTH, 3));
   const maxNodes = Math.max(1, Math.min(Number(options.maxNodes) || MAX_NODES, 64));
@@ -86,6 +113,7 @@ function analyzeArtifactTree(seedArtifacts, options = {}) {
   const maxTotalBytes = Math.max(maxNodeBytes, Math.min(Number(options.maxTotalBytes) || MAX_TOTAL_BYTES, 96 * 1024 * 1024));
   const queue = [];
   const seenNodes = new Set();
+  const queued = new Set();
   const artifactSeen = new Set();
   const artifacts = [];
   const nodes = [];
@@ -95,9 +123,10 @@ function analyzeArtifactTree(seedArtifacts, options = {}) {
   let skippedOversize = 0;
 
   const enqueue = (artifact, depth, lineage) => {
-    if (!artifact || artifact.completeness !== 'complete' || !artifact.sha256 || seenNodes.has(artifact.sha256)) return;
+    if (!artifact || artifact.completeness !== 'complete' || !artifact.sha256 || seenNodes.has(artifact.sha256) || queued.has(artifact.sha256)) return;
     if (artifact.size > maxNodeBytes) { skippedOversize += 1; return; }
     if (queue.length + seenNodes.size >= maxNodes * 2) return;
+    queued.add(artifact.sha256);
     queue.push({ artifact, depth, lineage });
     uniquePushArtifact(artifacts, artifactSeen, artifact);
   };
@@ -107,6 +136,7 @@ function analyzeArtifactTree(seedArtifacts, options = {}) {
   while (queue.length && nodes.length < maxNodes) {
     const current = queue.shift();
     const artifact = current.artifact;
+    queued.delete(artifact.sha256);
     if (seenNodes.has(artifact.sha256)) continue;
     if (current.depth > maxDepth) continue;
     let decoded;
@@ -132,6 +162,7 @@ function analyzeArtifactTree(seedArtifacts, options = {}) {
       decode: null,
       capture: null,
       embeddedCaptures: 0,
+      zip: null,
       decompressed: []
     };
     for (const flag of node.flags) if (!flags.includes(flag)) flags.push(flag);
@@ -170,6 +201,47 @@ function analyzeArtifactTree(seedArtifacts, options = {}) {
           if (current.depth < maxDepth) enqueue(item.artifact, current.depth + 1, [...current.lineage, item.artifact.name]);
         }
       } catch (error) { node.embeddedCaptureError = error.message; }
+    }
+
+    if (node.magic === 'ZIP' && current.depth < maxDepth) {
+      try {
+        const zip = parseZipCentralDirectory(buffer);
+        if (zip?.entries?.length) {
+          const extracted = [];
+          let skippedEncrypted = 0;
+          let skippedUnsupported = 0;
+          for (let index = 0; index < zip.entries.length && extracted.length < MAX_ZIP_ENTRIES; index += 1) {
+            const entry = zip.entries[index];
+            if (!entry?.name || /[\\/]$/.test(entry.name)) continue;
+            if (entry.flags & 1) { skippedEncrypted += 1; continue; }
+            if (entry.uncompressedSize <= 0 || entry.uncompressedSize > maxNodeBytes || entry.compressedSize > maxNodeBytes) { skippedUnsupported += 1; continue; }
+            const entryBuffer = extractZipEntry(buffer, entry);
+            if (!entryBuffer?.length || entryBuffer.length > maxNodeBytes) { skippedUnsupported += 1; continue; }
+            const derived = makeZipEntryArtifact(entryBuffer, artifact, entry, index);
+            extracted.push({
+              name: entry.name,
+              compression: entry.compression,
+              size: entryBuffer.length,
+              artifact: derived
+            });
+            uniquePushArtifact(artifacts, artifactSeen, derived);
+            enqueue(derived, current.depth + 1, [...current.lineage, `ZIP:${entry.name}`]);
+          }
+          node.zip = {
+            entries: zip.entries.length,
+            extracted: extracted.slice(0, MAX_ZIP_ENTRIES),
+            skippedEncrypted,
+            skippedUnsupported
+          };
+          if (extracted.length) findings.push({
+            id: `recursive-zip:${artifact.sha256}`,
+            severity: 'info',
+            title: 'ZIP 恢复产物已安全展开并继续递归分析',
+            sourceArtifact: artifact.name,
+            evidence: `entries=${zip.entries.length}, extracted=${extracted.length}, encrypted=${skippedEncrypted}`
+          });
+        }
+      } catch (error) { node.zipError = error.message; }
     }
 
     if (buffer.length <= MAX_TEXT_BYTES && printableRatio(buffer) >= 0.62) {
@@ -230,7 +302,7 @@ function analyzeArtifactTree(seedArtifacts, options = {}) {
   }
 
   return {
-    schema: 'newcyber.recursive-artifact.v1',
+    schema: 'newcyber.recursive-artifact.v2',
     maxDepth,
     stats: { seedArtifacts: (seedArtifacts || []).length, analyzedNodes: nodes.length, totalBytes, skippedOversize, artifacts: artifacts.length, flags: flags.length },
     flags,
@@ -240,4 +312,4 @@ function analyzeArtifactTree(seedArtifacts, options = {}) {
   };
 }
 
-module.exports = { analyzeArtifactTree, compactCapture, MAX_NODE_BYTES, MAX_TOTAL_BYTES, MAX_NODES, MAX_DEPTH };
+module.exports = { analyzeArtifactTree, compactCapture, MAX_NODE_BYTES, MAX_TOTAL_BYTES, MAX_NODES, MAX_DEPTH, MAX_ZIP_ENTRIES };
