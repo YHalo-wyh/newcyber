@@ -1,6 +1,10 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fsp = require('node:fs/promises');
+const os = require('node:os');
+const path = require('node:path');
 const { buildInvestigationGraph, inferTool, inferExploitability } = require('../src/core/investigation_graph');
+const { scanWorkspace, buildMarkdownReport } = require('../src/core/finals_analyzer_batch11');
 
 function baseAnalysis(findings = [], files = []) {
   return { findings, files, stats:{ files:files.length, bytes:0, findings:findings.length, flags:0 }, recommendations:[] };
@@ -47,4 +51,28 @@ test('low-confidence evidence stays candidate rather than being upgraded to conf
   assert.notEqual(graph.focus[0].exploitability,'confirmed');
   assert.equal(graph.focus[0].track,'web3');
   assert.equal(graph.focus[0].recommendedTool,'evm-disasm');
+});
+
+test('Batch 11 workspace emits investigation graph and report from real analyzer findings', async () => {
+  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'newcyber-investigation-'));
+  try {
+    await fsp.writeFile(path.join(dir, 'service.py'), [
+      'from transformers import AutoModel',
+      'model = AutoModel.from_pretrained(repo, trust_remote_code=True)'
+    ].join('\n'));
+    const analysis = await scanWorkspace(dir);
+    assert.equal(analysis.version >= 11, true);
+    assert.ok(analysis.investigation?.focus?.length);
+    const node = analysis.investigation.focus.find((item) => item.originalId === 'hf-trust-remote-code' || /远端自定义代码/.test(item.title));
+    assert.ok(node);
+    assert.equal(node.track, 'ai');
+    assert.equal(node.recommendedTool, 'ai-supply-chain');
+    assert.notEqual(node.exploitability, 'confirmed');
+    const report = buildMarkdownReport(analysis);
+    assert.match(report, /## Investigation Graph/);
+    assert.match(report, /Prerequisite/);
+    assert.match(report, /Recommended tool：ai-supply-chain/);
+  } finally {
+    await fsp.rm(dir, { recursive:true, force:true });
+  }
 });
