@@ -38,6 +38,32 @@ async function collectReferenceText(rootPath, analysis) {
   return { text:chunks.join('\n\n'), bytes, filesRead };
 }
 
+function augmentAutopilot(analysis, refs) {
+  const autopilot = analysis.autopilot;
+  if (!autopilot || !refs.length) return;
+  autopilot.automaticChecks ||= [];
+  if (!autopilot.automaticChecks.some((item) => item.id === 'poc-reference')) {
+    autopilot.automaticChecks.push({ id:'poc-reference', title:'PoC-in-GitHub 漏洞参考关联', hits:refs.length });
+  }
+  const top = refs[0];
+  const priority = top.exactCve ? 85 : 65;
+  const action = {
+    id:'poc-reference',
+    priority,
+    level:top.exactCve ? 'hot' : 'normal',
+    title:`核对历史漏洞参考：${top.cve}`,
+    detail:top.exactCve
+      ? '题目/附件直接出现该 CVE；先核对组件版本、补丁状态和触发条件。'
+      : `关键词关联 score=${top.score}；只作为历史漏洞线索，不代表赛题已确认存在该 CVE。`
+  };
+  autopilot.actions = [...(autopilot.actions || []).filter((item) => item.id !== 'poc-reference'), action]
+    .sort((a, b) => (b.priority || 0) - (a.priority || 0))
+    .slice(0, 4);
+  autopilot.summary ||= {};
+  autopilot.summary.automaticCheckKinds = autopilot.automaticChecks.length;
+  autopilot.summary.automaticCheckHits = autopilot.automaticChecks.reduce((sum, item) => sum + (Number(item.hits) || 0), 0);
+}
+
 async function scanWorkspace(rootPath, options = {}) {
   const analysis = await base.scanWorkspace(rootPath);
   let extra = { text:'', bytes:0, filesRead:0 };
@@ -50,6 +76,7 @@ async function scanWorkspace(rootPath, options = {}) {
   if (refs.length) {
     const exact = refs.filter((item) => item.exactCve).length;
     analysis.recommendations.unshift(`漏洞参考：从 PoC-in-GitHub 元数据筛出 ${refs.length} 个相关 CVE/PoC 参考${exact ? `，其中 ${exact} 个为题目直接出现的 CVE` : ''}；仅作线索对照，不自动下载或执行 PoC。`);
+    augmentAutopilot(analysis, refs);
   } else if (!analysis.pocReferences.indexAvailable) {
     analysis.recommendations.push('PoC 参考索引尚未导入：可一次性选择本地 nomi-sec/PoC-in-GitHub 仓库生成离线关键词索引，之后所有赛题自动筛选相关 CVE/PoC 元数据。');
   }
@@ -86,4 +113,4 @@ function buildMarkdownReport(analysis, notes = '') {
   return section ? `${report.trim()}\n\n${section}\n` : report;
 }
 
-module.exports = { ...base, scanWorkspace, buildMarkdownReport, collectReferenceText, buildBatch17Section };
+module.exports = { ...base, scanWorkspace, buildMarkdownReport, collectReferenceText, augmentAutopilot, buildBatch17Section };
