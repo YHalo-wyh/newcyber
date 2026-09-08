@@ -10,6 +10,12 @@ const { scanWorkspace, extractSuspiciousStrings } = require('../src/core/finals_
 const root = path.join(__dirname, '..');
 const read = (relative) => fs.readFileSync(path.join(root, relative), 'utf8');
 
+function assertAnalyzerAtLeast(main, minimum) {
+  const match = main.match(/finals_analyzer_batch(\d+)/);
+  assert.ok(match, 'main.js should load a finals analyzer wrapper');
+  assert.ok(Number(match[1]) >= minimum, `expected analyzer batch >= ${minimum}, got ${match[1]}`);
+}
+
 test('workspace suspicious-string extractor finds encoded candidates conservatively', () => {
   const source = 'normal text\nblob=666c61677b746573747d\nother=SGVsbG8gd29ybGQ=';
   const items = extractSuspiciousStrings(source);
@@ -53,5 +59,5 @@ test('auto decode UI keeps results simple and actionable', () => {
 
 test('Electron workspace keeps batch-five capability through a later analyzer wrapper', () => {
   const main = read('main.js');
-  assert.match(main, /finals_analyzer_batch(?:5|6|7|8|9|11|12)/);
+  assertAnalyzerAtLeast(main,5);
 });
