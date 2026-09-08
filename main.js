@@ -3,7 +3,7 @@ const path = require('path');
 const fs = require('fs/promises');
 const { execFile } = require('child_process');
 const { promisify } = require('util');
-const { scanWorkspace, inspectFile, buildMarkdownReport } = require('./src/core/finals_analyzer_batch13');
+const { scanWorkspace, inspectFile, buildMarkdownReport } = require('./src/core/finals_analyzer_batch14');
 const { runTool } = require('./src/core/tool_router');
 const { bufferFromArtifact } = require('./src/core/artifacts');
 const { analyzeFirmwareBuffer, MAX_FIRMWARE_BYTES } = require('./src/core/firmware_workbench');
@@ -148,6 +148,7 @@ function compactRecursiveAnalysis(analysis) {
     rtspCount,
     mavlinkFrames,
     canFrames,
+    examDirectionCounts:analysis.examDirectionCounts || null,
     recommendations:(analysis.recommendations||[]).slice(0,20),
     topFindings:(analysis.findings||[]).slice(0,40).map((finding)=>({ severity:finding.severity, title:finding.title, file:finding.file, evidence:finding.evidence }))
   };
