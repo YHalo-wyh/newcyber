@@ -78,7 +78,8 @@ function comparePep440(a,b){
 
 const MAVEN_QUALIFIER_RANK=Object.freeze({alpha:-5,a:-5,beta:-4,b:-4,milestone:-3,m:-3,rc:-2,cr:-2,snapshot:-1,'':0,ga:0,final:0,release:0,sp:1});
 function mavenTokens(value=''){
-  const raw=String(value||'').trim().toLowerCase();if(!raw)return null;
+  const raw=String(value||'').trim().toLowerCase();
+  if(!raw||!/^\d/.test(raw))return null;
   const expanded=raw.replace(/([0-9])([a-z])/g,'$1.$2').replace(/([a-z])([0-9])/g,'$1.$2');
   return expanded.split(/[.\-+_]/).filter((x)=>x!=='').map((x)=>/^\d+$/.test(x)?{n:Number(x)}:{q:QUALIFIER_ALIASES[x]??x});
 }
