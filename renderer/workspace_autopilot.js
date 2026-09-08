@@ -16,7 +16,7 @@
     return html
       .replace('选择赛题目录，开始分析','选择赛题目录，一键自动分析')
       .replace('把题目丢进来，<em>先告诉你下一步做什么。</em>','把题目丢进来，<em>自动把重复劳动跑完。</em>')
-      .replace('NewCyber 先做离线分析，再把最值得追的线索压缩成 1～3 个动作。','NewCyber 默认直接跑离线扫描、赛道识别、疑似编码试解、专项审计、恢复产物递归分析和漏洞参考关联，再把需要人工处理的部分压缩到最短链路。');
+      .replace('NewCyber 先做离线分析，再把最值得追的线索压缩成 1～3 个动作。','NewCyber 默认直接跑离线扫描、赛道识别、疑似编码试解、专项审计、恢复产物递归分析、技术栈版本识别和漏洞参考关联，再把需要人工处理的部分压缩到最短链路。');
   }
 
   function actionHtml(item,index) {
@@ -25,6 +25,30 @@
     const toolButton=item.tool
       ? `<button class="button primary" data-tool="${esc(item.tool)}">打开对应工具</button>`:'';
     return `<div class="competition-step ${esc(item.level||'normal')}"><b>${index+1}</b><div><strong>${esc(item.title||'下一步')}</strong><p>${esc(item.detail||'')}</p><div class="run-row">${exportButton}${toolButton}</div></div></div>`;
+  }
+
+  function techStackPanel(analysis) {
+    const stack=analysis.techStack;
+    if (!stack?.stats?.components) return '';
+    const exact=(stack.components||[]).filter((item)=>item.version).slice(0,18);
+    const declared=(stack.components||[]).filter((item)=>!item.version && item.constraint).slice(0,8);
+    const chips=[...exact,...declared].map((item)=>{
+      const version=item.version||item.constraint||'?';
+      const origin=(item.sources||[item.source]).filter(Boolean)[0]||'';
+      return `<span class="tag" title="${esc(origin)}">${esc(item.name)} ${esc(version)}</span>`;
+    }).join('');
+    const ecosystems=Object.entries(stack.ecosystems||{}).sort((a,b)=>b[1]-a[1]).slice(0,8).map(([name,count])=>`${name}:${count}`).join(' · ');
+    return `<section class="panel next-actions tech-stack-panel">
+      <div class="result-title"><div><b>技术栈 / 依赖 / 版本</b><p>package、lock、requirements、pom、Gradle、Go、Cargo、Composer、Gem、Dockerfile 和常见 banner 会自动解析，不需要手工抄版本号。</p></div><div class="run-row"><span>${stack.stats.manifests||0} manifests · ${stack.stats.exactVersions||0} exact versions</span></div></div>
+      <div class="simple-score-row">
+        <article class="simple-result"><span>组件</span><strong>${stack.stats.components||0}</strong><small>${esc(ecosystems||'已建立技术栈画像')}</small></article>
+        <article class="simple-result"><span>精确版本</span><strong>${stack.stats.exactVersions||0}</strong><small>优先用于 CVE/PoC 相关性增强</small></article>
+        <article class="simple-result"><span>PURL</span><strong>${stack.purls?.length||0}</strong><small>后续可直接接离线 advisory 数据</small></article>
+        <article class="simple-result"><span>CPE candidate</span><strong>${stack.stats.cpeCandidates||0}</strong><small>只生成高置信已知映射</small></article>
+      </div>
+      ${chips?`<div class="tag-row">${chips}</div>`:''}
+      <div class="hint-list"><p><b>版本结论：</b>当前会把精确组件版本加入 PoC 关键词关联；PoC-in-GitHub 并不提供权威 affected/fixed range，因此“版本匹配”只提高核对优先级，不自动判定漏洞成立。</p></div>
+    </section>`;
   }
 
   function pocReferencePanel(analysis) {
@@ -37,10 +61,15 @@
     const cards=matches.map((item)=>{
       const repos=(item.repos||[]).slice(0,3).map((repo)=>`${esc(repo.fullName||repo.name||'repo')}${repo.stars?` ★${repo.stars}`:''}`).join(' · ');
       const keywords=(item.matchedKeywords||[]).slice(0,8).map((x)=>`<span class="tag">${esc(x)}</span>`).join('');
+      const versions=item.versionEvidence?.matchedVersions||[];
+      const versionLine=versions.length
+        ? `<small><b>版本相关：</b>${versions.map(esc).join(', ')} · 仅表示参考元数据也出现该版本</small>`
+        : '';
       return `<article class="simple-result poc-reference-card">
-        <span>${item.exactCve?'精确 CVE':'关键词关联'} · score ${item.score||0}</span>
+        <span>${item.exactCve?'精确 CVE':versions.length?'组件 + 版本关联':'关键词关联'} · score ${item.score||0}</span>
         <strong>${esc(item.cve||'CVE')}</strong>
         <small>${esc(item.summary||'PoC-in-GitHub 收录了相关公开仓库元数据。')}</small>
+        ${versionLine}
         ${keywords?`<div class="tag-row">${keywords}</div>`:''}
         ${repos?`<small>${repos}</small>`:''}
         <div class="run-row"><button class="button ghost" data-poc-copy="${esc(item.sourceUrl||'')}">复制索引链接</button></div>
@@ -49,7 +78,7 @@
     return `<section class="panel next-actions poc-reference-panel">
       <div class="result-title"><div><b>相关漏洞 / PoC 参考</b><p>来源：nomi-sec/PoC-in-GitHub。只索引 CVE、仓库名、说明、topics 与热度，不下载、更不会自动执行 PoC。</p></div><div class="run-row"><span>${esc(status)}</span><button class="button primary" data-poc-index-import>${p.indexAvailable?'更新本地索引':'导入本地索引'}</button></div></div>
       ${matches.length?`<div class="simple-score-row poc-reference-grid">${cards}</div>`:`<div class="hint-list"><p>${esc(p.note||'当前没有筛出明显相关的公开 PoC 元数据。')}</p></div>`}
-      <div class="hint-list"><p><b>匹配逻辑：</b>直接出现 CVE 时最高优先；否则按产品名、组件名和 RCE / SSRF / SQLi / 反序列化 / 路径穿越等漏洞类型关键词做离线倒排筛选。</p></div>
+      <div class="hint-list"><p><b>匹配逻辑：</b>直接出现 CVE 时最高优先；否则把产品、组件、精确版本和 RCE / SSRF / SQLi / 反序列化 / 路径穿越等漏洞类型一起做离线倒排筛选。</p></div>
     </section>`;
   }
 
@@ -57,14 +86,15 @@
     const a=analysis.autopilot;
     if (!a) return '';
     autopilotArtifacts=(a.artifacts||[]).map((x)=>x.artifact).filter(Boolean);
-    const checks=(a.automaticChecks||[]).slice(0,12);
+    const checks=(a.automaticChecks||[]).slice(0,14);
     const track=a.track?.title||'暂未锁定';
     return `<section class="panel next-actions autopilot-panel">
-      <div class="result-title"><div><b>一键自动分析已完成</b><p>打开赛题目录后默认就走自动工作流：疑似编码先试解，恢复出的文件/抓包继续递归分析，不用反复导出再拖回来。</p></div><div class="run-row"><span>${a.summary?.automaticCheckKinds||0} 类检查 · ${a.summary?.automaticCheckHits||0} 次命中</span><button class="button primary" data-autopilot-bundle>一键导出结果包</button></div></div>
+      <div class="result-title"><div><b>一键自动分析已完成</b><p>打开赛题目录后默认就走自动工作流：疑似编码先试解，恢复出的文件/抓包继续递归分析，依赖和版本也自动提取，不用反复导出再拖回来。</p></div><div class="run-row"><span>${a.summary?.automaticCheckKinds||0} 类检查 · ${a.summary?.automaticCheckHits||0} 次命中</span><button class="button primary" data-autopilot-bundle>一键导出结果包</button></div></div>
       <div class="simple-score-row">
         <article class="simple-result"><span>自动识别方向</span><strong>${esc(track)}</strong><small>${a.track?`score ${a.track.score}`:'结合题目说明继续判断'}</small></article>
         <article class="simple-result"><span>高危线索</span><strong>${a.summary?.highFindings||0}</strong><small>已按优先级排序</small></article>
         <article class="simple-result"><span>Flag 候选</span><strong>${a.summary?.flagCandidates||0}</strong><small>只需人工核对来源</small></article>
+        <article class="simple-result"><span>精确版本</span><strong>${a.summary?.exactVersions||0}</strong><small>${a.summary?.versionCorrelatedPocs?`${a.summary.versionCorrelatedPocs} 个 PoC 参考同时命中版本`:'用于自动关联漏洞参考'}</small></article>
         <article class="simple-result"><span>可导出产物</span><strong>${a.summary?.exportableArtifacts||0}</strong><small>固件 / 抓包 / 编码恢复 / 图传 / 递归产物</small></article>
       </div>
       <div class="step-list">${(a.actions||[]).map(actionHtml).join('')}</div>
@@ -76,7 +106,7 @@
   function autoWorkspaceView() {
     const base=cleanLegacyLabels(previousWorkspaceView());
     if (!state.workspace) return base;
-    return `${autopilotPanel(state.workspace)}${pocReferencePanel(state.workspace)}${base}`;
+    return `${autopilotPanel(state.workspace)}${techStackPanel(state.workspace)}${pocReferencePanel(state.workspace)}${base}`;
   }
 
   document.addEventListener('click',async(event)=>{
