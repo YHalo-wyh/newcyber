@@ -98,5 +98,5 @@ test('prompt injection renderer compiles and loads after Batch 9 AI tools',()=>{
   assert.doesNotThrow(()=>new vm.Script(source,{filename:'renderer/ai_prompt_injection_tools.js'}));
   assert.ok(html.indexOf('ai_prompt_injection_tools.js')>html.indexOf('ai_batch9_tools.js'));
   assert.match(source,/提示词注入训练/);
-  assert.match(source,/TRAIN/);
+  assert.match(source,/no-op/i);
 });
