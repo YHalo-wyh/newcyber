@@ -12,7 +12,7 @@ function h265Info(payload) {
   if (!temporalIdPlus1) return null;
   if (nalType===48) return {type:'ap',nalType,strong:true};
   if (nalType===49&&payload.length>=3) return {type:'fu',nalType,fuType:payload[2]&0x3f,start:Boolean(payload[2]&0x80),end:Boolean(payload[2]&0x40),strong:true};
-  if (nalType===50) return {type:'paci',nalType,strong:true};
+  if (nalType===50) return {type:'paci',nalType,strong:false};
   return {type:'single',nalType,strong:nalType>=32&&nalType<=40};
 }
 
