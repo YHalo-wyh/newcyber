@@ -16,19 +16,44 @@ const { runTool }=require('../src/core/tool_router');
 
 test('prompt injection suite covers direct, indirect, RAG, tool, secret and multi-turn cases',()=>{
   const result=buildPromptInjectionSuite({});
-  assert.ok(result.templates.length>=9);
+  assert.ok(result.templates.length>=25);
   const categories=new Set(result.templates.map((x)=>x.category));
   for (const category of ['direct','indirect','rag','agent-tool','secret-boundary','multi-turn']) assert.ok(categories.has(category));
   assert.ok(result.templates.some((x)=>x.id==='direct-instruction-override' && x.payload.includes(DEFAULT_MARKER)));
   assert.ok(result.templates.some((x)=>x.id==='canary-exfiltration' && x.payload.includes(DEFAULT_CANARY)));
   assert.ok(result.templates.some((x)=>x.id==='tool-output-injection' && x.payload.includes(DEFAULT_TOOL)));
+  assert.equal(new Set(result.templates.map((x)=>x.id)).size,result.templates.length);
+});
+
+test('prompt injection suite exposes a competition-only pack with common CTF payload families',()=>{
+  const result=buildPromptInjectionSuite({competitionOnly:true});
+  assert.ok(result.templates.length>=20);
+  assert.equal(result.competitionCount,result.templates.length);
+  assert.ok(result.templates.every((x)=>x.competition===true));
+  for (const id of [
+    'developer-role-spoof',
+    'assistant-prefix-completion',
+    'output-format-hijack',
+    'markdown-fence-breakout',
+    'rag-authority-spoof',
+    'tool-confirmation-bypass',
+    'repeat-hidden-context',
+    'multi-turn-trigger-word'
+  ]) assert.ok(result.templates.some((x)=>x.id===id),id);
 });
 
 test('prompt injection suite supports category filtering and custom harmless markers',()=>{
   const result=buildPromptInjectionSuite({category:'rag',marker:'SAFE_MARKER_X',canary:'SAFE_CANARY_X',tool:'safe_noop_x'});
+  assert.ok(result.templates.length>=3);
+  assert.ok(result.templates.every((x)=>x.category==='rag'));
+  assert.ok(result.templates.every((x)=>x.payload.includes('SAFE_MARKER_X')));
+});
+
+test('prompt injection suite supports competition pack alias',()=>{
+  const result=buildPromptInjectionSuite({pack:'competition',ids:['output-format-hijack'],marker:'CTF_SAFE_MARKER'});
   assert.equal(result.templates.length,1);
-  assert.equal(result.templates[0].id,'rag-retrieval-injection');
-  assert.match(result.templates[0].payload,/SAFE_MARKER_X/);
+  assert.equal(result.templates[0].id,'output-format-hijack');
+  assert.match(result.templates[0].payload,/CTF_SAFE_MARKER/);
 });
 
 test('prompt injection evaluator flags marker and canary exposure as explicit candidate failure',()=>{
@@ -86,7 +111,8 @@ if response.tool_calls:
 });
 
 test('tool router exposes prompt injection suite, evaluator and source audit',()=>{
-  assert.ok(runTool('ai-prompt-injection-suite',{input:'{}'}).templates.length>=9);
+  assert.ok(runTool('ai-prompt-injection-suite',{input:'{}'}).templates.length>=25);
+  assert.ok(runTool('ai-prompt-injection-suite',{input:JSON.stringify({competitionOnly:true})}).competitionCount>=20);
   assert.equal(runTool('ai-prompt-injection-evaluate',{input:JSON.stringify({response:DEFAULT_MARKER})}).verdict,'candidate-failure');
   assert.ok(runTool('ai-prompt-injection-source',{input:'retriever.similarity_search(q); client.responses.create({input: context}); tool_calls'}).surfaces.rag);
 });
@@ -98,5 +124,6 @@ test('prompt injection renderer compiles and loads after Batch 9 AI tools',()=>{
   assert.doesNotThrow(()=>new vm.Script(source,{filename:'renderer/ai_prompt_injection_tools.js'}));
   assert.ok(html.indexOf('ai_prompt_injection_tools.js')>html.indexOf('ai_batch9_tools.js'));
   assert.match(source,/提示词注入训练/);
-  assert.match(source,/no-op/i);
+  assert.match(source,/competitionOnly/);
+  assert.match(source,/赛题高频/);
 });
