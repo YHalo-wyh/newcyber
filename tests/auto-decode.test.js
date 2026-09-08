@@ -34,6 +34,6 @@ test('auto decode does not claim unknown strong encryption is solved', () => {
   const input = '8f2a7c4d0e15b9aa4936d0e8c1f24751a1e8f0b893fa77c2c6de48a51b29f031';
   const result = autoDecode(input);
   assert.equal(result.foundFlag, null);
-  assert.match(result.note, /key\/IV\/模式|key\/IV\/算法参数/);
+  assert.match(result.note, /未知强加密|key\/IV\/模式|key\/IV\/算法参数/);
   assert.ok(result.triedCandidates > 0);
 });

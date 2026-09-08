@@ -37,6 +37,8 @@ function scoreTracks(analysis={}) {
 
     if (m.web3Audit||m.solanaAudit||m.evmAudit||m.contractAudit) scores.web3+=14;
     if (/\.(?:sol|vy)$/.test(p)||/(?:evm|solidity|web3|contract|abi)/.test(p)) scores.web3+=4;
+
+    if (m.recursiveArtifacts?.nodes?.some((node)=>node.capture)) scores.lowalt+=5;
   }
   return Object.entries(scores).map(([id,score])=>({id,title:TRACKS[id].title,tool:TRACKS[id].tool,score})).sort((a,b)=>b.score-a.score);
 }
@@ -82,6 +84,15 @@ function pushArtifact(out,seen,file,kind,artifact,next='') {
   out.push({file,kind,name:artifact.name||kind,size:artifact.size||0,completeness:artifact.completeness||'unknown',artifact,next});
 }
 
+function recursiveArtifactKind(artifact) {
+  const magic=String(artifact?.metadata?.magic||'').toUpperCase();
+  if (artifact?.mediaType?.includes('H265')) return '递归恢复 RTP/H265 图传';
+  if (artifact?.mediaType?.includes('H264')) return '递归恢复 RTP/H264 图传';
+  if (magic==='PCAP'||magic==='PCAPNG') return `递归解码 ${magic} 抓包`;
+  if (['ELF','ZIP','PDF','PNG','JPEG','SQUASHFS','UIMAGE'].includes(magic)) return `递归恢复 ${magic} 文件`;
+  return '递归恢复产物';
+}
+
 function collectArtifacts(analysis={}) {
   const out=[]; const seen=new Set();
   for (const file of analysis.files||[]) {
@@ -96,12 +107,13 @@ function collectArtifacts(analysis={}) {
     for (const item of m.autoDecode?.candidates||[]) pushArtifact(out,seen,file.path,`自动解码 ${item.magic||'文件'} 候选`,item.artifact,'直接进入对应文件类型的下一步分析。');
     for (const artifact of m.captureIntelligence?.video?.artifacts||[]) pushArtifact(out,seen,file.path,artifact.mediaType?.includes('H265')?'RTP/H265 图传':'RTP/H264 图传',artifact,'可直接交给 ffplay/ffmpeg 或视频取证继续检查。');
     for (const session of m.captureIntelligence?.video?.sessions||[]) pushArtifact(out,seen,file.path,`RTP/${session.codec||'H264'} 图传`,session.artifact,'可直接交给 ffplay/ffmpeg 或视频取证继续检查。');
+    for (const artifact of m.recursiveArtifacts?.artifacts||[]) pushArtifact(out,seen,file.path,recursiveArtifactKind(artifact),artifact,'已经过递归自动分析；导出只用于人工复核或交给外部专业工具。');
   }
   return out.sort((a,b)=>{
     const ca=a.completeness==='complete'?1:0;
     const cb=b.completeness==='complete'?1:0;
     return cb-ca||(b.size||0)-(a.size||0);
-  }).slice(0,24);
+  }).slice(0,32);
 }
 
 function priorityFiles(analysis={}) {
@@ -113,13 +125,15 @@ function priorityFiles(analysis={}) {
     if (m.captureIntelligence?.video?.artifacts?.length||m.captureIntelligence?.datalink) score+=32;
     if (m.pcapng?.can?.udsProgramming?.exportableTransfers) score+=50;
     if (m.autoDecode?.candidates?.some((x)=>x.artifact||x.foundFlag)) score+=50;
+    if (m.recursiveArtifacts?.artifacts?.length) score+=55;
+    if (m.recursiveArtifacts?.flags?.length) score+=100;
     return {path:file.path,type:file.type||file.extension||'文件',size:file.size||0,score};
   }).filter((x)=>x.score>0).sort((a,b)=>b.score-a.score).slice(0,8);
 }
 
 function automaticChecks(analysis={}) {
   const hits={
-    'capture-intelligence':0,'uav-regulatory':0,'gnss-audit':0,'firmware-update':0,'ai-model':0,'ai-ocr-extraction':0,'ai-skill-matrix':0,'web3':0,'vehicle':0,'auto-decode':0
+    'capture-intelligence':0,'uav-regulatory':0,'gnss-audit':0,'firmware-update':0,'ai-model':0,'ai-ocr-extraction':0,'ai-skill-matrix':0,'web3':0,'vehicle':0,'auto-decode':0,'recursive-artifact':0
   };
   for (const file of analysis.files||[]) {
     const m=file.metadata||{};
@@ -133,9 +147,10 @@ function automaticChecks(analysis={}) {
     if (m.web3Audit||m.solanaAudit||m.evmAudit) hits.web3++;
     if (m.pcapng?.can||m.captureIntelligence?.can?.parsedFrames) hits.vehicle++;
     if (m.autoDecode?.candidates?.length) hits['auto-decode']++;
+    if (m.recursiveArtifacts?.stats?.analyzedNodes) hits['recursive-artifact']++;
   }
   const labels={
-    'capture-intelligence':'PCAP/PCAPNG 深度解析','uav-regulatory':'低空监管 API 审计','gnss-audit':'GNSS/GPS 异常审计','firmware-update':'固件升级信任链审计','ai-model':'AI 模型/源码安全审计','ai-ocr-extraction':'OCR 模型窃取分析','ai-skill-matrix':'AI 技能矩阵','web3':'区块链/合约分析','vehicle':'CAN/UDS 分析','auto-decode':'自动解码/文件恢复'
+    'capture-intelligence':'PCAP/PCAPNG 深度解析','uav-regulatory':'低空监管 API 审计','gnss-audit':'GNSS/GPS 异常审计','firmware-update':'固件升级信任链审计','ai-model':'AI 模型/源码安全审计','ai-ocr-extraction':'OCR 模型窃取分析','ai-skill-matrix':'AI 技能矩阵','web3':'区块链/合约分析','vehicle':'CAN/UDS 分析','auto-decode':'疑似编码自动试解','recursive-artifact':'恢复产物递归分析'
   };
   return Object.entries(hits).filter(([,count])=>count>0).map(([id,count])=>({id,title:labels[id],hits:count})).sort((a,b)=>b.hits-a.hits);
 }
@@ -161,7 +176,7 @@ function buildWorkspaceAutopilot(analysis={}) {
   const track=tracks[0]?.score>0?tracks[0]:null;
   const actions=buildActions({track,flags,findings,artifacts});
   return {
-    version:1,
+    version:2,
     generatedAt:new Date().toISOString(),
     track,
     tracks,
@@ -178,7 +193,7 @@ function buildWorkspaceAutopilot(analysis={}) {
       automaticCheckKinds:checks.length,
       automaticCheckHits:checks.reduce((sum,x)=>sum+x.hits,0)
     },
-    notes:['NewCyber 默认就是赛题工作流：导入目录后先自动扫描、自动路由、自动恢复可验证产物，再把人工操作压缩到最短链路。','所有结论仍保留证据来源；不会自动执行附件、联网攻击或提交 Flag。']
+    notes:['NewCyber 默认就是赛题工作流：导入目录后先自动扫描、自动路由、自动恢复产物，并对恢复出的文本/抓包/压缩层继续递归分析，再把人工操作压缩到最短链路。','所有结论仍保留证据来源；不会自动执行附件、联网攻击或提交 Flag。']
   };
 }
 

@@ -16,7 +16,7 @@
     return html
       .replace('选择赛题目录，开始分析','选择赛题目录，一键自动分析')
       .replace('把题目丢进来，<em>先告诉你下一步做什么。</em>','把题目丢进来，<em>自动把重复劳动跑完。</em>')
-      .replace('NewCyber 先做离线分析，再把最值得追的线索压缩成 1～3 个动作。','NewCyber 默认直接跑离线扫描、赛道识别、专项审计、产物恢复和优先级排序，再把需要人工处理的部分压缩到最短链路。');
+      .replace('NewCyber 先做离线分析，再把最值得追的线索压缩成 1～3 个动作。','NewCyber 默认直接跑离线扫描、赛道识别、疑似编码试解、专项审计和恢复产物递归分析，再把需要人工处理的部分压缩到最短链路。');
   }
 
   function actionHtml(item,index) {
@@ -31,15 +31,15 @@
     const a=analysis.autopilot;
     if (!a) return '';
     autopilotArtifacts=(a.artifacts||[]).map((x)=>x.artifact).filter(Boolean);
-    const checks=(a.automaticChecks||[]).slice(0,8);
+    const checks=(a.automaticChecks||[]).slice(0,12);
     const track=a.track?.title||'暂未锁定';
     return `<section class="panel next-actions autopilot-panel">
-      <div class="result-title"><div><b>一键自动分析已完成</b><p>打开赛题目录后默认就走自动工作流，能离线完成的步骤先全部跑完。</p></div><div class="run-row"><span>${a.summary?.automaticCheckKinds||0} 类检查 · ${a.summary?.automaticCheckHits||0} 次命中</span><button class="button primary" data-autopilot-bundle>一键导出结果包</button></div></div>
+      <div class="result-title"><div><b>一键自动分析已完成</b><p>打开赛题目录后默认就走自动工作流：疑似编码先试解，恢复出的文件/抓包继续递归分析，不用反复导出再拖回来。</p></div><div class="run-row"><span>${a.summary?.automaticCheckKinds||0} 类检查 · ${a.summary?.automaticCheckHits||0} 次命中</span><button class="button primary" data-autopilot-bundle>一键导出结果包</button></div></div>
       <div class="simple-score-row">
         <article class="simple-result"><span>自动识别方向</span><strong>${esc(track)}</strong><small>${a.track?`score ${a.track.score}`:'结合题目说明继续判断'}</small></article>
         <article class="simple-result"><span>高危线索</span><strong>${a.summary?.highFindings||0}</strong><small>已按优先级排序</small></article>
         <article class="simple-result"><span>Flag 候选</span><strong>${a.summary?.flagCandidates||0}</strong><small>只需人工核对来源</small></article>
-        <article class="simple-result"><span>可导出产物</span><strong>${a.summary?.exportableArtifacts||0}</strong><small>固件 / FTP / 自动解码 / 图传</small></article>
+        <article class="simple-result"><span>可导出产物</span><strong>${a.summary?.exportableArtifacts||0}</strong><small>固件 / 抓包 / 编码恢复 / 图传 / 递归产物</small></article>
       </div>
       <div class="step-list">${(a.actions||[]).map(actionHtml).join('')}</div>
       ${checks.length?`<div class="hint-list"><p><b>已经自动跑过：</b> ${checks.map((x)=>`${esc(x.title)} ×${x.hits}`).join(' · ')}</p></div>`:''}
