@@ -91,5 +91,6 @@ test('renderer and compatibility entrypoint include tech stack intelligence',()=
   assert.doesNotThrow(()=>new Function(renderer));
   assert.match(renderer,/技术栈 \/ 依赖 \/ 版本/);
   const entry=fssync.readFileSync(path.join(root,'src/core/finals_analyzer_batch15.js'),'utf8');
-  assert.match(entry,/finals_analyzer_batch18/);
+  const match=entry.match(/finals_analyzer_batch(\d+)/);
+  assert.ok(match&&Number(match[1])>=18,`compatibility wrapper must target Batch18 or newer, got ${match?.[1]||'none'}`);
 });
