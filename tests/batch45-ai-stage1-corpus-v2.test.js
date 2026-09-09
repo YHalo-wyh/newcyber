@@ -3,8 +3,9 @@
 const test=require('node:test');
 const assert=require('node:assert/strict');
 const {
-  DIRECTIONS,AI_STAGE1_SOURCE_CATALOG,byDirection,buildCorpusV2Plan,catalogHealth
+  DIRECTIONS,AI_STAGE1_SOURCE_CATALOG,byDirection:baseByDirection,buildCorpusV2Plan,catalogHealth
 }=require('../src/core/ai_stage1_source_catalog');
+const {SOURCE_REGISTRY,byDirection,registryHealth}=require('../src/core/ai_stage1_source_registry');
 const {auditCurrentCorpusCoverage,buildTrainingMix}=require('../src/core/ai_stage1_corpus_optimizer');
 
 test('Batch45 source catalog covers all five official stage-one directions with real sources',()=>{
@@ -13,10 +14,29 @@ test('Batch45 source catalog covers all five official stage-one directions with 
   assert.equal(health.complete,true);
   assert.equal(health.duplicateIds.length,0);
   for(const direction of DIRECTIONS){
-    const sources=byDirection(direction);
+    const sources=baseByDirection(direction);
     assert.ok(sources.length>=5,`${direction} source coverage`);
     assert.ok(sources.some((x)=>x.tier==='A'),`${direction} needs a real competition/dataset source`);
     assert.ok(sources.every((x)=>/^https:\/\//.test(x.url)),`${direction} sources must preserve provenance URL`);
+  }
+});
+
+test('Batch45 expanded registry includes the user-selected global corpora and domestic CTFs',()=>{
+  const health=registryHealth();
+  assert.equal(health.complete,true);
+  assert.ok(health.domestic>=6);
+  assert.deepEqual(health.requestedCoreMissing,[]);
+  const ids=new Set(SOURCE_REGISTRY.map((x)=>x.id));
+  for(const id of [
+    'tensortrust-data','prompt-airlines','gandalf-ignore-instructions','agentdojo',
+    'madry-mnist-challenge','madry-cifar10-challenge','nips17-adversarial','robustbench',
+    'mico','nist-trojai','ccb-2025-ai-archive','ccb-2025-easy-poison','ccb-2025-llm-poison',
+    'bayarea-2025-blind-whisper','ycb-2024-nlp-model-attack','ycb-2024-targeted-image-adv','ycb-2025-mini-modelscope'
+  ])assert.ok(ids.has(id),id);
+  for(const direction of DIRECTIONS){
+    const sources=byDirection(direction);
+    assert.ok(sources.length>=5,`${direction} expanded source coverage`);
+    assert.ok(sources.every((x)=>/^https:\/\//.test(x.url)),`${direction} registry provenance`);
   }
 });
 
@@ -41,7 +61,7 @@ test('Batch45 split policy prevents mutation leakage and answer/flag memorizatio
   assert.match(policy.negatives,/hard negatives/i);
 });
 
-test('Batch45 catalog contains competition-grade bulk corpora and real CTF bundles',()=>{
+test('Batch45 base catalog contains competition-grade bulk corpora and real CTF bundles',()=>{
   const ids=new Set(AI_STAGE1_SOURCE_CATALOG.map((x)=>x.id));
   for(const id of [
     'defcon31-mosscap','agentdojo','injecagent','robustbench','tianchi-imagenet-attack',
@@ -60,6 +80,8 @@ test('Batch45 audits the old mutated-seed corpus by upstream diversity instead o
     assert.ok(group.currentSeeds>0,`${group.direction} keeps existing Batch43 seed coverage`);
     assert.ok(group.distinctCurrentSources<=group.currentSeeds);
   }
+  assert.ok(audit.queue.some((x)=>x.id==='tensortrust-data'));
+  assert.ok(audit.queue.some((x)=>x.id==='madry-mnist-challenge'));
 });
 
 test('Batch45 training mix is dominated by real competitions and benchmarks with source-grouped split',()=>{
