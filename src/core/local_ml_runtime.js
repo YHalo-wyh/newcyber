@@ -203,7 +203,12 @@ module.exports = {
   MAX_OUTPUT_ELEMENTS,
   providerCatalog,
   runtimeStatus,
+  normalizeProvider,
+  sessionOptions,
+  withSession,
   tensorFromSpec,
+  metadataView,
+  outputView,
   inspectOnnxModel,
   runOnnxModel
 };
