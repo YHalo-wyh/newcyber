@@ -70,7 +70,6 @@ function solveCholeskyMany(L,rhs){
   const n=L.length,cols=rhs[0].length;const y=Array.from({length:n},()=>Array(cols).fill(0));
   for(let i=0;i<n;i+=1)for(let c=0;c<cols;c+=1){let v=rhs[i][c];for(let k=0;k<i;k++)v-=L[i][k]*y[k][c];y[i][c]=v/L[i][i];}
   const x=Array.from({length:n},()=>Array(cols).fill(0));
-  for(let i=n-1;i>=0;i--)for(let c=0;c<cols;c+=1){let v=rhs[i][c];for(let k=0;k<i;k++)v-=L[i][k]*y[k][c];y[i][c]=v/L[i][i];}
   for(let i=n-1;i>=0;i--)for(let c=0;c<cols;c+=1){let v=y[i][c];for(let k=i+1;k<n;k++)v-=L[k][i]*x[k][c];x[i][c]=v/L[i][i];}
   return x;
 }
@@ -121,7 +120,7 @@ async function fitGroupedLeakageProfiles(hiddenStates,rowSource,layout,options={
 
 function recoverGroupHidden(profile,leakageRow,options={}){
   if(profile?.status!=='ok')return {status:'profile-gap'};const y=finiteMatrixRow(leakageRow,profile.leakageDim,'target grouped leakage');
-  const A=Array.from({length:profile.leakageDim},(_,c)=>Array.from({length:profile.hiddenDim},(_,d)=>Number(profile.weights[d][c])));const b=y.map((v,c)=>v-Number(profile.intercept[c]||0));
+  const A=Array.from({length:profile.leakageDim},(_,c)=>Array.from({length:profile.hiddenDim},(_,d)=>Number(profile.weights[d][c])));const b=y.map((value,c)=>value-Number(profile.intercept[c]||0));
   const solved=pseudoinverseSolve(A,b,{lambda:Math.max(0,Number(options.lambda??1e-10))});return {status:solved.status,hidden:solved.solution||null,method:solved.method||null};
 }
 
