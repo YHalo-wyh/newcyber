@@ -9,28 +9,31 @@ const read=(p)=>fs.readFileSync(path.join(root,p),'utf8');
 const {runAiRealCtfRegression,getAiRealCtfCorpus}=require('../src/core/ai_real_ctf_regression');
 const {runTool}=require('../src/core/tool_router');
 
-test('domestic AI CTF corpus is provenance-aware and exposes honest coverage gaps',()=>{
+test('domestic AI CTF corpus is provenance-aware and keeps partial coverage honest',()=>{
   const corpus=getAiRealCtfCorpus();
-  assert.ok(corpus.length>=8);
+  assert.ok(corpus.length>=9);
   for(const item of corpus){
     assert.ok(item.event&&item.challenge&&item.source);
     assert.ok(['official-writeup-derived','public-writeup-derived','public-description-derived','public-description-only'].includes(item.provenance));
     assert.ok(['full','partial','gap'].includes(item.coverage));
   }
   const names=corpus.map((x)=>x.challenge);
-  for(const expected of ['🪐 小型大语言模型星球','欺诈猎手的后门陷阱','The Silent Heist','what-is-model','prompt_audit','CIFAR-10','Fake Emotion','Blind']) assert.ok(names.includes(expected));
+  for(const expected of ['🪐 小型大语言模型星球','欺诈猎手的后门陷阱','The Silent Heist','what-is-model','prompt_audit','CIFAR-10','Fake Emotion','耄耋','Blind']) assert.ok(names.includes(expected));
   const fake=corpus.find((x)=>x.challenge==='Fake Emotion');
-  assert.equal(fake.coverage,'gap');
-  assert.match(fake.limitation,/\.npy|NPY/i);
+  assert.equal(fake.coverage,'partial');
+  assert.match(fake.limitation,/NPY|样本|差分/i);
+  const maodie=corpus.find((x)=>x.challenge==='耄耋');
+  assert.equal(maodie.provenance,'public-writeup-derived');
+  assert.match(maodie.limitation,/0\.85|0\.125|频域/);
 });
 
 test('real AI CTF regression feeds analyzers instead of claiming every challenge solved',()=>{
   const result=runAiRealCtfRegression();
   assert.equal(result.schema,'newcyber.ai-real-ctf-regression.v1');
-  assert.equal(result.summary.total,8);
-  assert.ok(result.summary.recognitionPass>=6);
-  assert.ok(result.summary.coveragePartial>=5);
-  assert.equal(result.summary.coverageGap,1);
+  assert.equal(result.summary.total,9);
+  assert.ok(result.summary.recognitionPass>=8);
+  assert.ok(result.summary.coveragePartial>=7);
+  assert.equal(result.summary.coverageGap,0);
   assert.match(result.note,/PASS.*不等于已自动解出原题/);
 
   const byName=new Map(result.results.map((x)=>[x.challenge,x]));
@@ -40,19 +43,23 @@ test('real AI CTF regression feeds analyzers instead of claiming every challenge
   assert.ok(byName.get('The Silent Heist').findingIds.includes('multivariate-profile'));
   assert.equal(byName.get('prompt_audit').status,'pass');
   assert.ok(byName.get('prompt_audit').findingIds.includes('prompt-injection-rag-surface'));
-  assert.equal(byName.get('CIFAR-10').status,'pass');
+  assert.equal(byName.get('CIFAR-10').status,'miss');
   assert.ok(byName.get('CIFAR-10').findingIds.includes('backdoor-target-asr-candidate'));
+  assert.match(byName.get('CIFAR-10').limitation,/Patch|trigger/i);
+  assert.equal(byName.get('Fake Emotion').status,'pass');
+  assert.match(byName.get('Fake Emotion').evidence,/shape=8x8x1/);
+  assert.equal(byName.get('耄耋').status,'pass');
+  assert.ok(byName.get('耄耋').findingIds.includes('frequency-domain-profile'));
   assert.equal(byName.get('Blind').status,'pass');
   assert.ok(byName.get('Blind').findingIds.includes('ai-output-shell-injection'));
-  assert.equal(byName.get('Fake Emotion').status,'gap');
 });
 
 test('tool router exposes real corpus and executable regression',()=>{
   const corpus=runTool('ai-real-ctf-corpus',{});
   assert.equal(corpus.schema,'newcyber.ai-real-ctf-corpus.v1');
-  assert.ok(corpus.cases.length>=8);
+  assert.ok(corpus.cases.length>=9);
   const result=runTool('ai-real-ctf-regression',{});
-  assert.equal(result.summary.total,8);
+  assert.equal(result.summary.total,9);
 });
 
 test('homepage is a compact desktop start center, not the legacy marketing hero',()=>{

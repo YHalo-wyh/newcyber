@@ -2,6 +2,7 @@ const { auditAiChallengeSource } = require('./ai_source_batch9');
 const { analyzeTabularDataset } = require('./ai_tabular');
 const { analyzeBackdoorBehavior } = require('./ai_poison_backdoor_validation');
 const { auditPromptInjectionSource } = require('./ai_prompt_injection');
+const { analyzeNpySample, analyzeRasterImage } = require('./ai_sample_forensics');
 
 function silentHeistCsv(rows=96) {
   const headers=Array.from({length:20},(_,i)=>`feature_${i+1}`);
@@ -25,6 +26,40 @@ function backdoorFixture() {
     rows.push({true_label:truth,clean_pred:truth,triggered_pred:'1',control_pred:truth,target_label:'1'});
   }
   return JSON.stringify({targetLabel:'1',rows});
+}
+
+function makeNpyFloat32(shape, values) {
+  const shapeText=shape.length===1?`${shape[0]},`:shape.join(', ');
+  let header=`{'descr': '<f4', 'fortran_order': False, 'shape': (${shapeText}), }`;
+  const preamble=10;
+  const base=Buffer.byteLength(header,'latin1')+1;
+  const padded=Math.ceil((preamble+base)/16)*16-preamble;
+  header=`${header}${' '.repeat(Math.max(0,padded-base))}\n`;
+  const magic=Buffer.from([0x93,0x4e,0x55,0x4d,0x50,0x59,0x01,0x00]);
+  const length=Buffer.alloc(2); length.writeUInt16LE(Buffer.byteLength(header,'latin1'),0);
+  const payload=Buffer.alloc(values.length*4);
+  values.forEach((value,index)=>payload.writeFloatLE(value,index*4));
+  return Buffer.concat([magic,length,Buffer.from(header,'latin1'),payload]);
+}
+
+function patchRaster(size=32) {
+  const data=[];
+  for(let y=0;y<size;y+=1){
+    for(let x=0;x<size;x+=1){
+      const value=(x>=size-5&&y>=size-5)?255:96+((x+y)%3);
+      data.push(value,value,value,255);
+    }
+  }
+  return {width:size,height:size,channels:4,data};
+}
+
+function checkerRaster(size=32) {
+  const data=[];
+  for(let y=0;y<size;y+=1) for(let x=0;x<size;x+=1){
+    const value=((x+y)&1)?255:0;
+    data.push(value,value,value,255);
+  }
+  return {width:size,height:size,channels:4,data};
 }
 
 const HACKERGAME_SOURCE=`
@@ -63,7 +98,7 @@ const CASES=Object.freeze([
     challenge:'🪐 小型大语言模型星球',
     aiLabel:'AI',
     kind:'LLM target-output / prompt search',
-    source:'https://github.com/USTC-Hackergame/hackergame2023-writeups/tree/master/official/%F0%9F%AA%90%20%E5%B0%8F%E5%9E%8B%E5%A4%A7%E8%AF%AD%E8%A8%80%E6%A8%A1%E5%9E%8B%E6%98%9F%E7%90%83',
+    source:'https://github.com/USTC-Hackergame/hackergame2023-writeups/tree/master/official/%F0%9F%AA%90%20%E5%B0%8B%8F%E5%A4%A7%E8%AF%AD%E8%A8%80%E6%A8%A1%E5%9E%8B%E6%98%9F%E7%90%83',
     provenance:'official-writeup-derived',
     coverage:'partial',
     limitation:'能识别 target-output oracle、确定性生成参数与约束搜索方向；尚不自动执行 token/prompt 优化。',
@@ -143,11 +178,13 @@ const CASES=Object.freeze([
     source:'https://github.com/CTF-Archives/2026-CCSSSC-Final',
     provenance:'public-description-derived',
     coverage:'partial',
-    limitation:'能验证 trigger 前后预测迁移、ASR 与 control specificity；还缺图像 trigger 定位/搜索和 patch 可视化。',
+    limitation:'现在同时能验证 trigger 前后预测迁移/ASR，并把局部 patch 候选叠到图像工作台；仍不会替选手针对目标模型自动优化 trigger。',
     run(){
-      const result=analyzeBackdoorBehavior(backdoorFixture());
-      const ids=(result.findings||[]).map((x)=>x.id);
-      return {recognized:ids.includes('backdoor-target-asr-candidate'),tool:'ai-backdoor-behavior',evidence:`paired=${result.paired??10} · target ASR=${result.targetASR??'n/a'}`,findingIds:ids};
+      const behavior=analyzeBackdoorBehavior(backdoorFixture());
+      const visual=analyzeRasterImage(patchRaster());
+      const ids=[...(behavior.findings||[]).map((x)=>x.id),...(visual.findings||[]).map((x)=>x.id)];
+      const recognized=ids.includes('backdoor-target-asr-candidate')&&Boolean(visual.patchAnalysis?.candidates?.length);
+      return {recognized,tool:'ai-sample-forensics',evidence:`target ASR=${behavior.targetASR??'n/a'} · patch candidates=${visual.patchAnalysis?.candidates?.length||0}`,findingIds:ids};
     }
   },
   {
@@ -157,10 +194,32 @@ const CASES=Object.freeze([
     aiLabel:'AI / NPY submission',
     kind:'Array / adversarial sample submission',
     source:'https://github.com/CTF-Archives/2026-CCSSSC-Final',
-    provenance:'public-description-only',
-    coverage:'gap',
-    limitation:'当前缺少面向 .npy 样本的第一方数组预览、差分热区、约束编辑和直接导出工作台；这是下一批 AI UI/能力缺口。',
-    run(){return {recognized:false,tool:'ai-adversarial-audit',evidence:'GAP: no first-class NPY sample workbench',findingIds:[]};}
+    provenance:'public-description-derived',
+    coverage:'partial',
+    limitation:'已补第一方 NPY dtype/shape/数值预览、图像解释和双样本差分；仍缺面向题目模型的梯度/黑箱优化与提交文件约束编辑器。',
+    run(){
+      const values=[];
+      for(let y=0;y<8;y+=1) for(let x=0;x<8;x+=1) values.push((x+y)/14);
+      const result=analyzeNpySample(makeNpyFloat32([8,8,1],values),'fake-emotion-fixture.npy');
+      const recognized=Boolean(result.imageLike&&result.preview?.rgbaBase64&&result.numeric?.sampled===64);
+      return {recognized,tool:'ai-sample-forensics',evidence:`shape=${result.header?.shape?.join('x')} · dtype=${result.header?.descr} · preview=${Boolean(result.preview)}`,findingIds:(result.findings||[]).map((x)=>x.id)};
+    }
+  },
+  {
+    id:'bay-area-2025-maodie',
+    event:'第五届湾区杯网络安全大赛决赛',
+    challenge:'耄耋',
+    aiLabel:'AI 人工智能 / AIGC 检测',
+    kind:'AI-generated image detection / FFT frequency feature',
+    source:'https://mdr.skyeye.qianxin.com/forum/share/4686',
+    provenance:'public-writeup-derived',
+    coverage:'partial',
+    limitation:'已复现公开 WP 的灰度频域高频占比、outer radius=0.85 与 δ=0.125 参考线；尚未加入整目录批处理、阈值校准和 CSV 批量结果导出。',
+    run(){
+      const result=analyzeRasterImage(checkerRaster());
+      const recognized=Boolean(result.frequency?.ctfReference?.outerRadiusRatio===0.85&&result.frequency?.ctfReference?.delta===0.125&&Number.isFinite(result.frequency?.highFrequencyRatio));
+      return {recognized,tool:'ai-sample-forensics',evidence:`FFT high=${result.frequency?.highFrequencyRatio} · public delta=${result.frequency?.ctfReference?.delta}`,findingIds:(result.findings||[]).map((x)=>x.id)};
+    }
   },
   {
     id:'bay-area-2025-blind',
