@@ -101,8 +101,11 @@ function decodeInstruction(buffer, offset, little = true) {
   if (p < buffer.length && buffer[p] >= 0x40 && buffer[p] <= 0x4f) { rex = buffer[p]; p += 1; }
   if (p >= buffer.length) return null;
   const opcode = buffer[p++];
-  const prefixLength = p - offset;
-  const finish = (kind, extra = {}) => ({ kind, opcode, rex, operand16, length:(extra.end ?? p)-offset, ...extra });
+  const finish = (kind, extra = {}) => {
+    const end = extra.end ?? p;
+    const { end:_end, length:_innerLength, ...rest } = extra;
+    return { kind, opcode, rex, operand16, ...rest, length:end-offset };
+  };
   const withModRM = (kind, extra = {}) => {
     const parsed = parseModRM(buffer,p,rex,little); if (!parsed) return null;
     p += parsed.length;
