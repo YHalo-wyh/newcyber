@@ -17,12 +17,6 @@ function node(id,title,phase,state,detail='',extra={}){
   return {id,title,phase,state,detail:text(detail),evidence:[],inputs:[],outputs:[],dependsOn:[],...extra};
 }
 
-function evidenceCount(value){
-  if(Array.isArray(value))return value.length;
-  if(value&&typeof value==='object')return Object.keys(value).length;
-  return value?1:0;
-}
-
 function buildSolverPipeline(analysis={}){
   const files=list(analysis.files);
   const checks=autoChecks(analysis);
@@ -98,14 +92,19 @@ function buildSolverPipeline(analysis={}){
 
   const vehicle=check(checks,'vehicle');
   if(vehicle)push(node('vehicle','CAN / ISO-TP / UDS','solve','done',`${vehicle.hits} 个车辆协议输入已解析`,{dependsOn:['triage'],evidence:[`${vehicle.hits} hit(s)`]}));
-  const lowaltHits=['capture-intelligence','gnss-audit','uav-regulatory','firmware-update'].map((id)=>check(checks,id)).filter(Boolean).reduce((sum,x)=>sum+x.hits,0);
+
+  const lowaltSpecific=['gnss-audit','uav-regulatory','firmware-update'].map((id)=>check(checks,id)).filter(Boolean).reduce((sum,x)=>sum+x.hits,0);
+  const mavlinkEvidence=anyFile(analysis,(file)=>Boolean(file.metadata?.lowAltitude||file.metadata?.mavlink||file.metadata?.captureIntelligence?.network?.mavlink?.parsedFrames));
+  const lowaltHits=lowaltSpecific+(mavlinkEvidence?1:0);
   if(lowaltHits)push(node('lowalt','MAVLink / UAV / GNSS','solve','done',`${lowaltHits} 项低空协议/场景证据进入分析链`,{dependsOn:['triage'],evidence:[`${lowaltHits} hit(s)`]}));
+
   const web3=check(checks,'web3');
   if(web3)push(node('web3','EVM / Solidity 数据流','solve','done',`${web3.hits} 个 Web3 工件已分析`,{dependsOn:['triage'],evidence:[`${web3.hits} hit(s)`]}));
 
   const vuln=check(checks,'vulnerability-candidates');
   const advisory=analysis.advisories?.summary;
-  if(vuln||advisory)push(node('supply-chain','组件版本 / Advisory / 可达性','correlate','done',vuln?`${vuln.hits} 个统一漏洞候选`:`affected ${Number(advisory?.affected)||0} · unknown ${Number(advisory?.unknown)||0}`,{
+  const advisoryEvidence=advisory&&Object.values(advisory).some((value)=>Number(value)>0);
+  if(vuln||advisoryEvidence)push(node('supply-chain','组件版本 / Advisory / 可达性','correlate','done',vuln?`${vuln.hits} 个统一漏洞候选`:`affected ${Number(advisory?.affected)||0} · unknown ${Number(advisory?.unknown)||0}`,{
     dependsOn:['triage'],evidence:vuln?[`${vuln.hits} candidate(s)`]:[]
   }));
 
