@@ -42,8 +42,10 @@ function buildSolverPipeline(analysis={}){
 
   const recursive=check(checks,'recursive-artifact');
   const recovered=list(analysis.autopilot?.artifacts);
-  push(node('recursive','恢复产物递归回灌','solve',recursive||recovered.length?'done':'skipped',recovered.length?`恢复 ${recovered.length} 个可跟踪产物并继续扫描`:'当前没有完整恢复产物',{
-    dependsOn:['decode'],outputs:recovered.slice(0,12).map((item)=>text(item.name||item.kind)).filter(Boolean),evidence:recursive?[`${recursive.hits} recursive source(s)`]:[]
+  const recursiveEvidence=metadataAny(analysis,['recursiveArtifacts','recursiveExecutor']);
+  const recursivePresent=[...exts].some((x)=>['.zip','.tar','.tgz','.gz','.gzip'].includes(x))||anyFile(analysis,(file)=>/(?:ZIP|TAR|GZIP)/i.test(text(file.type)));
+  push(node('recursive','恢复产物递归回灌','solve',recursive||recovered.length||recursiveEvidence?'done':recursivePresent?'ready':'skipped',recovered.length?`恢复 ${recovered.length} 个可跟踪产物并继续扫描`:recursiveEvidence?'已执行归档/压缩层递归分析':recursivePresent?'存在可安全递归的归档/压缩附件':'当前没有完整恢复产物',{
+    dependsOn:['decode'],inputs:recursivePresent?['archive/compressed file']:[],outputs:recovered.slice(0,12).map((item)=>text(item.name||item.kind)).filter(Boolean),evidence:recursive?[`${recursive.hits} recursive source(s)`]:recursiveEvidence?['recursive execution evidence']:[]
   }));
 
   const binaryPresent=[...exts].some((x)=>['.elf','.so','.exe','.dll','.o','.bin'].includes(x))||anyFile(analysis,(file)=>/ELF|PE32/i.test(text(file.type)));
