@@ -12,6 +12,7 @@ const {
   auditModelTree,
   validateConvertedOnnx
 } = require('../src/core/trusted_hf_converter');
+const { isSafeTensorOracleGap } = require('../src/core/hf_sca_bridge');
 
 async function tempDir(prefix='newcyber-b37-fs-') {
   return fsp.mkdtemp(path.join(os.tmpdir(),prefix));
@@ -58,4 +59,17 @@ test('Batch37 ONNX validation rejects a symlink output root', async (t) => {
     throw error;
   }
   await assert.rejects(()=>validateConvertedOnnx(link,{ort:{}}),/非符号链接目录/);
+});
+
+test('Batch37 SCA conversion eligibility requires the exact SafeTensors oracle-artifact gap', () => {
+  const eligible={
+    status:'gap',
+    gap:{code:'ORACLE_ARTIFACT_GAP'},
+    discovery:{safetensors:[{fileName:'model.safetensors'}],roles:{model:{status:'missing'}}}
+  };
+  assert.equal(isSafeTensorOracleGap(eligible),true);
+  assert.equal(isSafeTensorOracleGap({...eligible,gap:{code:'MODEL_RUNTIME_GAP'}}),false);
+  assert.equal(isSafeTensorOracleGap({...eligible,discovery:{...eligible.discovery,safetensors:[]}}),false);
+  assert.equal(isSafeTensorOracleGap({...eligible,discovery:{...eligible.discovery,roles:{model:{status:'ok',file:{fileName:'model.onnx'}}}}}),false);
+  assert.equal(isSafeTensorOracleGap({...eligible,status:'decoded-no-flag'}),false);
 });
