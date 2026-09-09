@@ -12,6 +12,7 @@ const { analyzeModelExtractionTranscript, buildModelExtractionHarness } = requir
 const { analyzeOcrExtractionTranscript, buildOcrExtractionHarness } = require('./ai_ocr_extraction');
 const { analyzeModelInversion } = require('./ai_model_inversion');
 const { diagnoseAiSkillMatrix } = require('./ai_skill_matrix');
+const { runAiRealCtfRegression, getAiRealCtfCorpus } = require('./ai_real_ctf_regression');
 const { scanRegulatoryApi } = require('./low_altitude_regulatory');
 const { analyzeGnssLog } = require('./gnss_audit');
 const { analyzeGnssSpectrum } = require('./gnss_sdr');
@@ -45,6 +46,8 @@ function runTool(tool, payload = {}) {
   if (tool === 'firmware-update-audit') return auditFirmwareUpdate(payload.input);
   if (tool === 'ai-source-scan') return auditAiChallengeSource(payload.input);
   if (tool === 'ai-skill-matrix') return diagnoseAiSkillMatrix(payload.input ?? payload);
+  if (tool === 'ai-real-ctf-regression') return runAiRealCtfRegression();
+  if (tool === 'ai-real-ctf-corpus') return { schema:'newcyber.ai-real-ctf-corpus.v1', cases:getAiRealCtfCorpus() };
   if (tool === 'ai-tabular-profile') return analyzeTabularDataset(payload.input);
   if (tool === 'ai-tabular-candidate') return evaluateTabularCandidate(payload.input);
   if (tool === 'ai-adversarial-audit') return analyzeAdversarialPair(payload.input);
