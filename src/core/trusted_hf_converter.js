@@ -1,5 +1,6 @@
 'use strict';
 
+const fsNative = require('fs');
 const fs = require('fs/promises');
 const path = require('path');
 const crypto = require('crypto');
@@ -17,6 +18,7 @@ const MAX_ONNX_FILES = 32;
 const MAX_ONNX_DEPTH = 4;
 const MAX_ONNX_BYTES = 4 * 1024 * 1024 * 1024;
 const MAX_MODEL_TREE_ENTRIES = 4096;
+const MAX_MODEL_TREE_DEPTH = 4;
 const CODE_EXTENSIONS = new Set(['.py', '.pyc', '.pyo', '.pyd', '.so', '.dll', '.dylib', '.exe', '.sh', '.bat', '.cmd', '.ps1']);
 const UNSAFE_WEIGHT_EXTENSIONS = new Set(['.bin', '.pt', '.pth', '.pkl', '.pickle', '.ckpt']);
 const TOKENIZER_COPY_LIMITS = new Map([
@@ -83,6 +85,7 @@ async function inspectTrustedConverter(filePath) {
 
 async function revalidateTrustedConverter(descriptor) {
   if (!descriptor || descriptor.schema !== CONVERTER_SCHEMA) throw new Error('缺少已审计 trusted converter');
+  if (descriptor.platform !== process.platform || descriptor.arch !== process.arch) throw new Error('trusted converter 描述符平台/架构与当前进程不一致');
   const current = await inspectTrustedConverter(descriptor.filePath);
   if (current.bytes !== Number(descriptor.bytes) || current.sha256 !== String(descriptor.sha256 || '').toLowerCase()) {
     throw new Error('trusted converter 在选择后发生变化；拒绝执行');
@@ -117,12 +120,18 @@ function buildOfflineEnv(baseEnv = process.env) {
 
 async function auditModelTree(rootPath) {
   const root = resolved(rootPath);
-  const rootStat = await fs.lstat(root);
-  if (!rootStat.isDirectory() || rootStat.isSymbolicLink()) return { ok: false, code: 'MODEL_ROOT_GAP', detail: '模型根目录必须是非符号链接目录' };
+  let rootStat;
+  try { rootStat = await fs.lstat(root); }
+  catch (error) { return { ok:false, code:'MODEL_ROOT_GAP', detail:error?.message || String(error), entriesSeen:0 }; }
+  if (!rootStat.isDirectory() || rootStat.isSymbolicLink()) return { ok: false, code: 'MODEL_ROOT_GAP', detail: '模型根目录必须是非符号链接目录', entriesSeen:0 };
   let entriesSeen = 0;
   const findings = [];
   async function walk(current, depth) {
-    if (depth > 4 || findings.length) return;
+    if (findings.length) return;
+    if (depth > MAX_MODEL_TREE_DEPTH) {
+      findings.push({ code:'MODEL_TREE_DEPTH_GAP', detail:`模型目录深度超过 ${MAX_MODEL_TREE_DEPTH}；不会留下未审计子树` });
+      return;
+    }
     const entries = (await fs.readdir(current, { withFileTypes: true })).sort((a, b) => a.name.localeCompare(b.name));
     for (const entry of entries) {
       entriesSeen += 1;
@@ -136,6 +145,10 @@ async function auditModelTree(rootPath) {
         return;
       }
       if (entry.isDirectory()) {
+        if (depth >= MAX_MODEL_TREE_DEPTH) {
+          findings.push({ code:'MODEL_TREE_DEPTH_GAP', detail:`模型目录深度超过 ${MAX_MODEL_TREE_DEPTH}: ${path.relative(root, target)}` });
+          return;
+        }
         await walk(target, depth + 1);
         if (findings.length) return;
         continue;
@@ -152,8 +165,9 @@ async function auditModelTree(rootPath) {
       }
     }
   }
-  await walk(root, 0);
-  return findings.length ? { ok: false, ...findings[0], entriesSeen } : { ok: true, entriesSeen };
+  try { await walk(root, 0); }
+  catch (error) { findings.push({ code:'MODEL_TREE_READ_GAP', detail:error?.message || String(error) }); }
+  return findings.length ? { ok: false, ...findings[0], entriesSeen } : { ok: true, entriesSeen, maxDepth:MAX_MODEL_TREE_DEPTH };
 }
 
 function validatePlan(plan) {
@@ -262,6 +276,8 @@ function runBoundedProcess(executable, args, options = {}) {
 
 async function collectOnnxFiles(outputDir) {
   const root = resolved(outputDir);
+  const rootStat = await fs.lstat(root);
+  if (!rootStat.isDirectory() || rootStat.isSymbolicLink()) throw new Error('ONNX 输出根必须是非符号链接目录');
   const files = [];
   async function walk(current, depth) {
     if (depth > MAX_ONNX_DEPTH || files.length > MAX_ONNX_FILES) return;
@@ -336,9 +352,12 @@ async function mirrorTokenizerArtifacts(modelRoot, outputDir) {
     try {
       const sourceStat = await fs.lstat(source);
       if (!sourceStat.isFile() || sourceStat.isSymbolicLink() || sourceStat.size <= 0 || sourceStat.size > maxBytes) continue;
-      try { await fs.lstat(destination); continue; }
-      catch (error) { if (error?.code !== 'ENOENT') throw error; }
-      await fs.copyFile(source, destination);
+      try {
+        await fs.copyFile(source, destination, fsNative.constants.COPYFILE_EXCL);
+      } catch (error) {
+        if (error?.code === 'EEXIST') continue;
+        throw error;
+      }
       copied.push({ name, bytes: sourceStat.size, sha256: await sha256Path(destination) });
     } catch (error) {
       if (error?.code !== 'ENOENT') throw error;
@@ -395,7 +414,9 @@ async function executeTrustedHfOnnxPlan(plan, converterDescriptor, options = {})
   catch (error) { return gap('ONNX_VALIDATION_GAP', error?.message || String(error), 'onnx-validate', { plan, converter, process: processView }); }
   if (validation.status !== 'ok') return gap(validation.gap.code, validation.gap.detail, 'onnx-validate', { plan, converter, process: processView, validation });
 
-  const tokenizerArtifacts = await mirrorTokenizerArtifacts(planState.root, planState.output);
+  let tokenizerArtifacts;
+  try { tokenizerArtifacts = await mirrorTokenizerArtifacts(planState.root, planState.output); }
+  catch (error) { return gap('TOKENIZER_MIRROR_GAP', `ONNX 已验证，但 tokenizer 工件镜像失败：${error?.message || String(error)}`, 'tokenizer', { plan, converter, process:processView, validation }); }
   const selected = validation.selected ? {
     filePath: validation.selected.filePath,
     fileName: validation.selected.fileName,
@@ -453,6 +474,7 @@ module.exports = {
   MAX_PROCESS_OUTPUT_BYTES,
   DEFAULT_TIMEOUT_MS,
   MAX_TIMEOUT_MS,
+  MAX_MODEL_TREE_DEPTH,
   inspectTrustedConverter,
   revalidateTrustedConverter,
   buildOfflineEnv,
