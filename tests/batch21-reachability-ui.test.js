@@ -53,5 +53,5 @@ test('tool workbench scrolls long prompt input/output independently and homepage
   assert.match(ui,/tool-home-head tool-home-head-minimal"><h1>NewCyber<\/h1>/);
   assert.doesNotMatch(ui,/LOCAL SECURITY WORKBENCH/);
   assert.match(html,/styles\/layout_fix\.css/);
-  assert.match(entry,/finals_analyzer_batch21/);
+  assert.match(entry,/finals_analyzer_batch22/);
 });
