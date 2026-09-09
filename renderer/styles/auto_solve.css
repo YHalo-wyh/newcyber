@@ -46,6 +46,7 @@
 .auto-solve-next p{margin:4px 0 0;color:#8d97a7;font-size:12px;line-height:1.5}
 .auto-solve-actions{display:flex;gap:7px;flex:0 0 auto}
 .auto-solve-progress{height:3px;background:#202833;margin:0 20px;border-radius:99px;overflow:hidden}
-.auto-solve-progress>i{display:block;height:100%;background:linear-gradient(90deg,var(--accent),var(--green));border-radius:99px}
+.auto-solve-progress>i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--accent),var(--green));border-radius:99px}
+.auto-solve-progress>i.p1{width:20%}.auto-solve-progress>i.p2{width:40%}.auto-solve-progress>i.p3{width:60%}.auto-solve-progress>i.p4{width:80%}.auto-solve-progress>i.p5{width:100%}
 @media(max-width:1250px){.auto-solve-grid{grid-template-columns:1fr}.auto-solve-stages{grid-template-columns:repeat(3,1fr)}}
 @media(max-width:850px){.auto-solve-head{flex-direction:column}.auto-solve-stages{grid-template-columns:1fr}.auto-solve-next{align-items:flex-start;flex-direction:column}.auto-solve-actions{width:100%;flex-wrap:wrap}}
