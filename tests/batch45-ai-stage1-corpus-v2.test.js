@@ -5,6 +5,7 @@ const assert=require('node:assert/strict');
 const {
   DIRECTIONS,AI_STAGE1_SOURCE_CATALOG,byDirection,buildCorpusV2Plan,catalogHealth
 }=require('../src/core/ai_stage1_source_catalog');
+const {auditCurrentCorpusCoverage,buildTrainingMix}=require('../src/core/ai_stage1_corpus_optimizer');
 
 test('Batch45 source catalog covers all five official stage-one directions with real sources',()=>{
   assert.equal(DIRECTIONS.length,5);
@@ -47,4 +48,27 @@ test('Batch45 catalog contains competition-grade bulk corpora and real CTF bundl
     'mico','midst','mibench','nist-trojai','backdoorbench','ductf-2025-ai',
     'htb-business-2025-ai','htb-gcsb-2026-lotus','thm-model-leakage-2026','modelscan','shadowray'
   ])assert.ok(ids.has(id),id);
+});
+
+test('Batch45 audits the old mutated-seed corpus by upstream diversity instead of raw case count',()=>{
+  const audit=auditCurrentCorpusCoverage();
+  assert.equal(audit.schema,'newcyber.ai-stage1-corpus-audit.v2');
+  assert.equal(audit.groups.length,5);
+  assert.ok(audit.currentSeedCount>0);
+  assert.ok(audit.queue.length>0,'the old corpus should expose real-source expansion work');
+  for(const group of audit.groups){
+    assert.ok(group.currentSeeds>0,`${group.direction} keeps existing Batch43 seed coverage`);
+    assert.ok(group.distinctCurrentSources<=group.currentSeeds);
+  }
+});
+
+test('Batch45 training mix is dominated by real competitions and benchmarks with source-grouped split',()=>{
+  const mix=buildTrainingMix();
+  assert.equal(mix.schema,'newcyber.ai-stage1-training-mix.v2');
+  assert.equal(mix.weights.A,0.45);
+  assert.equal(mix.weights.B,0.35);
+  assert.equal(mix.weights.synthetic,0.05);
+  assert.equal(mix.split.groupKey,'upstream-source-or-competition');
+  assert.equal(mix.requirements.stripFinalAnswers,true);
+  assert.equal(mix.requirements.forbidUnsafeArtifactExecution,true);
 });
