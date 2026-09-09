@@ -36,6 +36,9 @@ contextBridge.exposeInMainWorld('newcyber', {
   fitScaLeakageProfile: (payload) => ipcRenderer.invoke('ai:sca-fit-leakage-profile', payload),
   recoverScaProbeCandidates: (payload) => ipcRenderer.invoke('ai:sca-recover-probe', payload),
   getLocalMlRuntimeStatus: () => ipcRenderer.invoke('ai:local-ml-status'),
+  chooseLocalMlRuntimeBundle: () => ipcRenderer.invoke('ai:local-ml-select-runtime'),
+  chooseHfOnnxExportPlan: () => ipcRenderer.invoke('ai:hf-onnx-choose-plan'),
+  saveHfOnnxExportPlan: (payload) => ipcRenderer.invoke('ai:hf-onnx-save-plan', payload || {}),
   chooseAndInspectOnnxModel: (provider) => ipcRenderer.invoke('ai:onnx-choose-inspect', provider || 'cpu'),
   inspectDroppedOnnxModel: (file, provider) => {
     const filePath = file ? webUtils.getPathForFile(file) : '';
