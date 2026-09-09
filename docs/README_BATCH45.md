@@ -1,0 +1,1 @@
+Batch45 focuses on competition-oriented AI Stage-One corpus diversity. See `batch45-corpus-sources.md`, `batch45-import-priority.md`, and `batch43-sca-retest-gap.md`.
