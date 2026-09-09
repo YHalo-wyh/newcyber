@@ -27,6 +27,7 @@ contextBridge.exposeInMainWorld('newcyber', {
     return ipcRenderer.invoke('ida:analyze-dropped', filePath);
   },
   chooseAndAnalyzePowerSideChannel: () => ipcRenderer.invoke('ai:sca-choose-analyze'),
+  chooseAndRunScaAutopilot: () => ipcRenderer.invoke('ai:sca-autopilot-choose'),
   analyzeDroppedPowerSideChannel: (files) => {
     const paths = [...(files || [])].map((file) => webUtils.getPathForFile(file)).filter(Boolean);
     return ipcRenderer.invoke('ai:sca-analyze-dropped', paths);
