@@ -10,6 +10,8 @@ const { createGpt2Bpe } = require('../core/gpt2_bpe');
 const { fitLeakageProfile, recoverProbeCandidates } = require('../core/side_channel_probe');
 const { runScaAutopilotPaths } = require('../core/sca_autopilot');
 const { planHfOnnxExport } = require('../core/hf_onnx_export');
+const { inspectTrustedConverter, executeTrustedHfOnnxPlan } = require('../core/trusted_hf_converter');
+const { convertAndResumeSca } = require('../core/hf_sca_bridge');
 
 const MAX_SOURCE_BYTES = 2 * 1024 * 1024;
 const MAX_ONNX_BYTES = 4 * 1024 * 1024 * 1024;
@@ -22,6 +24,8 @@ const SKIP_DIRS = new Set(['.git','node_modules','.venv','venv','__pycache__','.
 const approvedTraceFiles = new Set();
 const approvedOnnxFiles = new Set();
 const approvedHfRoots = new Set();
+const approvedAutopilotRoots = new Set();
+let trustedHfConverter = null;
 
 function openDialog(options) {
   const parent = BrowserWindow.getFocusedWindow();
@@ -87,8 +91,8 @@ async function analyzeScaPaths(filePaths) {
 
 async function collectAutopilotFiles(rootPath) {
   const root = resolvedPath(rootPath);
-  const stat = await fs.stat(root);
-  if (!stat.isDirectory()) throw new Error('SCA Autopilot 入口必须是目录');
+  const stat = await fs.lstat(root);
+  if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error('SCA Autopilot 入口必须是非符号链接目录');
   const out = [];
   async function walk(current, depth) {
     if (depth > MAX_AUTOPILOT_DEPTH || out.length >= MAX_AUTOPILOT_FILES) return;
@@ -111,16 +115,25 @@ async function collectAutopilotFiles(rootPath) {
   return out;
 }
 
-async function runScaAutopilotDirectory(rootPath, options = {}) {
-  const paths = await collectAutopilotFiles(rootPath);
-  const result = await runScaAutopilotPaths(paths, { provider: options.provider || 'cpu' });
-  const model = result?.discovery?.roles?.model?.file?.filePath;
+function approveResultArtifacts(result) {
+  const discovery = result?.result?.discovery || result?.discovery;
+  const model = discovery?.roles?.model?.file?.filePath;
   if (model) approvedOnnxFiles.add(path.resolve(model));
   for (const key of ['profileTrace','targetTrace']) {
-    const trace = result?.discovery?.roles?.[key]?.file?.filePath;
+    const trace = discovery?.roles?.[key]?.file?.filePath;
     if (trace) approvedTraceFiles.add(path.resolve(trace));
   }
-  return result;
+  const converted = result?.conversion?.selected?.filePath;
+  if (converted) approvedOnnxFiles.add(path.resolve(converted));
+}
+
+async function runScaAutopilotDirectory(rootPath, options = {}) {
+  const root = resolvedPath(rootPath);
+  const paths = await collectAutopilotFiles(root);
+  approvedAutopilotRoots.add(root);
+  const result = await runScaAutopilotPaths(paths, { provider: options.provider || 'cpu' });
+  approveResultArtifacts(result);
+  return { ...result, workspaceRoot: root };
 }
 
 async function optionalSibling(filePath,name,maxBytes) {
@@ -220,6 +233,34 @@ async function saveHfPlan(rootPath, options = {}) {
   return { filePath: result.filePath, status: plan.status, gap: plan.gap || null };
 }
 
+async function executeApprovedHfConversion(rootPath, options = {}) {
+  const root = resolvedPath(rootPath);
+  if (!approvedHfRoots.has(root)) throw new Error('请先通过 HF / SafeTensors 选择器检查模型目录');
+  if (!trustedHfConverter) throw new Error('请先显式选择并审计 optimum-cli');
+  const runtime = runtimeStatus();
+  if (!runtime.available) return { schema:'newcyber.hf-onnx-conversion.v1', status:'gap', gap:{ code:'MODEL_RUNTIME_GAP', detail:runtime.installHint, stage:'preflight' }, runtime };
+  const plan = await planHfOnnxExport(root, { task: options.task || null, outputDir: options.outputDir || null });
+  const conversion = await executeTrustedHfOnnxPlan(plan, trustedHfConverter, { provider: options.provider || 'cpu', purpose: options.purpose || 'general', timeoutMs: options.timeoutMs, maxOutputBytes: options.maxOutputBytes });
+  approveResultArtifacts({ conversion });
+  return conversion;
+}
+
+async function continueScaAutopilotDirectory(rootPath, options = {}) {
+  const root = resolvedPath(rootPath);
+  if (!approvedAutopilotRoots.has(root)) throw new Error('请先通过 Power SCA Autopilot 选择器打开赛题目录');
+  if (!trustedHfConverter) throw new Error('请先显式选择并审计 optimum-cli');
+  const runtime = runtimeStatus();
+  if (!runtime.available) return { schema:'newcyber.sca-autopilot-conversion.v1', status:'gap', gap:{ code:'MODEL_RUNTIME_GAP', detail:runtime.installHint, stage:'preflight' }, runtime, workspaceRoot:root };
+  const paths = await collectAutopilotFiles(root);
+  const bridged = await convertAndResumeSca(paths, trustedHfConverter, { provider: options.provider || 'cpu', timeoutMs: options.timeoutMs, maxOutputBytes: options.maxOutputBytes });
+  approveResultArtifacts(bridged);
+  return { ...bridged, workspaceRoot: root, runtime };
+}
+
+function trustedConverterStatus() {
+  return trustedHfConverter ? { ...trustedHfConverter, selected:true } : { schema:'newcyber.trusted-hf-converter.v1', selected:false };
+}
+
 function registerAiScaIpc() {
   ipcMain.handle('ai:sca-choose-analyze', async () => {
     const result = await openDialog({
@@ -239,6 +280,8 @@ function registerAiScaIpc() {
     if (result.canceled || !result.filePaths[0]) return null;
     return runScaAutopilotDirectory(result.filePaths[0], { provider: 'cpu' });
   });
+
+  ipcMain.handle('ai:sca-autopilot-convert-resume', async (_event, payload) => continueScaAutopilotDirectory(payload?.root, { provider: payload?.provider || 'cpu', timeoutMs: payload?.timeoutMs, maxOutputBytes: payload?.maxOutputBytes }));
 
   ipcMain.handle('ai:sca-analyze-dropped', async (_event, filePaths) => analyzeScaPaths(filePaths));
 
@@ -262,6 +305,19 @@ function registerAiScaIpc() {
     return runtimeStatus();
   });
 
+  ipcMain.handle('ai:hf-converter-status', async () => trustedConverterStatus());
+
+  ipcMain.handle('ai:hf-converter-select', async () => {
+    const result = await openDialog({
+      title: '选择 Trusted Optimum Converter',
+      properties: ['openFile'],
+      filters: [{ name:'optimum-cli', extensions:['exe'] }, { name:'All files', extensions:['*'] }]
+    });
+    if (result.canceled || !result.filePaths[0]) return null;
+    trustedHfConverter = await inspectTrustedConverter(result.filePaths[0]);
+    return trustedConverterStatus();
+  });
+
   ipcMain.handle('ai:hf-onnx-choose-plan', async () => {
     const result = await openDialog({ title: '选择本地 HuggingFace / SafeTensors 模型目录', properties: ['openDirectory'] });
     if (result.canceled || !result.filePaths[0]) return null;
@@ -269,6 +325,7 @@ function registerAiScaIpc() {
   });
 
   ipcMain.handle('ai:hf-onnx-save-plan', async (_event, payload) => saveHfPlan(payload?.root, { task: payload?.task || null, outputDir: payload?.outputDir || null }));
+  ipcMain.handle('ai:hf-onnx-execute', async (_event, payload) => executeApprovedHfConversion(payload?.root, { task: payload?.task || null, outputDir: payload?.outputDir || null, provider: payload?.provider || 'cpu', purpose: payload?.purpose || 'general', timeoutMs: payload?.timeoutMs, maxOutputBytes: payload?.maxOutputBytes }));
 
   ipcMain.handle('ai:onnx-choose-inspect', async (_event, provider = 'cpu') => {
     const result = await openDialog({
@@ -300,9 +357,12 @@ module.exports = {
   analyzeScaPaths,
   collectAutopilotFiles,
   runScaAutopilotDirectory,
+  continueScaAutopilotDirectory,
   inspectOnnxPath,
   tokenizerSibling,
   runTransformerPath,
   planHfDirectory,
-  saveHfPlan
+  saveHfPlan,
+  executeApprovedHfConversion,
+  trustedConverterStatus
 };
