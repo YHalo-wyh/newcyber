@@ -28,6 +28,7 @@ contextBridge.exposeInMainWorld('newcyber', {
   },
   chooseAndAnalyzePowerSideChannel: () => ipcRenderer.invoke('ai:sca-choose-analyze'),
   chooseAndRunScaAutopilot: () => ipcRenderer.invoke('ai:sca-autopilot-choose'),
+  continueScaAutopilotWithConversion: (payload) => ipcRenderer.invoke('ai:sca-autopilot-convert-resume', payload || {}),
   analyzeDroppedPowerSideChannel: (files) => {
     const paths = [...(files || [])].map((file) => webUtils.getPathForFile(file)).filter(Boolean);
     return ipcRenderer.invoke('ai:sca-analyze-dropped', paths);
@@ -37,8 +38,11 @@ contextBridge.exposeInMainWorld('newcyber', {
   recoverScaProbeCandidates: (payload) => ipcRenderer.invoke('ai:sca-recover-probe', payload),
   getLocalMlRuntimeStatus: () => ipcRenderer.invoke('ai:local-ml-status'),
   chooseLocalMlRuntimeBundle: () => ipcRenderer.invoke('ai:local-ml-select-runtime'),
+  getTrustedHfConverterStatus: () => ipcRenderer.invoke('ai:hf-converter-status'),
+  chooseTrustedHfConverter: () => ipcRenderer.invoke('ai:hf-converter-select'),
   chooseHfOnnxExportPlan: () => ipcRenderer.invoke('ai:hf-onnx-choose-plan'),
   saveHfOnnxExportPlan: (payload) => ipcRenderer.invoke('ai:hf-onnx-save-plan', payload || {}),
+  executeTrustedHfOnnxConversion: (payload) => ipcRenderer.invoke('ai:hf-onnx-execute', payload || {}),
   chooseAndInspectOnnxModel: (provider) => ipcRenderer.invoke('ai:onnx-choose-inspect', provider || 'cpu'),
   inspectDroppedOnnxModel: (file, provider) => {
     const filePath = file ? webUtils.getPathForFile(file) : '';
