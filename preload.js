@@ -32,6 +32,8 @@ contextBridge.exposeInMainWorld('newcyber', {
     return ipcRenderer.invoke('ai:sca-analyze-dropped', paths);
   },
   extractPowerSideChannelWindows: (payload) => ipcRenderer.invoke('ai:sca-extract-windows', payload),
+  fitScaLeakageProfile: (payload) => ipcRenderer.invoke('ai:sca-fit-leakage-profile', payload),
+  recoverScaProbeCandidates: (payload) => ipcRenderer.invoke('ai:sca-recover-probe', payload),
   getLocalMlRuntimeStatus: () => ipcRenderer.invoke('ai:local-ml-status'),
   chooseAndInspectOnnxModel: (provider) => ipcRenderer.invoke('ai:onnx-choose-inspect', provider || 'cpu'),
   inspectDroppedOnnxModel: (file, provider) => {
@@ -39,6 +41,7 @@ contextBridge.exposeInMainWorld('newcyber', {
     return ipcRenderer.invoke('ai:onnx-inspect-dropped', filePath, provider || 'cpu');
   },
   runOnnxModel: (payload) => ipcRenderer.invoke('ai:onnx-run', payload),
+  runTransformerOracle: (payload) => ipcRenderer.invoke('ai:transformer-run', payload),
   exportFirmwareRecovered: (filePath) => ipcRenderer.invoke('firmware:export-recovered', filePath),
   extractFirmwareWithBinwalk: (filePath) => ipcRenderer.invoke('firmware:extract-binwalk', filePath),
   getAiBackendStatus: () => ipcRenderer.invoke('ai:backend-status'),
