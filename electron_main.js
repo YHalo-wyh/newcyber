@@ -3,6 +3,7 @@ const os=require('os');
 const {registerBinaryElfIpc}=require('./src/electron/binary_elf_ipc');
 const {registerIdaSnapshotIpc}=require('./src/electron/ida_snapshot_ipc');
 const {registerAiScaIpc}=require('./src/electron/ai_sca_ipc');
+const {registerChallengeSessionIpc}=require('./src/electron/challenge_session_ipc');
 
 let activeWindow=null;
 const materialByWindow=new WeakMap();
@@ -81,4 +82,5 @@ pocIndexBase.buildPocIndexFromDirectory=pocIndexV2.buildPocIndexFromDirectory;
 registerBinaryElfIpc();
 registerIdaSnapshotIpc();
 registerAiScaIpc();
+registerChallengeSessionIpc();
 require('./main');

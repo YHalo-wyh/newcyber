@@ -1,0 +1,42 @@
+/* Batch39 final typography guard. Challenge Session may be dense, but readable evidence is never micro-copy. */
+.challenge-top-status,
+.challenge-status,
+.challenge-main-card>header span,
+.challenge-side-card header span,
+.challenge-result span,
+.challenge-facts span,
+.challenge-ledger article>span,
+.challenge-ledger em,
+.challenge-file-list article>span,
+.challenge-finding-list article>span{font-size:11.5px}
+
+.challenge-sidebar .challenge-primary-nav small,
+.challenge-flow-preview article>b,
+.challenge-facts small,
+.challenge-file-list small,
+.challenge-finding-list small,
+.challenge-manual small,
+.challenge-accepts span{font-size:12px}
+
+.challenge-ledger small,
+.challenge-evidence-toggle span>small,
+.challenge-evidence-toggle em,
+.challenge-mini-drop,
+.challenge-session-stats span,
+.challenge-finding-list p{font-size:12px}
+
+.challenge-side-card>p,
+.challenge-flow-preview article>p,
+.challenge-file-list strong,
+.challenge-finding-list strong,
+.challenge-manual strong,
+.challenge-empty-small{font-size:13px}
+
+.challenge-ledger strong,
+.challenge-facts strong,
+.challenge-main-card>header b,
+.challenge-side-card header b{font-size:13.5px}
+
+.challenge-drop>small{font-size:12.5px}
+.challenge-drop p,.challenge-session-head p{font-size:14px}
+.challenge-result code,.challenge-result strong{font-size:15px}
