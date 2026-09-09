@@ -29,6 +29,8 @@ const { decryptCryptoContext } = require('./context_crypto');
 const { searchKnowledge, knowledgeStats } = require('../knowledge');
 const { analyzeUavChallengeEvidence, getScenarioCatalog, parseWifiEvidence, analyzeFlightLog } = require('./uav_challenge_matrix_v4');
 const { buildLowaltAssessment, getLowaltAssessmentCatalog } = require('./lowalt_assessment_mode');
+const { analyzeSwarmCoordination } = require('./lowalt_swarm');
+const { analyzeCrossBoundaryFlow } = require('./lowalt_cross_boundary');
 
 function npyBuffer(value) {
   if (!value || typeof value.base64 !== 'string') throw new Error('NPY 输入需要 base64');
@@ -53,6 +55,8 @@ function runTool(tool, payload = {}) {
   if (tool === 'uav-challenge-matrix') return { ...analyzeUavChallengeEvidence(payload.input), catalog: getScenarioCatalog() };
   if (tool === 'lowalt-assessment-mode') return buildLowaltAssessment(payload.input || payload);
   if (tool === 'lowalt-assessment-catalog') return getLowaltAssessmentCatalog();
+  if (tool === 'lowalt-swarm-coordination') return analyzeSwarmCoordination(payload.input || payload, payload.options || {});
+  if (tool === 'lowalt-cross-boundary-flow') return analyzeCrossBoundaryFlow(payload.input || payload, payload.options || {});
   if (tool === 'uav-regulatory-audit') return scanRegulatoryApi(payload.input);
   if (tool === 'uav-gnss-audit') return analyzeGnssLog(payload.input, payload.options || {});
   if (tool === 'uav-gnss-spectrum') return analyzeGnssSpectrum(payload.input, payload.options || {});
