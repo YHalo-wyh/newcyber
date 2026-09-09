@@ -17,7 +17,7 @@ const {
   analyzeRoleEvidence,
   getScenarioCatalog,
   DVD_REFERENCE
-} = require('../src/core/uav_challenge_matrix_v5');
+} = require('../src/core/uav_challenge_matrix_v6');
 const { runTool } = require('../src/core/tool_router');
 
 function mav1(msgid, payload, seq = 1, sysid = 255, compid = 190) {
@@ -140,7 +140,7 @@ test('Batch32 ROS2 camera flood requires availability evidence, not camera topic
   assert.ok(noisy.hits.some((hit) => hit.scenarioId === 'ros2-camera-flood'));
 });
 
-test('Batch32 reconstructs MAVLink mission download before surfacing mission extraction', () => {
+test('Batch32 reconstructs MAVLink mission download and preserves legal seq zero', () => {
   const wire = Buffer.concat([
     mav1(43, missionRequestList(), 1, 255, 190),
     mav1(44, missionCount(1), 2, 1, 1),
@@ -152,9 +152,32 @@ test('Batch32 reconstructs MAVLink mission download before surfacing mission ext
   assert.equal(transfer.sessions.length, 1);
   assert.equal(transfer.sessions[0].requester, '255:190');
   assert.equal(transfer.sessions[0].responder, '1:1');
+  assert.deepEqual(transfer.sessions[0].requestedSeq, [0]);
+  assert.deepEqual(transfer.sessions[0].itemSeq, [0]);
+  assert.deepEqual(transfer.sessions[0].missingSeq, []);
   assert.equal(transfer.sessions[0].complete, true);
   const result = analyzeUavChallengeEvidence(wire, { category:'leak' });
   assert.ok(result.hits.some((hit) => hit.scenarioId === 'mission-extract' && hit.confidence >= 0.9));
+  const routed = runTool('uav-leak-analyze', { input:wire });
+  assert.equal(routed.missionTransfer.schema, 'newcyber.uav-mission-transfer.v2');
+  assert.equal(routed.missionTransfer.completeSessions, 1);
+});
+
+test('Batch32 duplicate mission items cannot fake complete sequence coverage', () => {
+  const wire = Buffer.concat([
+    mav1(43, missionRequestList(), 1, 255, 190),
+    mav1(44, missionCount(2), 2, 1, 1),
+    mav1(51, missionRequestInt(0), 3, 255, 190),
+    mav1(73, missionItemInt(0), 4, 1, 1),
+    mav1(51, missionRequestInt(1), 5, 255, 190),
+    mav1(73, missionItemInt(0), 6, 1, 1)
+  ]).toString('hex');
+  const transfer = analyzeMissionTransfer(wire);
+  assert.equal(transfer.sessions.length, 1);
+  assert.deepEqual(transfer.sessions[0].itemSeq, [0]);
+  assert.deepEqual(transfer.sessions[0].missingSeq, [1]);
+  assert.equal(transfer.sessions[0].duplicateItemCount, 1);
+  assert.equal(transfer.sessions[0].complete, false);
 });
 
 test('Batch32 does not reinterpret standalone mission items as mission exfiltration', () => {
