@@ -5,9 +5,14 @@ const fs = require('fs/promises');
 const path = require('path');
 const { analyzePowerTracePath, extractWindowFeatures } = require('../core/power_side_channel');
 const { runtimeStatus, inspectOnnxModel, runOnnxModel } = require('../core/local_ml_runtime');
+const { inspectTransformerModel, runTransformerDecode } = require('../core/transformer_oracle');
+const { createGpt2Bpe } = require('../core/gpt2_bpe');
+const { fitLeakageProfile, recoverProbeCandidates } = require('../core/side_channel_probe');
 
 const MAX_SOURCE_BYTES = 2 * 1024 * 1024;
 const MAX_ONNX_BYTES = 4 * 1024 * 1024 * 1024;
+const MAX_VOCAB_BYTES = 32 * 1024 * 1024;
+const MAX_MERGES_BYTES = 16 * 1024 * 1024;
 const approvedTraceFiles = new Set();
 const approvedOnnxFiles = new Set();
 
@@ -68,27 +73,75 @@ async function analyzeScaPaths(filePaths) {
   };
 }
 
+async function optionalSibling(filePath,name,maxBytes) {
+  const candidate=path.join(path.dirname(filePath),name);
+  try {
+    const stat=await fs.stat(candidate);
+    if(!stat.isFile()||stat.size<=0||stat.size>maxBytes)return null;
+    return {filePath:candidate,fileName:name,size:stat.size,text:await fs.readFile(candidate,'utf8')};
+  } catch(error) {
+    if(error?.code==='ENOENT')return null;
+    throw error;
+  }
+}
+
+async function tokenizerSibling(filePath,includeText=false) {
+  const vocab=await optionalSibling(filePath,'vocab.json',MAX_VOCAB_BYTES);
+  if(!vocab)return {available:false,kind:null,vocab:null,merges:null};
+  const merges=await optionalSibling(filePath,'merges.txt',MAX_MERGES_BYTES);
+  let parsed;
+  try { parsed=createGpt2Bpe(vocab.text,merges?.text||''); }
+  catch(error) { return {available:false,kind:'gpt2-bpe',error:error?.message||String(error),vocab:vocab.fileName,merges:merges?.fileName||null}; }
+  const result={available:true,kind:'gpt2-bpe',vocab:vocab.fileName,merges:merges?.fileName||null,vocabSize:parsed.vocabSize,mergeCount:parsed.mergeCount};
+  if(includeText){result.vocabText=vocab.text;result.mergesText=merges?.text||'';}
+  return result;
+}
+
 async function inspectOnnxPath(filePath, provider = 'cpu') {
   const checked = await checkedFile(filePath);
   if (path.extname(checked.filePath).toLowerCase() !== '.onnx') throw new Error('本地 ML runtime 当前只接受 .onnx 执行工件');
   if (checked.stat.size > MAX_ONNX_BYTES) throw new Error(`ONNX 超过 ${MAX_ONNX_BYTES} bytes 上限`);
   approvedOnnxFiles.add(checked.filePath);
   const status = runtimeStatus();
+  const tokenizer=await tokenizerSibling(checked.filePath,false);
   if (!status.available) return {
     filePath: checked.filePath,
     fileName: path.basename(checked.filePath),
     size: checked.stat.size,
     runtime: status,
-    model: null
+    tokenizer,
+    model: null,
+    transformer: null
   };
-  const model = await inspectOnnxModel(checked.filePath, { provider });
+  const [model,transformer] = await Promise.all([
+    inspectOnnxModel(checked.filePath, { provider }),
+    inspectTransformerModel(checked.filePath,{provider})
+  ]);
   return {
     filePath: checked.filePath,
     fileName: path.basename(checked.filePath),
     size: checked.stat.size,
     runtime: status,
-    model
+    tokenizer,
+    model,
+    transformer
   };
+}
+
+async function runTransformerPath(payload={}) {
+  const filePath=resolvedPath(payload.filePath);
+  if(!approvedOnnxFiles.has(filePath))throw new Error('请先通过 ONNX 选择器打开模型');
+  const request={...(payload.request||{})};
+  if(typeof request.promptText==='string'&&!request.tokenizer){
+    const tokenizer=await tokenizerSibling(filePath,true);
+    if(!tokenizer.available)throw new Error('promptText 需要模型同目录的 vocab.json；也可以直接提供 promptTokenIds');
+    request.tokenizer={vocabText:tokenizer.vocabText,mergesText:tokenizer.mergesText};
+  }
+  return runTransformerDecode(filePath,request,{
+    provider:payload.provider||'cpu',
+    intraOpNumThreads:payload.intraOpNumThreads,
+    interOpNumThreads:payload.interOpNumThreads
+  });
 }
 
 function registerAiScaIpc() {
@@ -116,6 +169,8 @@ function registerAiScaIpc() {
     });
   });
 
+  ipcMain.handle('ai:sca-fit-leakage-profile', async (_event,payload) => fitLeakageProfile(payload?.hiddenStates,payload?.leakageFeatures,payload?.options||{}));
+  ipcMain.handle('ai:sca-recover-probe', async (_event,payload) => recoverProbeCandidates(payload?.profile,payload?.targetLeakage,payload?.probeMatrix,payload?.options||{}));
   ipcMain.handle('ai:local-ml-status', async () => runtimeStatus());
 
   ipcMain.handle('ai:onnx-choose-inspect', async (_event, provider = 'cpu') => {
@@ -139,6 +194,8 @@ function registerAiScaIpc() {
       interOpNumThreads: payload?.interOpNumThreads
     });
   });
+
+  ipcMain.handle('ai:transformer-run', async (_event,payload) => runTransformerPath(payload||{}));
 }
 
-module.exports = { registerAiScaIpc, analyzeScaPaths, inspectOnnxPath };
+module.exports = { registerAiScaIpc, analyzeScaPaths, inspectOnnxPath, tokenizerSibling, runTransformerPath };
