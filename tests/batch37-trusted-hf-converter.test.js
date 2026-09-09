@@ -215,7 +215,8 @@ test('Batch37 SCA ONNX validation refuses same-score oracle ambiguity', async (t
 
 test('Batch37 HF root discovery is exact and bridge excludes old ONNX before SCA re-entry', async (t) => {
   const root = await tempDir('newcyber-b37-bridge-');
-  t.after(()=>fsp.rm(root,{recursive:true,force:true}));
+  const toolRoot = await tempDir('newcyber-b37-bridge-tools-');
+  t.after(async()=>{await fsp.rm(root,{recursive:true,force:true});await fsp.rm(toolRoot,{recursive:true,force:true});});
   const modelRoot = path.join(root,'oracle');
   await fsp.mkdir(modelRoot,{recursive:true});
   await fsp.writeFile(path.join(modelRoot,'config.json'),'{}');
@@ -229,15 +230,18 @@ test('Batch37 HF root discovery is exact and bridge excludes old ONNX before SCA
   assert.equal(roots.status,'ok');
   assert.equal(roots.root,path.resolve(modelRoot));
 
+  const converterPath=await makeConverter(toolRoot);
   const selected = path.join(modelRoot,'newcyber_onnx','model.onnx');
   let rerunPaths=null;
-  const result = await convertAndResumeSca([trace,safe,oldOnnx],{schema:'fake'}, {
+  const result = await convertAndResumeSca([trace,safe,oldOnnx],{filePath:converterPath}, {
+    workspaceRoot:root,
     planHfOnnxExport:async(model)=>({schema:'newcyber.hf-onnx-plan.v1',status:'ready',bundle:{root:model},output:{directory:path.dirname(selected)},converter:{executable:'optimum-cli',shell:false}}),
     executeTrustedHfOnnxPlan:async()=>({status:'converted',selected:{filePath:selected,fileName:'model.onnx'}}),
     runScaAutopilotPaths:async(paths)=>{rerunPaths=paths.slice();return {status:'flag-recovered',flag:'flag{bridge-ok}'};}
   });
   assert.equal(result.status,'flag-recovered');
   assert.equal(result.result.flag,'flag{bridge-ok}');
+  assert.equal(result.converterLocation.ok,true);
   assert.ok(rerunPaths.includes(path.resolve(selected)));
   assert.ok(!rerunPaths.includes(path.resolve(oldOnnx)));
   assert.equal(result.rerun.existingOnnxExcluded[0],'old.onnx');
