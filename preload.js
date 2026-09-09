@@ -4,6 +4,18 @@ contextBridge.exposeInMainWorld('newcyber', {
   chooseWorkspace: () => ipcRenderer.invoke('workspace:choose'),
   scanWorkspace: (rootPath) => ipcRenderer.invoke('workspace:scan', rootPath),
   inspectFile: (rootPath, relativePath) => ipcRenderer.invoke('workspace:inspect', rootPath, relativePath),
+  chooseChallengeFiles: () => ipcRenderer.invoke('challenge:choose-files'),
+  analyzeDroppedChallenge: (files) => {
+    const paths = [...(files || [])].map((file) => webUtils.getPathForFile(file)).filter(Boolean);
+    return ipcRenderer.invoke('challenge:analyze-dropped', paths);
+  },
+  addChallengeFiles: (rootPath) => ipcRenderer.invoke('challenge:add-files', rootPath),
+  addDroppedChallengeFiles: (rootPath, files) => {
+    const paths = [...(files || [])].map((file) => webUtils.getPathForFile(file)).filter(Boolean);
+    return ipcRenderer.invoke('challenge:add-dropped', rootPath, paths);
+  },
+  rescanChallenge: (rootPath) => ipcRenderer.invoke('challenge:rescan', rootPath),
+  inspectChallengeFile: (rootPath, relativePath) => ipcRenderer.invoke('challenge:inspect', rootPath, relativePath),
   getPocIndexStatus: () => ipcRenderer.invoke('poc:index-status'),
   importPocIndex: () => ipcRenderer.invoke('poc:index-import'),
   getAdvisoryIndexStatus: () => ipcRenderer.invoke('advisory:index-status'),
