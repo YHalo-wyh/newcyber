@@ -9,12 +9,18 @@ const SIMPLE = new Map([
   [0x03, 'ADD'], [0x02, 'ADD'], [0x2b, 'SUB'], [0x2a, 'SUB']
 ]);
 
+function toBigInt(value) {
+  try { return typeof value === 'bigint' ? value : BigInt(value || 0); } catch { return null; }
+}
 function safeNumber(value) {
-  const big = typeof value === 'bigint' ? value : BigInt(value || 0);
-  if (big < 0n || big > BigInt(Number.MAX_SAFE_INTEGER)) return null;
+  const big = toBigInt(value);
+  if (big == null || big < 0n || big > BigInt(Number.MAX_SAFE_INTEGER)) return null;
   return Number(big);
 }
 function hex(value) { return `0x${BigInt(value).toString(16)}`; }
+function sectionAddress(section) { return toBigInt(section?.addr ?? section?.address); }
+function sectionFileOffset(section) { return toBigInt(section?.fileOffset); }
+function sectionSize(section) { return toBigInt(section?.size); }
 function objectContains(object, ea) {
   try {
     const start = BigInt(object.address);
@@ -38,7 +44,7 @@ function decodeRipRelative(bytes, offset, little) {
   let rex = null;
   if (p < bytes.length && bytes[p] >= 0x40 && bytes[p] <= 0x4f) { rex = bytes[p]; p += 1; }
   if (p >= bytes.length) return null;
-  let opcode = bytes[p++];
+  const opcode = bytes[p++];
   let mnemonic = SIMPLE.get(opcode) || null;
   let width = (rex && (rex & 0x08)) ? 64 : 32;
   let immediateBytes = 0;
@@ -62,7 +68,6 @@ function decodeRipRelative(bytes, offset, little) {
     mnemonic = ({0:'ADD',1:'OR',4:'AND',5:'SUB',6:'XOR',7:'CMP'})[reg] || null;
     if (!mnemonic) return null;
   }
-  const displacementOffset = p;
   const disp = signed32(bytes, p, little);
   if (disp == null) return null;
   p += 4;
@@ -71,20 +76,23 @@ function decodeRipRelative(bytes, offset, little) {
   if (immediateBytes === 1) immediate = bytes.readInt8(p);
   else if (immediateBytes === 4) immediate = little ? bytes.readInt32LE(p) : bytes.readInt32BE(p);
   p += immediateBytes;
-  return { mnemonic, width, rex, modrm, reg, length:p-offset, disp, displacementOffset, immediate };
+  return { mnemonic, width, rex, modrm, reg, length:p-offset, disp, immediate };
 }
 
-function scanX86_64DataRefs(buffer, sections, objects, symbols, options = {}) {
+function scanX86_64DataRefs(buffer, sections, objects, symbols = [], options = {}) {
   const little = options.littleEndian !== false;
   const functions = (symbols || []).filter((symbol) => symbol.type === 2 && symbol.value > 0n && symbol.size > 0n);
   const relations = [];
   const operations = [];
   const seen = new Set();
   let scannedBytes = 0;
-  for (const section of sections) {
-    if (!section.executable || !section.fileBacked || section.truncated || section.size <= 0n) continue;
-    const base = safeNumber(section.fileOffset);
-    const total = safeNumber(section.size);
+  for (const section of sections || []) {
+    const secAddr = sectionAddress(section);
+    const secOffset = sectionFileOffset(section);
+    const secSize = sectionSize(section);
+    if (!section.executable || !section.fileBacked || section.truncated || secAddr == null || secOffset == null || secSize == null || secSize <= 0n) continue;
+    const base = safeNumber(secOffset);
+    const total = safeNumber(secSize);
     if (base == null || total == null || base < 0 || base >= buffer.length) continue;
     const size = Math.min(total, buffer.length - base, MAX_CODE_SCAN_BYTES - scannedBytes);
     if (size <= 0) break;
@@ -93,10 +101,10 @@ function scanX86_64DataRefs(buffer, sections, objects, symbols, options = {}) {
     for (let offset = 0; offset < code.length && relations.length < MAX_REFS; offset += 1) {
       const decoded = decodeRipRelative(code, offset, little);
       if (!decoded) continue;
-      const instructionEa = section.addr + BigInt(offset);
+      const instructionEa = secAddr + BigInt(offset);
       const nextEa = instructionEa + BigInt(decoded.length);
       const targetEa = nextEa + BigInt(decoded.disp);
-      const object = objects.find((candidate) => objectContains(candidate, targetEa));
+      const object = (objects || []).find((candidate) => objectContains(candidate, targetEa));
       if (!object) continue;
       const fn = functionFor(functions, instructionEa);
       const relationType = decoded.mnemonic === 'CMP' ? 'COMPARES_WITH' : decoded.mnemonic === 'LEA' ? 'TAKES_ADDRESS' : 'READS';
