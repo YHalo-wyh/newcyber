@@ -64,6 +64,7 @@ async function scanSession(root,session){
   const input=descriptor(root,session);
   const analysis=await scanWorkspace(root,{challengeInput:input});
   analysis.challengeInput=input;
+  analysis.workspaceName=input.displayName;
   analysis.challengeSession=buildChallengeSession(analysis);
   return analysis;
 }
