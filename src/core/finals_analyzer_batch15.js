@@ -1,3 +1,3 @@
 // Compatibility entrypoint: Electron/main and older imports automatically receive the newest workspace analyzer.
-// Batch35 wraps Batch31 and preserves prior deterministic analyzers while adding bounded Power-SCA → Transformer autopilot.
+// Compatibility chain preserves finals_analyzer_batch22 through Batch31 → Batch35.
 module.exports = require('./finals_analyzer_batch35');
