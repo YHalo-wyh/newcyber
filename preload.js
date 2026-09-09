@@ -16,6 +16,11 @@ contextBridge.exposeInMainWorld('newcyber', {
     const filePath = file ? webUtils.getPathForFile(file) : '';
     return ipcRenderer.invoke('firmware:analyze-dropped', filePath);
   },
+  chooseAndAnalyzeBinary: () => ipcRenderer.invoke('binary:choose-analyze'),
+  analyzeDroppedBinary: (file) => {
+    const filePath = file ? webUtils.getPathForFile(file) : '';
+    return ipcRenderer.invoke('binary:analyze-dropped', filePath);
+  },
   exportFirmwareRecovered: (filePath) => ipcRenderer.invoke('firmware:export-recovered', filePath),
   extractFirmwareWithBinwalk: (filePath) => ipcRenderer.invoke('firmware:extract-binwalk', filePath),
   getAiBackendStatus: () => ipcRenderer.invoke('ai:backend-status'),
