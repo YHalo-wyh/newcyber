@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const vm = require('node:vm');
 
 const { decodeInstruction, scanX86_64ShortDataflow } = require('../src/core/x86_64_short_dataflow');
 
@@ -61,9 +62,16 @@ test('Batch28 clears register provenance at unknown instruction instead of cross
   assert.ok(result.stats.resets>1);
 });
 
-test('Batch28 decoder understands SIB indexed MOVZX and rejects truncated encodings',()=>{
+test('Batch28 decoder keeps complete instruction length and understands SIB indexed MOVZX',()=>{
+  const lea=decodeInstruction(Buffer.from([0x48,0x8d,0x1d,0x10,0x00,0x00,0x00]),0,true);
+  assert.equal(lea.kind,'LEA');
+  assert.equal(lea.length,7);
+  assert.equal(lea.reg,'rbx');
+  assert.equal(lea.memory.rip,true);
+
   const movzx=decodeInstruction(Buffer.from([0x0f,0xb6,0x0c,0x33]),0,true);
   assert.equal(movzx.kind,'MOVZX');
+  assert.equal(movzx.length,4);
   assert.equal(movzx.reg,'rcx');
   assert.equal(movzx.memory.base,'rbx');
   assert.equal(movzx.memory.index,'rsi');
@@ -74,10 +82,16 @@ test('Batch28 decoder understands SIB indexed MOVZX and rejects truncated encodi
 test('Batch28 ELF bridge and renderer advertise bounded standalone IR rather than full disassembly',()=>{
   const ipc=read('src/electron/binary_elf_ipc.js');
   const core=read('src/core/x86_64_short_dataflow.js');
+  const renderer=read('renderer/binary_data_graph_batch28.js');
+  const html=read('renderer/toolbox.html');
   assert.match(ipc,/scanX86_64ShortDataflow/);
   assert.match(ipc,/standaloneRecoverable/);
   assert.match(ipc,/unknown instruction|未知指令|控制流边界/i);
   assert.match(core,/MAX_SCAN_BYTES/);
   assert.match(core,/resetState/);
   assert.doesNotMatch(core,/capstone|objdump|radare/i);
+  assert.doesNotThrow(()=>new vm.Script(renderer,{filename:'binary_data_graph_batch28.js'}));
+  assert.match(renderer,/EXPRESSION IR · STANDALONE/);
+  assert.ok(html.indexOf('binary_data_graph_batch28.js')>html.indexOf('binary_data_graph_tools.js'));
+  assert.ok(html.indexOf('binary_data_graph_batch28.js')<html.indexOf('ida_bridge_tools.js'));
 });
