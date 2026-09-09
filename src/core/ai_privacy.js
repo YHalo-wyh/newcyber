@@ -67,32 +67,66 @@ function rankAuc(items, higherMeansMember=true) {
   return auc;
 }
 
+function confusionAtThreshold(rows,threshold,higherMeansMember) {
+  let tp=0; let tn=0; let fp=0; let fn=0;
+  for (const row of rows) {
+    const predicted=higherMeansMember ? row.value>=threshold : row.value<=threshold;
+    if (row.member && predicted) tp+=1;
+    else if (row.member) fn+=1;
+    else if (predicted) fp+=1;
+    else tn+=1;
+  }
+  const pos=tp+fn; const neg=tn+fp;
+  return {threshold,tp,tn,fp,fn,tpr:pos?tp/pos:0,fpr:neg?fp/neg:0,balancedAccuracy:pos&&neg?((tp/pos)+(tn/neg))/2:null};
+}
+
+function thresholdCandidates(rows) {
+  const values=[...new Set(rows.map((x)=>x.value))].sort((a,b)=>a-b);
+  if (!values.length) return [];
+  const out=[values[0]-Math.max(1,Math.abs(values[0]))*1e-12];
+  for (let i=0;i<values.length-1;i+=1) out.push((values[i]+values[i+1])/2);
+  out.push(values[values.length-1]+Math.max(1,Math.abs(values[values.length-1]))*1e-12);
+  return out;
+}
+
 function bestThreshold(items, higherMeansMember=true) {
   const rows=items.filter((x)=>x.member!=null && Number.isFinite(x.value));
   const pos=rows.filter((x)=>x.member).length;
   const neg=rows.length-pos;
   if (!pos || !neg) return null;
-  const values=[...new Set(rows.map((x)=>x.value))].sort((a,b)=>a-b);
-  const candidates=[];
-  if (values.length) {
-    candidates.push(values[0]-Math.max(1,Math.abs(values[0]))*1e-12);
-    for (let i=0;i<values.length-1;i+=1) candidates.push((values[i]+values[i+1])/2);
-    candidates.push(values[values.length-1]+Math.max(1,Math.abs(values[values.length-1]))*1e-12);
-  }
   let best=null;
-  for (const threshold of candidates) {
-    let tp=0; let tn=0; let fp=0; let fn=0;
-    for (const row of rows) {
-      const predicted=higherMeansMember ? row.value>=threshold : row.value<=threshold;
-      if (row.member && predicted) tp+=1;
-      else if (row.member) fn+=1;
-      else if (predicted) fp+=1;
-      else tn+=1;
-    }
-    const tpr=tp/pos; const tnr=tn/neg;
-    const balancedAccuracy=(tpr+tnr)/2;
-    const item={ threshold,tp,tn,fp,fn,tpr,fpr:fp/neg,balancedAccuracy };
-    if (!best || balancedAccuracy>best.balancedAccuracy+1e-15 || (Math.abs(balancedAccuracy-best.balancedAccuracy)<=1e-15 && Math.abs(threshold)<Math.abs(best.threshold))) best=item;
+  for (const threshold of thresholdCandidates(rows)) {
+    const item=confusionAtThreshold(rows,threshold,higherMeansMember);
+    if (!best || item.balancedAccuracy>best.balancedAccuracy+1e-15 || (Math.abs(item.balancedAccuracy-best.balancedAccuracy)<=1e-15 && Math.abs(threshold)<Math.abs(best.threshold))) best=item;
+  }
+  return best;
+}
+
+function tprAtFpr(items,higherMeansMember=true,targetFpr=0.1) {
+  const rows=items.filter((x)=>x.member!=null && Number.isFinite(x.value));
+  const pos=rows.filter((x)=>x.member).length;
+  const neg=rows.length-pos;
+  if (!pos || !neg) return null;
+  const limit=Math.max(0,Math.min(1,Number(targetFpr)));
+  let best=null;
+  for (const threshold of thresholdCandidates(rows)) {
+    const item=confusionAtThreshold(rows,threshold,higherMeansMember);
+    if (item.fpr>limit+1e-15) continue;
+    if (!best || item.tpr>best.tpr+1e-15 || (Math.abs(item.tpr-best.tpr)<=1e-15 && item.fpr<best.fpr-1e-15)) best=item;
+  }
+  return best ? {...best,targetFpr:limit} : null;
+}
+
+function membershipAdvantage(items,higherMeansMember=true) {
+  const rows=items.filter((x)=>x.member!=null && Number.isFinite(x.value));
+  const pos=rows.filter((x)=>x.member).length;
+  const neg=rows.length-pos;
+  if (!pos || !neg) return null;
+  let best=null;
+  for (const threshold of thresholdCandidates(rows)) {
+    const item=confusionAtThreshold(rows,threshold,higherMeansMember);
+    const advantage=item.tpr-item.fpr;
+    if (!best || advantage>best.advantage+1e-15) best={...item,advantage};
   }
   return best;
 }
@@ -108,7 +142,9 @@ function summarizeSignal(rows, aliases, higherMeansMember, id) {
   const usable=items.filter((x)=>x.member!=null && x.value!=null);
   const members=usable.filter((x)=>x.member).map((x)=>x.value);
   const nonmembers=usable.filter((x)=>!x.member).map((x)=>x.value);
-  if (!members.length || !nonmembers.length) return { id,key,usable:usable.length,auc:null,threshold:null };
+  if (!members.length || !nonmembers.length) return { id,key,usable:usable.length,auc:null,threshold:null,tprAtFpr10:null,membershipAdvantage:null };
+  const lowFpr=tprAtFpr(usable,higherMeansMember,0.1);
+  const advantage=membershipAdvantage(usable,higherMeansMember);
   return {
     id,
     key,
@@ -118,15 +154,18 @@ function summarizeSignal(rows, aliases, higherMeansMember, id) {
     nonMemberMean:mean(nonmembers),
     gap:mean(members)-mean(nonmembers),
     auc:rankAuc(usable,higherMeansMember),
-    threshold:bestThreshold(usable,higherMeansMember)
+    threshold:bestThreshold(usable,higherMeansMember),
+    tprAtFpr10:lowFpr,
+    membershipAdvantage:advantage
   };
 }
 
 function riskLevel(signals) {
   const auc=Math.max(...signals.map((x)=>x?.auc).filter(Number.isFinite),0.5);
-  if (auc>=0.85) return 'high';
-  if (auc>=0.7) return 'medium';
-  if (auc>=0.6) return 'low';
+  const lowFpr=Math.max(...signals.map((x)=>x?.tprAtFpr10?.tpr).filter(Number.isFinite),0);
+  if (auc>=0.85 || lowFpr>=0.5) return 'high';
+  if (auc>=0.7 || lowFpr>=0.25) return 'medium';
+  if (auc>=0.6 || lowFpr>0) return 'low';
   return 'weak';
 }
 
@@ -140,18 +179,31 @@ function analyzePrivacyTranscript(input) {
   ].filter(Boolean);
   const level=riskLevel(signals);
   const findings=[];
-  const strongest=[...signals].filter((x)=>Number.isFinite(x.auc)).sort((a,b)=>b.auc-a.auc)[0] || null;
-  if (strongest?.auc>=0.7) findings.push({ id:'membership-separation', severity:strongest.auc>=0.85?'high':'medium', evidence:`signal=${strongest.id} auc=${strongest.auc.toFixed(4)}`, meaning:'成员/非成员在该信号上存在可量化分离；应继续用独立 holdout 或官方 verifier 复核，不能据单条样本断言成员身份。' });
+  const strongest=[...signals].filter((x)=>Number.isFinite(x.auc)).sort((a,b)=>(b.tprAtFpr10?.tpr||0)-(a.tprAtFpr10?.tpr||0)||b.auc-a.auc)[0] || null;
+  if (strongest?.auc>=0.7 || strongest?.tprAtFpr10?.tpr>=0.25) findings.push({
+    id:'membership-separation',
+    severity:strongest.auc>=0.85||strongest?.tprAtFpr10?.tpr>=0.5?'high':'medium',
+    evidence:`signal=${strongest.id} auc=${strongest.auc?.toFixed(4)??'n/a'} tpr@0.1fpr=${strongest.tprAtFpr10?.tpr?.toFixed(4)??'n/a'}`,
+    meaning:'成员/非成员在该信号上存在可量化分离；低 FPR operating point 更接近竞赛型 MIA 评分，但仍需独立 holdout/reference 分布复核。'
+  });
   if (labeled===0) findings.push({ id:'privacy-groundtruth-missing', severity:'info', evidence:'member labels absent', meaning:'没有成员/非成员真值，只能整理模型输出分布，无法计算真实 MIA 区分能力。' });
   return {
     rows:rows.length,
     labeledRows:labeled,
     signals,
     strongestSignal:strongest,
+    competitionMetrics:strongest?{
+      auc:strongest.auc,
+      tprAtFpr10:strongest.tprAtFpr10?.tpr??null,
+      realizedFpr:strongest.tprAtFpr10?.fpr??null,
+      lowFprThreshold:strongest.tprAtFpr10?.threshold??null,
+      membershipAdvantage:strongest.membershipAdvantage?.advantage??null
+    }:null,
     privacyRisk:level,
     findings,
     notes:[
       'AUC 与阈值只衡量当前 transcript 的成员区分能力；不要把它解释为训练数据泄露的绝对概率。',
+      'TPR@0.1FPR 是竞赛型低误报 operating point；样本过少时只能作为本地回归指标，不应夸大统计显著性。',
       '比赛若给 shadow/reference model 或多次查询结果，应按相同 preprocessing 生成独立参考分布再比较。'
     ]
   };
@@ -160,15 +212,15 @@ function analyzePrivacyTranscript(input) {
 function buildPrivacyHarness(input={}) {
   const data=input && typeof input==='object' ? input : {};
   const signal=String(data.signal||'loss');
-  const privacyMeter=`# Privacy Meter integration plan\n# Project: privacytrustlab/ml_privacy_meter\n# 1. Implement the target model/dataset wrappers from the challenge code.\n# 2. Keep the challenge preprocessing identical.\n# 3. Configure membership inference with the requested signal (${signal}).\n# 4. Export per-record attack scores, then feed them back to NewCyber's transcript auditor for AUC/threshold comparison.\n`;
+  const privacyMeter=`# Privacy Meter integration plan\n# Project: privacytrustlab/ml_privacy_meter\n# 1. Implement the target model/dataset wrappers from the challenge code.\n# 2. Keep the challenge preprocessing identical.\n# 3. Configure membership inference with the requested signal (${signal}).\n# 4. Export per-record attack scores, then feed them back to NewCyber's transcript auditor for AUC/TPR@0.1FPR comparison.\n`;
   const art=`# ART membership-inference harness sketch\nfrom art.attacks.inference.membership_inference import MembershipInferenceBlackBox\n\n# classifier = ...  # wrap the trusted challenge model with an ART estimator\n# attack = MembershipInferenceBlackBox(classifier, input_type='${signal==='loss'?'loss':'prediction'}')\n# attack.fit(x_member, y_member, x_nonmember, y_nonmember)\n# inferred = attack.infer(x_query, y_query)\n`;
   return {
     harnesses:[
       { backend:'Privacy Meter', project:'privacytrustlab/ml_privacy_meter', text:privacyMeter },
       { backend:'ART', project:'Trusted-AI/adversarial-robustness-toolbox', text:art }
     ],
-    notes:['NewCyber 负责 transcript 归一化、AUC/阈值和结果解释；模型 wrapper 仍按赛题实际代码填写。']
+    notes:['NewCyber 负责 transcript 归一化、AUC/低 FPR operating point 和结果解释；模型 wrapper 仍按赛题实际代码填写。']
   };
 }
 
-module.exports={ splitCsvLine, parseRows, rankAuc, bestThreshold, analyzePrivacyTranscript, buildPrivacyHarness };
+module.exports={ splitCsvLine, parseRows, rankAuc, bestThreshold, tprAtFpr, membershipAdvantage, analyzePrivacyTranscript, buildPrivacyHarness };
