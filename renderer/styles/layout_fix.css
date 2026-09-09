@@ -1,0 +1,22 @@
+main,.content{min-height:0}
+.tool-home-head-minimal{align-items:center;justify-content:flex-start;margin:0 0 16px;padding:2px 0 13px}
+.tool-home-head-minimal h1{margin:0;font-size:28px;letter-spacing:-.5px}
+
+#tool-result,.field textarea{scrollbar-gutter:stable;scrollbar-width:thin;scrollbar-color:#343e4d transparent}
+#tool-result::-webkit-scrollbar,.field textarea::-webkit-scrollbar{width:9px;height:9px}
+#tool-result::-webkit-scrollbar-thumb,.field textarea::-webkit-scrollbar-thumb{background:#343e4d;border-radius:999px;border:2px solid transparent;background-clip:padding-box}
+
+@media(min-width:1201px){
+  .workbench{height:calc(100vh - 170px);min-height:420px;align-items:stretch}
+  .input-panel,.result-panel{min-height:0;overflow:hidden}
+  .input-panel .field.grow{min-height:0}
+  .input-panel .field.grow textarea{height:100%;min-height:160px;resize:vertical;overflow:auto;overscroll-behavior:contain}
+  .result-panel #tool-result{flex:1;min-height:0;overflow:auto;overscroll-behavior:contain;padding-right:4px}
+}
+
+@media(max-width:1200px){
+  .workbench{height:auto;max-height:none;min-height:0}
+  .input-panel,.result-panel{overflow:visible}
+  .result-panel #tool-result{overflow:visible}
+  .field textarea{resize:vertical;overflow:auto}
+}
