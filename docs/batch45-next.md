@@ -1,0 +1,1 @@
+Next implementation work: build source adapters/importers for P0 corpora and separately close the real SCA `profileTokenIds` routing/label-source gap without weakening evidence requirements.
