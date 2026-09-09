@@ -45,10 +45,7 @@
 
   homeView = function toolHomeView() {
     let html = previousHomeView();
-    html = html.replace(
-      /<div class="hero">[\s\S]*?<\/div>/,
-      `<section class="tool-home-head"><div><span class="kicker">LOCAL SECURITY WORKBENCH</span><h1>NewCyber</h1><p>本地安全分析工具。选择模块或直接打开赛题目录。</p></div><div class="tool-home-status"><span><i></i>本地模式</span><kbd>Ctrl K</kbd></div></section>`
-    );
+    html = html.replace(/<div class="hero">[\s\S]*?<\/div>/, `<section class="tool-home-head tool-home-head-minimal"><h1>NewCyber</h1></section>`);
     html = html.replace(/进入工具箱 →/g, '打开');
     html = html.replace(/Hex、Base64、URL、SHA-256、XOR 一页完成/g, 'Hex / Base64 / URL / Hash / XOR');
     html = html.replace(/文件类型、字符串、Flag、模型\/WAV\/PCAP 基础检查/g, '扫描附件、候选结果和可导出产物');
@@ -59,10 +56,7 @@
   domainView = function toolDomainView(id) {
     let html = previousDomainView(id);
     html = html.replace(/<em>打开 →<\/em>/g, '<em>打开</em>');
-    html = html.replace(
-      /<article class="panel roadmap">[\s\S]*?<\/article>/,
-      '<div class="module-footnote"><span>LOCAL</span><p>输入只在本机处理；检测结果保留原始证据，未满足条件时不会给出确定结论。</p></div>'
-    );
+    html = html.replace(/<article class="panel roadmap">[\s\S]*?<\/article>/, '<div class="module-footnote"><span>LOCAL</span><p>输入只在本机处理；检测结果保留原始证据，未满足条件时不会给出确定结论。</p></div>');
     return html;
   };
 
@@ -95,10 +89,7 @@
     const sectionTitles = document.querySelectorAll('.nav-section > b');
     if (sectionTitles[0]) sectionTitles[0].textContent = '模块';
     if (sectionTitles[1]) sectionTitles[1].textContent = '工具';
-    const labels = {
-      vehicle:'车联网', lowalt:'低空 / UAV', ai:'AI 安全', web3:'Web3',
-      common:'编码 / Hash', knowledge:'协议速查', workspace:'目录分析'
-    };
+    const labels = {vehicle:'车联网', lowalt:'低空 / UAV', ai:'AI 安全', web3:'Web3', common:'编码 / Hash', knowledge:'协议速查', workspace:'目录分析'};
     for (const button of document.querySelectorAll('.nav-item[data-view]')) {
       const label = labels[button.dataset.view];
       if (!label) continue;

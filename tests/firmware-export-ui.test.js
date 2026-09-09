@@ -60,8 +60,8 @@ test('compact workbench UI loads last and firmware view exposes both export path
   assert.doesNotThrow(() => new vm.Script(ui, { filename: 'renderer/tool_ui.js' }));
   assert.ok(html.indexOf('tool_ui.js') > html.indexOf('investigation_panel.js'));
   assert.match(html, /styles\/tool_ui\.css/);
-  assert.match(ui, /LOCAL SECURITY WORKBENCH/);
-  assert.doesNotMatch(ui, /一台机器解决重复劳动|面向线下断网决赛准备/);
+  assert.match(ui, /tool-home-head tool-home-head-minimal"><h1>NewCyber<\/h1>/);
+  assert.doesNotMatch(ui, /LOCAL SECURITY WORKBENCH|一台机器解决重复劳动|面向线下断网决赛准备/);
   assert.match(css, /\.tool-home-head/);
   assert.match(firmware, /导出恢复结果/);
   assert.match(firmware, /Binwalk 解包到目录/);
