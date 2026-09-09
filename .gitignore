@@ -1,4 +1,5 @@
 node_modules/
+.newcyber-runtime/
 dist/
 out/
 *.log
