@@ -13,7 +13,7 @@ const { analyzeOcrExtractionTranscript, buildOcrExtractionHarness } = require('.
 const { analyzeModelInversion } = require('./ai_model_inversion');
 const { diagnoseAiSkillMatrix } = require('./ai_skill_matrix');
 const { runAiRealCtfRegression, getAiRealCtfCorpus } = require('./ai_real_ctf_regression');
-const { analyzeRasterImage, compareRasterImages } = require('./ai_sample_forensics');
+const { analyzeRasterImage, compareRasterImages, analyzeNpySample, compareNpySamples } = require('./ai_sample_forensics');
 const { scanRegulatoryApi } = require('./low_altitude_regulatory');
 const { analyzeGnssLog } = require('./gnss_audit');
 const { analyzeGnssSpectrum } = require('./gnss_sdr');
@@ -27,6 +27,14 @@ const { autoDecode } = require('./auto_decode');
 const { decryptCryptoContext } = require('./context_crypto');
 const { searchKnowledge, knowledgeStats } = require('../knowledge');
 const { analyzeUavChallengeEvidence, getScenarioCatalog, parseWifiEvidence, analyzeFlightLog } = require('./uav_challenge_matrix_v4');
+
+function npyBuffer(value) {
+  if (!value || typeof value.base64 !== 'string') throw new Error('NPY 输入需要 base64');
+  const buffer = Buffer.from(value.base64, 'base64');
+  if (!buffer.length) throw new Error('NPY 数据为空');
+  if (buffer.length > 48 * 1024 * 1024) throw new Error('NPY 样本工作台单文件上限 48 MiB');
+  return buffer;
+}
 
 function runTool(tool, payload = {}) {
   if (tool === 'can-analyze') return analyzeCanAdvanced(payload.input);
@@ -51,6 +59,14 @@ function runTool(tool, payload = {}) {
   if (tool === 'ai-real-ctf-corpus') return { schema:'newcyber.ai-real-ctf-corpus.v1', cases:getAiRealCtfCorpus() };
   if (tool === 'ai-image-raster-forensics') return analyzeRasterImage(payload.input || payload);
   if (tool === 'ai-image-raster-compare') return compareRasterImages(payload.input || payload);
+  if (tool === 'ai-npy-sample-forensics') {
+    const input = payload.input || payload;
+    return analyzeNpySample(npyBuffer(input), input.fileName || 'sample.npy');
+  }
+  if (tool === 'ai-npy-sample-compare') {
+    const input = payload.input || payload;
+    return compareNpySamples(npyBuffer(input.left), npyBuffer(input.right));
+  }
   if (tool === 'ai-tabular-profile') return analyzeTabularDataset(payload.input);
   if (tool === 'ai-tabular-candidate') return evaluateTabularCandidate(payload.input);
   if (tool === 'ai-adversarial-audit') return analyzeAdversarialPair(payload.input);
