@@ -4,11 +4,12 @@ const { BrowserWindow, dialog, ipcMain } = require('electron');
 const fs = require('fs/promises');
 const path = require('path');
 const { analyzePowerTracePath, extractWindowFeatures } = require('../core/power_side_channel');
-const { runtimeStatus, inspectOnnxModel, runOnnxModel } = require('../core/local_ml_runtime');
+const { runtimeStatus, inspectOnnxModel, runOnnxModel, setRuntimeBundleRoot } = require('../core/local_ml_runtime');
 const { inspectTransformerModel, runTransformerDecode } = require('../core/transformer_oracle');
 const { createGpt2Bpe } = require('../core/gpt2_bpe');
 const { fitLeakageProfile, recoverProbeCandidates } = require('../core/side_channel_probe');
 const { runScaAutopilotPaths } = require('../core/sca_autopilot');
+const { planHfOnnxExport } = require('../core/hf_onnx_export');
 
 const MAX_SOURCE_BYTES = 2 * 1024 * 1024;
 const MAX_ONNX_BYTES = 4 * 1024 * 1024 * 1024;
@@ -20,10 +21,16 @@ const AUTOPILOT_EXT = new Set(['.npy','.onnx','.safetensors','.py','.pyw','.json
 const SKIP_DIRS = new Set(['.git','node_modules','.venv','venv','__pycache__','.idea','.vscode','dist','build']);
 const approvedTraceFiles = new Set();
 const approvedOnnxFiles = new Set();
+const approvedHfRoots = new Set();
 
 function openDialog(options) {
   const parent = BrowserWindow.getFocusedWindow();
   return parent ? dialog.showOpenDialog(parent, options) : dialog.showOpenDialog(options);
+}
+
+function saveDialog(options) {
+  const parent = BrowserWindow.getFocusedWindow();
+  return parent ? dialog.showSaveDialog(parent, options) : dialog.showSaveDialog(options);
 }
 
 function resolvedPath(value) {
@@ -187,6 +194,32 @@ async function runTransformerPath(payload={}) {
   });
 }
 
+async function planHfDirectory(rootPath, options = {}) {
+  const root = resolvedPath(rootPath);
+  const stat = await fs.lstat(root);
+  if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error('请选择非符号链接的本地 HuggingFace 模型目录');
+  const plan = await planHfOnnxExport(root, options);
+  approvedHfRoots.add(root);
+  return plan;
+}
+
+async function saveHfPlan(rootPath, options = {}) {
+  const root = resolvedPath(rootPath);
+  if (!approvedHfRoots.has(root)) throw new Error('请先通过 HF / SafeTensors 选择器检查模型目录');
+  const plan = await planHfOnnxExport(root, options);
+  const result = await saveDialog({
+    title: '保存 NewCyber ONNX 转换清单',
+    defaultPath: path.join(root, 'newcyber_hf_onnx_plan.json'),
+    filters: [{ name: 'JSON', extensions: ['json'] }]
+  });
+  if (result.canceled || !result.filePath) return null;
+  await fs.writeFile(result.filePath, `${JSON.stringify(plan, null, 2)}\n`, { encoding: 'utf8', flag: 'wx' }).catch(async (error) => {
+    if (error?.code !== 'EEXIST') throw error;
+    throw new Error('目标转换清单已存在；NewCyber 不会静默覆盖已有文件');
+  });
+  return { filePath: result.filePath, status: plan.status, gap: plan.gap || null };
+}
+
 function registerAiScaIpc() {
   ipcMain.handle('ai:sca-choose-analyze', async () => {
     const result = await openDialog({
@@ -222,6 +255,21 @@ function registerAiScaIpc() {
   ipcMain.handle('ai:sca-recover-probe', async (_event,payload) => recoverProbeCandidates(payload?.profile,payload?.targetLeakage,payload?.probeMatrix,payload?.options||{}));
   ipcMain.handle('ai:local-ml-status', async () => runtimeStatus());
 
+  ipcMain.handle('ai:local-ml-select-runtime', async () => {
+    const result = await openDialog({ title: '选择 NewCyber ONNX Runtime Bundle', properties: ['openDirectory'] });
+    if (result.canceled || !result.filePaths[0]) return null;
+    setRuntimeBundleRoot(result.filePaths[0]);
+    return runtimeStatus();
+  });
+
+  ipcMain.handle('ai:hf-onnx-choose-plan', async () => {
+    const result = await openDialog({ title: '选择本地 HuggingFace / SafeTensors 模型目录', properties: ['openDirectory'] });
+    if (result.canceled || !result.filePaths[0]) return null;
+    return planHfDirectory(result.filePaths[0]);
+  });
+
+  ipcMain.handle('ai:hf-onnx-save-plan', async (_event, payload) => saveHfPlan(payload?.root, { task: payload?.task || null, outputDir: payload?.outputDir || null }));
+
   ipcMain.handle('ai:onnx-choose-inspect', async (_event, provider = 'cpu') => {
     const result = await openDialog({
       title: '选择 ONNX oracle',
@@ -247,4 +295,14 @@ function registerAiScaIpc() {
   ipcMain.handle('ai:transformer-run', async (_event,payload) => runTransformerPath(payload||{}));
 }
 
-module.exports = { registerAiScaIpc, analyzeScaPaths, collectAutopilotFiles, runScaAutopilotDirectory, inspectOnnxPath, tokenizerSibling, runTransformerPath };
+module.exports = {
+  registerAiScaIpc,
+  analyzeScaPaths,
+  collectAutopilotFiles,
+  runScaAutopilotDirectory,
+  inspectOnnxPath,
+  tokenizerSibling,
+  runTransformerPath,
+  planHfDirectory,
+  saveHfPlan
+};
