@@ -1,6 +1,8 @@
 'use strict';
 
 const { analyzeUavChallengeEvidence } = require('./uav_challenge_matrix_v4');
+const { analyzeSwarmCoordination } = require('./lowalt_swarm');
+const { analyzeCrossBoundaryFlow } = require('./lowalt_cross_boundary');
 
 const MAX_TEXT = 512 * 1024;
 const MAX_LINES = 1200;
@@ -177,25 +179,38 @@ function gateState(findings, gate) {
   return { id:gate.id,title:gate.title,status:complete===checks.length?'complete':complete?'partial':'missing',need:gate.need,complete,total:checks.length,queuedCandidates };
 }
 
+function autoCandidate(id,surface,title,evidence,source,extra={}) {
+  return {
+    id,
+    surface,
+    title:String(title||id).slice(0,160),
+    evidence:Array.isArray(evidence)?evidence.join(' · ').slice(0,1200):String(evidence||'').slice(0,1200),
+    impact:'',remediation:'',retest:'',state:'candidate',confidence:Number(extra.confidence)||0,
+    source,closureTracked:false,nextCheck:String(extra.nextCheck||'').slice(0,800),severity:extra.severity||null
+  };
+}
+
 function buildLowaltAssessment(input, options={}) {
   const normalized=normalizeInput(input);
   const lines=evidenceLines(normalized.text);
-  let uav=null;
+  let uav=null,swarm=null,crossBoundary=null;
   if (normalized.text.trim()) {
     try { uav=analyzeUavChallengeEvidence(normalized.text); } catch { uav=null; }
+    try { swarm=analyzeSwarmCoordination(normalized.text, options.swarm || {}); } catch { swarm=null; }
+    try { crossBoundary=analyzeCrossBoundaryFlow(normalized.text, options.crossBoundary || {}); } catch { crossBoundary=null; }
   }
 
   const manual=normalized.observations.map(normalizeObservation).filter(Boolean);
   const auto=[];
   for (const [index,hit] of (uav?.hits||[]).slice(0,80).entries()) {
-    auto.push({
-      id:`uav-${index+1}`,
-      surface:surfaceForHit(hit),
-      title:hit.title || hit.scenarioId || 'UAV evidence candidate',
-      evidence:(hit.evidence||[]).join(' · '),
-      impact:'', remediation:hit.action || '', retest:'',
-      state:'candidate', confidence:Number(hit.confidence)||0, source:'existing-uav-analyzer', closureTracked:false
-    });
+    auto.push(autoCandidate(`uav-${index+1}`,surfaceForHit(hit),hit.title || hit.scenarioId || 'UAV evidence candidate',hit.evidence||[],'existing-uav-analyzer',{confidence:hit.confidence,nextCheck:hit.action}));
+  }
+  for (const [index,finding] of (swarm?.findings||[]).slice(0,40).entries()) {
+    auto.push(autoCandidate(`swarm-${index+1}`,'swarm',finding.title,finding.evidence||[],'swarm-coordination',{severity:finding.severity,nextCheck:finding.nextCheck}));
+  }
+  for (const [index,finding] of (crossBoundary?.findings||[]).slice(0,40).entries()) {
+    const surface=finding.id==='cross-boundary-control-acceptance'?'ground-station':'logistics-system';
+    auto.push(autoCandidate(`cross-${index+1}`,surface,finding.title,finding.evidence||[],'cross-boundary-flow',{severity:finding.severity,nextCheck:finding.nextCheck}));
   }
   const findings=[...manual,...auto];
 
@@ -223,7 +238,7 @@ function buildLowaltAssessment(input, options={}) {
     .sort((a,b)=>b.score-a.score);
 
   return {
-    schema:'newcyber.lowalt-assessment.v1',
+    schema:'newcyber.lowalt-assessment.v2',
     mode:'scenario-assessment',
     competitionContext:{
       target:'2026 第二届“湾区杯”网络安全大赛 · 低空经济安全准备',
@@ -235,6 +250,10 @@ function buildLowaltAssessment(input, options={}) {
     findings,
     gates,
     priority,
+    extensions:{
+      swarm:swarm?{summary:swarm.summary,findings:swarm.findings,leaders:swarm.leaders,tasks:swarm.tasks}:null,
+      crossBoundary:crossBoundary?{summary:crossBoundary.summary,findings:crossBoundary.findings,paths:crossBoundary.paths.slice(0,8),gaps:crossBoundary.gaps}:null
+    },
     coverage:{ surfaces:SURFACES.length, observed, validated, findings:findings.length, triageCandidates:auto.length, trackedFindings:manual.length, closureComplete, closureTotal:CLOSURE_GATES.length },
     deliverableTemplate:[
       '资产 / 业务对象与信任边界',
@@ -250,6 +269,8 @@ function buildLowaltAssessment(input, options={}) {
     ],
     notes:[
       'AUTO 命中只产生 candidate，不自动宣告漏洞成立。',
+      '蜂群异常必须由成员/角色/序列/任务/时间的可复核冲突支撑；单个 swarm 关键字不会自动变成漏洞。',
+      'APP → GCS → FC → PHYSICAL 只有在共享 trace/request/order/task/mission/route 等关联标识时才自动连边。',
       'AUTO triage candidate 不进入闭环完成度分母；只有分析员记录/提升后的 finding 才参与验证、影响、整改与复测状态。',
       '单纯开放端口、单条异常遥测、单次控制命令或关键字命中不能替代漏洞验证。',
       options.strict===false ? '当前为宽松准备模式。' : '默认采用保守证据边界：验证、影响、修复、复测分别计数。'
