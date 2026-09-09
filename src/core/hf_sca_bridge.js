@@ -4,6 +4,7 @@ const fs = require('fs/promises');
 const path = require('path');
 const { planHfOnnxExport } = require('./hf_onnx_export');
 const { executeTrustedHfOnnxPlan } = require('./trusted_hf_converter');
+const { validateTrustedConverterLocation } = require('./trusted_converter_location');
 const { runScaAutopilotPaths } = require('./sca_autopilot');
 
 const BRIDGE_SCHEMA = 'newcyber.sca-autopilot-conversion.v1';
@@ -73,6 +74,16 @@ async function convertAndResumeSca(filePaths, converterDescriptor, options = {})
   const rootState = await findHfModelRoots(sourcePaths);
   if (rootState.status !== 'ok') return bridgeGap(rootState.code, rootState.detail, 'hf-root', { roots: rootState.roots || [] });
 
+  const protectedRoots = [{ path:rootState.root, label:'HF model root' }];
+  if (options.workspaceRoot) protectedRoots.push({ path:resolved(options.workspaceRoot), label:'challenge workspace' });
+  const converterLocation = await validateTrustedConverterLocation(converterDescriptor, protectedRoots);
+  if (!converterLocation.ok) {
+    return bridgeGap(converterLocation.code, converterLocation.detail, 'converter-location', {
+      modelRoot:rootState.root,
+      converterLocation
+    });
+  }
+
   const planner = options.planHfOnnxExport || planHfOnnxExport;
   const executor = options.executeTrustedHfOnnxPlan || executeTrustedHfOnnxPlan;
   const autopilot = options.runScaAutopilotPaths || runScaAutopilotPaths;
@@ -109,6 +120,7 @@ async function convertAndResumeSca(filePaths, converterDescriptor, options = {})
     modelRoot: rootState.root,
     plan,
     conversion,
+    converterLocation,
     rerun: {
       selectedOnnx,
       originalFiles: sourcePaths.length,
