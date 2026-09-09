@@ -11,6 +11,7 @@ const { fitLeakageProfile, recoverProbeCandidates } = require('../core/side_chan
 const { runScaAutopilotPaths } = require('../core/sca_autopilot');
 const { planHfOnnxExport } = require('../core/hf_onnx_export');
 const { inspectTrustedConverter, executeTrustedHfOnnxPlan } = require('../core/trusted_hf_converter');
+const { validateTrustedConverterLocation } = require('../core/trusted_converter_location');
 const { convertAndResumeSca, isSafeTensorOracleGap } = require('../core/hf_sca_bridge');
 
 const MAX_SOURCE_BYTES = 2 * 1024 * 1024;
@@ -240,12 +241,14 @@ async function executeApprovedHfConversion(rootPath, options = {}) {
   const root = resolvedPath(rootPath);
   if (!approvedHfRoots.has(root)) throw new Error('请先通过 HF / SafeTensors 选择器检查模型目录');
   if (!trustedHfConverter) throw new Error('请先显式选择并审计 optimum-cli');
+  const converterLocation = await validateTrustedConverterLocation(trustedHfConverter, [{ path:root, label:'HF model root' }]);
+  if (!converterLocation.ok) return { schema:'newcyber.hf-onnx-conversion.v1', status:'gap', gap:{ code:converterLocation.code, detail:converterLocation.detail, stage:'converter-location' }, converterLocation };
   const runtime = runtimeStatus();
-  if (!runtime.available) return { schema:'newcyber.hf-onnx-conversion.v1', status:'gap', gap:{ code:'MODEL_RUNTIME_GAP', detail:runtime.installHint, stage:'preflight' }, runtime };
+  if (!runtime.available) return { schema:'newcyber.hf-onnx-conversion.v1', status:'gap', gap:{ code:'MODEL_RUNTIME_GAP', detail:runtime.installHint, stage:'preflight' }, runtime, converterLocation };
   const plan = await planHfOnnxExport(root, { task: options.task || null, outputDir: options.outputDir || null });
   const conversion = await executeTrustedHfOnnxPlan(plan, trustedHfConverter, { provider: options.provider || 'cpu', purpose: options.purpose || 'general', timeoutMs: options.timeoutMs, maxOutputBytes: options.maxOutputBytes });
   approveResultArtifacts({ conversion });
-  return conversion;
+  return { ...conversion, converterLocation };
 }
 
 async function continueScaAutopilotDirectory(rootPath, options = {}) {
@@ -256,7 +259,7 @@ async function continueScaAutopilotDirectory(rootPath, options = {}) {
   const runtime = runtimeStatus();
   if (!runtime.available) return { schema:'newcyber.sca-autopilot-conversion.v1', status:'gap', gap:{ code:'MODEL_RUNTIME_GAP', detail:runtime.installHint, stage:'preflight' }, runtime, workspaceRoot:root };
   const paths = await collectAutopilotFiles(root);
-  const bridged = await convertAndResumeSca(paths, trustedHfConverter, { provider: options.provider || 'cpu', timeoutMs: options.timeoutMs, maxOutputBytes: options.maxOutputBytes });
+  const bridged = await convertAndResumeSca(paths, trustedHfConverter, { workspaceRoot:root, provider: options.provider || 'cpu', timeoutMs: options.timeoutMs, maxOutputBytes: options.maxOutputBytes });
   if (bridged?.conversion?.status === 'converted') approvedScaConversionRoots.delete(root);
   approveResultArtifacts(bridged);
   return { ...bridged, workspaceRoot: root, runtime };
