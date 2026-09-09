@@ -19,6 +19,17 @@ function bridgeGap(code, detail, stage, extra = {}) {
   return { schema: BRIDGE_SCHEMA, status: 'gap', gap: { code, detail, stage }, ...extra };
 }
 
+function isSafeTensorOracleGap(result) {
+  return Boolean(
+    result
+    && result.status === 'gap'
+    && result.gap?.code === 'ORACLE_ARTIFACT_GAP'
+    && Array.isArray(result.discovery?.safetensors)
+    && result.discovery.safetensors.length > 0
+    && result.discovery?.roles?.model?.status !== 'ok'
+  );
+}
+
 async function isRegularFile(filePath) {
   try {
     const stat = await fs.lstat(filePath);
@@ -111,6 +122,7 @@ async function convertAndResumeSca(filePaths, converterDescriptor, options = {})
 module.exports = {
   BRIDGE_SCHEMA,
   MAX_CANDIDATE_ROOTS,
+  isSafeTensorOracleGap,
   findHfModelRoots,
   convertAndResumeSca
 };
