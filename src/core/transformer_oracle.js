@@ -191,7 +191,7 @@ function makeFeeds(session, ort, recipe, sequence, stepIds, cacheState, extraFee
     feeds[item.name] = tensorFromSpec(ort, spec);
   }
   for (const name of session.inputNames) if (!feeds[name]) throw new Error(`未构建 ONNX 输入 ${name}`);
-  return feeds;
+  return { feeds, idsForModelLength:idsForModel.length };
 }
 
 async function runTransformerDecode(model, request={}, options={}) {
@@ -219,9 +219,10 @@ async function runTransformerDecode(model, request={}, options={}) {
     let flag = null;
     for (let step=0; step<maxNewTokens; step+=1) {
       const stepIds = step === 0 ? sequence.slice() : [sequence[sequence.length-1]];
-      let feeds;
-      try { feeds = makeFeeds(session,ort,recipe,sequence,stepIds,cacheState,request.extraFeeds,pastLength); }
+      let built;
+      try { built = makeFeeds(session,ort,recipe,sequence,stepIds,cacheState,request.extraFeeds,pastLength); }
       catch (error) { return { schema:'newcyber.transformer-decode.v1', status:String(error?.message||error).split(':')[0], provider:normalizeProvider(options.provider||'cpu'), recipe, generatedTokenIds:generated, steps, gap:error?.message||String(error) }; }
+      const { feeds, idsForModelLength } = built;
       const wanted = new Set([recipe.roles.logits.name]);
       if (request.captureHidden && recipe.roles.hidden) wanted.add(recipe.roles.hidden.name);
       for (const pair of recipe.cache.pairs) wanted.add(pair.output);
@@ -242,7 +243,7 @@ async function runTransformerDecode(model, request={}, options={}) {
           next[pair.input] = tensor;
         }
         cacheState = next;
-        pastLength = sequence.length;
+        pastLength += idsForModelLength;
       } else {
         cacheState = null;
         pastLength = 0;
