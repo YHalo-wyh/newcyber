@@ -47,14 +47,30 @@ function scanPythonSource(text) {
       fixTarget:'sys.path 动态修改', fixAction:'只加入固定只读目录，并在加载关键模块前校验 resolved path。', regression:'在工作目录放置同名模块时，关键 import 的 resolved path 仍必须指向固定依赖目录。'
     },
     {
-      regex:/\b(?:pickle\.load|joblib\.load|torch\.load|dill\.load|cloudpickle\.load)\s*\(/gi,
+      regex:/\b(?:pickle\.(?:load|loads)|joblib\.load|dill\.(?:load|loads)|cloudpickle\.(?:load|loads))\s*\(/gi,
       id:'unsafe-model-deserialization-call', severity:'medium', title:'可执行语义模型/对象加载',
-      meaning:'加载 API 可能包含 pickle/dill/joblib 执行语义；真正风险取决于文件来源与加载参数。',
+      meaning:'加载 API 具有 pickle/dill/joblib 执行语义；若 artifact 来源不可信，反序列化边界可直接变成代码执行面。',
       fixTarget:'模型/对象加载调用', fixAction:'优先改用 SafeTensors/纯权重格式；必须加载 pickle 时先做独立静态扫描并约束来源/hash。', regression:'恶意 GLOBAL/REDUCE 样本必须在加载前被阻断，正常 checkpoint 仍可按预期读取。'
     }
   ];
   for (const spec of patterns) {
     for (const match of text.matchAll(spec.regex)) addFinding(findings,text,match,spec);
+  }
+
+  // torch.load needs call-level handling: weights_only=False is stronger evidence;
+  // weights_only=True is intentionally not treated as equivalent to unrestricted pickle execution.
+  for (const match of text.matchAll(/\btorch\.load\s*\(([\s\S]{0,1000}?)\)/gi)) {
+    const call=match[0];
+    if (/\bweights_only\s*=\s*False\b/i.test(call)) addFinding(findings,text,match,{
+      id:'torch-load-weights-only-false',severity:'high',title:'PyTorch 显式关闭 weights_only 限制',
+      meaning:'torch.load(..., weights_only=False) 允许完整 pickle 对象反序列化语义；对第三方/上传模型属于高风险供应链加载边界。',
+      fixTarget:'torch.load 调用',fixAction:'对只需要权重的路径改用 weights_only=True 或 SafeTensors；同时固定来源、hash 并在加载前做静态 artifact 审计。',regression:'带危险 pickle GLOBAL/REDUCE 的模型必须在进入 torch.load 前被阻断。'
+    });
+    else if (!/\bweights_only\s*=\s*True\b/i.test(call)) addFinding(findings,text,match,{
+      id:'torch-load-policy-implicit',severity:'medium',title:'PyTorch 模型加载策略未显式限定',
+      meaning:'torch.load 未显式声明 weights_only 策略；实际行为受 PyTorch 版本和文件类型影响，比赛复现与供应链边界不够确定。',
+      fixTarget:'torch.load 调用',fixAction:'明确声明 weights_only 策略，并对来源、格式和 hash 做独立校验。',regression:'升级 PyTorch 版本后，模型加载安全策略与功能行为必须保持可解释且有回归。'
+    });
   }
 
   for (const match of text.matchAll(/\b(?:AutoModel\w*|AutoTokenizer|AutoConfig|PeftModel|SentenceTransformer)\.from_pretrained\s*\(([\s\S]{0,900}?)\)/gi)) {
@@ -67,6 +83,22 @@ function scanPythonSource(text) {
       fixTarget:'from_pretrained 调用',fixAction:'固定不可变 commit SHA/revision，并记录权重、Tokenizer、adapter 的 hash。',regression:'仓库默认分支变化时，比赛/部署环境仍解析到同一 commit。'
     });
   }
+
+  for (const match of text.matchAll(/\b(?:hf_hub_download|snapshot_download)\s*\(([\s\S]{0,900}?)\)/gi)) {
+    const call=match[0];
+    if (!/\brevision\s*=/.test(call)) addFinding(findings,text,match,{
+      id:'hf-download-revision-unpinned',severity:'medium',title:'Hugging Face 下载 revision 未固定',
+      meaning:'直接下载 API 未固定 revision；缓存命中、默认分支漂移或仓库更新都可能改变实际 artifact。',
+      fixTarget:'Hub download 调用',fixAction:'固定 commit SHA，并在使用前验证文件 hash/允许格式。',regression:'仓库 HEAD 变化后仍必须解析到固定 commit 与相同 artifact hash。'
+    });
+  }
+
+  for (const match of text.matchAll(/\b(?:zipfile\.ZipFile|tarfile\.open)[\s\S]{0,500}?\.extractall\s*\(/gi)) addFinding(findings,text,match,{
+    id:'model-archive-extractall',severity:'medium',title:'模型/依赖归档直接 extractall',
+    meaning:'归档解包若未检查成员路径与符号链接，第三方模型包可能借路径穿越覆盖工作目录或依赖文件。',
+    fixTarget:'archive extraction',fixAction:'逐项验证规范化目标路径、禁止绝对路径/.. 与危险 symlink，再写入隔离目录。',regression:'包含 ../、绝对路径或越界 symlink 的归档必须拒绝且不能写出目标目录。'
+  });
+
   return findings;
 }
 
@@ -112,11 +144,12 @@ function auditAiSupplyChain(input) {
       info:findings.filter((x)=>x.severity==='info').length
     },
     nextActions:[
-      ...(findings.some((x)=>x.id==='hf-trust-remote-code'||x.id==='hf-revision-unpinned')?['先固定 model/tokenizer/adapter 的仓库、revision 和 hash，再分析自定义代码与模型文件。']:[]),
-      ...(findings.some((x)=>x.id==='unsafe-model-deserialization-call')?['对实际模型文件执行内置 pickle/model 审计，并可交叉运行 ModelScan / PickleScan。']:[]),
-      ...(findings.some((x)=>x.id==='python-extra-index'||x.id==='direct-dependency-reference')?['画出 dependency name → source/index → resolved artifact 的解析链，检查同名覆盖和来源漂移。']:[])
+      ...(findings.some((x)=>x.id==='hf-trust-remote-code'||x.id==='hf-revision-unpinned'||x.id==='hf-download-revision-unpinned')?['先固定 model/tokenizer/adapter 的仓库、revision 和 hash，再分析自定义代码与模型文件。']:[]),
+      ...(findings.some((x)=>x.id==='unsafe-model-deserialization-call'||x.id==='torch-load-weights-only-false'||x.id==='torch-load-policy-implicit')?['对实际模型文件执行内置 pickle/model 审计，并可交叉运行 ModelScan / PickleScan；加载策略必须显式。']:[]),
+      ...(findings.some((x)=>x.id==='python-extra-index'||x.id==='direct-dependency-reference')?['画出 dependency name → source/index → resolved artifact 的解析链，检查同名覆盖和来源漂移。']:[]),
+      ...(findings.some((x)=>x.id==='model-archive-extractall')?['对模型/依赖归档做路径规范化与 symlink 越界回归，再进入解包流程。']:[])
     ],
-    notes:['供应链 finding 必须结合“攻击者能否影响 artifact/source/revision/path”判断可利用性；未锁版本本身不直接等价于漏洞。']
+    notes:['供应链 finding 必须结合“攻击者能否影响 artifact/source/revision/path”判断可利用性；未锁版本本身不直接等价于漏洞。','weights_only=True 降低 pickle 对象执行面，但不替代 artifact provenance、hash、格式和业务语义验证。']
   };
 }
 
