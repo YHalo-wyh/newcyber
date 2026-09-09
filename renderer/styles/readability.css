@@ -1,0 +1,59 @@
+/* Batch38 readability pass.
+   Reference: PwnCraft keeps normal UI text around 12–13px and reserves 10–11px for labels.
+   NewCyber previously used 8–10px for many real evidence fields; this layer is loaded last. */
+:root{
+  --nc-font-base:14px;
+  --nc-font-ui:13px;
+  --nc-font-small:12px;
+  --nc-font-label:11px;
+  --nc-font-code:12.5px;
+}
+body{font-size:var(--nc-font-base);line-height:1.45}
+button,input,textarea,select{font-size:var(--nc-font-ui)}
+small{font-size:var(--nc-font-small)}
+code,pre,.output-pre,.mini-pre,.result-sub pre{font-size:var(--nc-font-code);line-height:1.58}
+
+/* Navigation / chrome */
+.brand strong{font-size:16px}
+.brand small,.nav-section>b,.sidebar-status small,.workspace-pill,.topbar>div:first-child,
+.ux-command-button,.ux-input-meta,.ux-section-title span{font-size:var(--nc-font-label)}
+.nav-item,.sidebar-status strong,.topbar strong{font-size:var(--nc-font-ui)}
+.nav-item span{font-size:11px}
+.workspace-pill{max-width:320px}
+
+/* Tool and workspace content */
+.kicker,.domain-kicker,.tool-card>span,.field label,.result-stats span,.kv-grid span,
+.surface,.finding>span,.finding small,.risk-strip span,.knowledge-list article>span,
+.tag,.chip,.simple-result>span,.simple-result small,.run-row,.text-button,
+[class*="-eyebrow"],[class*="-kicker"],[class*="-label"],[class*="-meta"]{font-size:var(--nc-font-label)}
+.domain-card p,.tool-card p,.quick-card span,.panel p,.notice,.hint-list p,.knowledge-list p,
+.workspace-empty p,.toolbar span,.result-title p,.competition-step p,
+[class*="-detail"],[class*="-note"]{font-size:var(--nc-font-small);line-height:1.6}
+.quick-card b,.knowledge-list b,.result-title b,.competition-step strong{font-size:var(--nc-font-ui)}
+.tool-card strong{font-size:17px}
+.field textarea{font-size:var(--nc-font-code);line-height:1.6}
+.field input,.field select{height:38px}
+.button{font-size:var(--nc-font-ui);padding:8px 13px}
+
+/* Evidence must be readable, not micro-copy. */
+table{font-size:12px}
+th,td{padding:9px 10px}
+.finding{grid-template-columns:72px 1fr;padding:12px}
+.finding pre{font-size:12px;line-height:1.55}
+.kv-grid strong{font-size:12px;line-height:1.45}
+.tag,.chip,.surface{line-height:1.25}
+
+/* Specialized Batch surfaces often used 8/9px text. Keep headings compact but readable. */
+[class*="bdg-"] small,[class*="sca-"] small,[class*="mlrt-"] small,[class*="lowalt-"] small,
+[class*="uav-"] small,[class*="model-arith-"] small,[class*="ida-"] small{font-size:12px}
+[class*="bdg-"] code,[class*="sca-"] code,[class*="mlrt-"] code,[class*="lowalt-"] code,
+[class*="uav-"] code,[class*="model-arith-"] code,[class*="ida-"] code{font-size:12px}
+
+/* Keep hierarchy close to PwnCraft: readable body, stronger page title, restrained micro labels. */
+.page-head h1{font-size:32px}
+.page-head p{font-size:13px}
+.hero p{font-size:13px}
+
+@media(max-width:1100px){
+  :root{--nc-font-base:13.5px;--nc-font-ui:12.5px;--nc-font-small:11.5px;--nc-font-code:12px}
+}
