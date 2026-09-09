@@ -168,6 +168,7 @@ function refreshFindings(analysis){
 }
 
 function recursiveEligible(file){return RECURSIVE_EXTENSIONS.has(ext(file))||/(?:ZIP|TAR|GZIP)/i.test(text(file?.type));}
+function elfEligible(file){const e=ext(file);return ['.elf','.so','.o'].includes(e)||/\bELF\b/i.test(text(file?.type));}
 
 function planSolverExecution(analysis={}){
   const pipeline=analysis.solverPipeline||analysis.challengeSession?.solverPipeline;
@@ -175,7 +176,7 @@ function planSolverExecution(analysis={}){
   const plans=[];
   const files=list(analysis.files);
   const add=(nodeId,adapter,file,maxBytes)=>{if(plans.length>=MAX_ATTEMPTS)return;plans.push({nodeId,adapter,filePath:file.path,file,maxBytes});};
-  if(ready.has('reverse'))for(const file of files){const e=ext(file);if(['.elf','.so','.o','.bin'].includes(e)||/ELF/i.test(text(file.type)))add('reverse','elf-static',file,MAX_ELF_BYTES);}
+  if(ready.has('reverse'))for(const file of files)if(elfEligible(file))add('reverse','elf-static',file,MAX_ELF_BYTES);
   if(ready.has('traffic'))for(const file of files)if(['.pcap','.pcapng','.cap'].includes(ext(file)))add('traffic','capture-intelligence',file,MAX_CAPTURE_BYTES);
   if(ready.has('firmware'))for(const file of files)if(['.img','.fw','.rom','.trx','.ubi','.squashfs'].includes(ext(file)))add('firmware','firmware-workbench',file,MAX_FIRMWARE_BYTES);
   if(ready.has('recursive'))for(const file of files)if(recursiveEligible(file))add('recursive','recursive-artifact',file,MAX_RECURSIVE_BYTES);
