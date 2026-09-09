@@ -14,6 +14,7 @@ const { analyzeModelInversion } = require('./ai_model_inversion');
 const { diagnoseAiSkillMatrix } = require('./ai_skill_matrix');
 const { runAiRealCtfRegression, getAiRealCtfCorpus } = require('./ai_real_ctf_regression');
 const { analyzeRasterImage, compareRasterImages, analyzeNpySample, compareNpySamples } = require('./ai_sample_forensics');
+const { analyzeBinaryDataListing } = require('./binary_data_graph');
 const { scanRegulatoryApi } = require('./low_altitude_regulatory');
 const { analyzeGnssLog } = require('./gnss_audit');
 const { analyzeGnssSpectrum } = require('./gnss_sdr');
@@ -53,6 +54,7 @@ function runTool(tool, payload = {}) {
   if (tool === 'uav-gnss-audit') return analyzeGnssLog(payload.input, payload.options || {});
   if (tool === 'uav-gnss-spectrum') return analyzeGnssSpectrum(payload.input, payload.options || {});
   if (tool === 'firmware-update-audit') return auditFirmwareUpdate(payload.input);
+  if (tool === 'binary-data-graph') return analyzeBinaryDataListing(payload.input);
   if (tool === 'ai-source-scan') return auditAiChallengeSource(payload.input);
   if (tool === 'ai-skill-matrix') return diagnoseAiSkillMatrix(payload.input ?? payload);
   if (tool === 'ai-real-ctf-regression') return runAiRealCtfRegression();
