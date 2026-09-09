@@ -15,12 +15,16 @@ module.exports = SCENARIOS.map((item) => ({
   domain: '低空经济',
   title: item.title,
   tags: [item.category, CATEGORY_NAMES[item.category], ...(item.tags || [])],
-  summary: `${CATEGORY_NAMES[item.category]}题型。分析目标不是看到关键字就定性，而是恢复“来源 → 协议/数据 → 状态变化或泄露结果”的证据链。`,
+  summary: `${CATEGORY_NAMES[item.category]}风险检查项。目标不是看到关键字就定性，而是恢复“业务/设备对象 → 来源 → 协议/数据 → 状态变化或泄露结果 → 整改与复测”的证据链。`,
   evidence: item.evidence || [],
   prerequisites: item.mavlink?.length ? [`MAVLink 消息候选：${item.mavlink.join(', ')}`] : ['需要抓包、日志、配置、服务扫描或固件中的至少一种可复核证据'],
   verify: [item.action],
   falsePositives: FALSE_POSITIVES[item.category] || [],
-  actions: [item.action],
+  actions: [item.action, '若风险成立，记录具体修复措施，并用同一测试向量或等价负例完成复测关闭。'],
+  assessment: {
+    workflow: ['discover','verify','impact','remediate','retest'],
+    automaticVerdict: 'candidate-only'
+  },
   mutations: [
     'rename-device-and-stream',
     'change-sysid-compid-or-endpoint',
