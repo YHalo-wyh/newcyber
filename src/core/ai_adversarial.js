@@ -145,6 +145,61 @@ function analyzeAdversarialPair(input) {
   };
 }
 
+function normalizeBatchSamples(data) {
+  if (Array.isArray(data.samples) && data.samples.length) return data.samples;
+  const originals=data.original ?? data.clean ?? data.x;
+  const adversarials=data.adversarial ?? data.adv ?? data.x_adv ?? data.xAdv;
+  if (!Array.isArray(originals)||!Array.isArray(adversarials)||!Array.isArray(originals[0])||!Array.isArray(adversarials[0])) throw new Error('批量模式需要 samples[]，或二维 original/adversarial 数组');
+  if (originals.length!==adversarials.length) throw new Error('批量 original/adversarial 行数不一致');
+  const labels=data.trueLabels ?? data.labels ?? [];
+  const targets=data.targetLabels ?? [];
+  const originalPreds=data.predictedOriginal ?? data.originalPredictions ?? [];
+  const adversarialPreds=data.predictedAdversarial ?? data.adversarialPredictions ?? [];
+  return originals.map((original,index)=>({
+    original,adversarial:adversarials[index],
+    trueLabel:Array.isArray(labels)?labels[index]:data.trueLabel,
+    targetLabel:Array.isArray(targets)?targets[index]:data.targetLabel,
+    predictedOriginal:Array.isArray(originalPreds)?originalPreds[index]:null,
+    predictedAdversarial:Array.isArray(adversarialPreds)?adversarialPreds[index]:null
+  }));
+}
+
+function analyzeAdversarialBatch(input) {
+  const data=parseInput(input);
+  const samples=normalizeBatchSamples(data);
+  if (!samples.length) throw new Error('批量对抗样本为空');
+  if (samples.length>100000) throw new Error('批量对抗样本超过 100000 行上限');
+  const defaults={norm:data.norm||'linf',epsilon:data.epsilon??data.eps,clip:data.clip,clipMin:data.clipMin,clipMax:data.clipMax,targetLabel:data.targetLabel};
+  const results=samples.map((sample,index)=>({index,result:analyzeAdversarialPair({...defaults,...sample})}));
+  const budgetKnown=results.filter((x)=>x.result.withinBudget!==null);
+  const within=budgetKnown.filter((x)=>x.result.withinBudget===true);
+  const over=budgetKnown.filter((x)=>x.result.withinBudget===false);
+  const evaluated=results.filter((x)=>x.result.outcome.success!==null);
+  const validEvaluated=evaluated.filter((x)=>x.result.withinBudget!==false);
+  const successful=validEvaluated.filter((x)=>x.result.withinBudget===true&&x.result.outcome.success===true);
+  const trueLabelRows=results.filter((x)=>x.result.outcome.trueLabel!=null&&x.result.outcome.adversarialPrediction!=null);
+  const advCorrect=trueLabelRows.filter((x)=>String(x.result.outcome.trueLabel)===String(x.result.outcome.adversarialPrediction)).length;
+  const cleanRows=results.filter((x)=>x.result.outcome.trueLabel!=null&&x.result.outcome.originalPrediction!=null);
+  const cleanCorrect=cleanRows.filter((x)=>String(x.result.outcome.trueLabel)===String(x.result.outcome.originalPrediction)).length;
+  const normValues=results.map((x)=>x.result.selectedNormValue).filter(Number.isFinite);
+  const findings=[];
+  if (over.length) findings.push({id:'adversarial-batch-budget-violations',severity:'high',evidence:`${over.length}/${results.length} samples exceed budget`,meaning:'比赛提交中存在超预算样本；整批结果不能直接视为有效攻击集。'});
+  if (successful.length) findings.push({id:'adversarial-batch-success',severity:'high',evidence:`${successful.length}/${results.length} within-budget successful attacks`,meaning:'整批样本中存在满足预算且达到目标的对抗样本；可按赛题 scorer 继续看整体成功率/鲁棒准确率。'});
+  return {
+    schema:'newcyber.ai-adversarial-batch.v1',
+    samples:results.length,
+    norm:results[0].result.norm,
+    epsilon:results[0].result.epsilon,
+    budget:{known:budgetKnown.length,within:within.length,over:over.length,passRate:budgetKnown.length?within.length/budgetKnown.length:null,allWithin:budgetKnown.length===results.length&&over.length===0},
+    attack:{evaluated:evaluated.length,validEvaluated:validEvaluated.length,successful:successful.length,successRate:evaluated.length?successful.length/evaluated.length:null,validSuccessRate:validEvaluated.length?successful.length/validEvaluated.length:null},
+    accuracy:{clean:cleanRows.length?cleanCorrect/cleanRows.length:null,adversarial:trueLabelRows.length?advCorrect/trueLabelRows.length:null},
+    selectedNorm:{max:normValues.length?Math.max(...normValues):null,mean:normValues.length?normValues.reduce((a,b)=>a+b,0)/normValues.length:null},
+    findings,
+    rows:results.slice(0,512).map((x)=>({index:x.index,verdict:x.result.verdict,withinBudget:x.result.withinBudget,selectedNormValue:x.result.selectedNormValue,outcome:x.result.outcome})),
+    notes:['批量 scorer 不执行模型；它只对题目已有预测结果和扰动数据做统一约束复算。','robust/adversarial accuracy 只有在 trueLabel 与 adversarial prediction 都给出时才计算。']
+  };
+}
+
 function buildAdversarialHarness(input = {}) {
   const data = parseInput(input);
   const eps = Number.isFinite(Number(data.epsilon ?? data.eps)) ? Number(data.epsilon ?? data.eps) : 8/255;
@@ -166,4 +221,4 @@ function buildAdversarialHarness(input = {}) {
   };
 }
 
-module.exports = { flattenFinite, computeNorms, analyzeAdversarialPair, buildAdversarialHarness };
+module.exports = { flattenFinite, computeNorms, analyzeAdversarialPair, analyzeAdversarialBatch, buildAdversarialHarness };
