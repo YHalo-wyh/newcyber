@@ -5,41 +5,77 @@ const fs = require('fs/promises');
 const path = require('path');
 const { analyzeElfBinary, MAX_ELF_BYTES } = require('../core/binary_elf_loader');
 const { scanX86_64DataRefs } = require('../core/x86_64_data_refs');
+const { scanX86_64ShortDataflow } = require('../core/x86_64_short_dataflow');
 
 function activeWindow() {
   return BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0] || null;
 }
 
+function mergeRelations(analysis, rows) {
+  const keys = new Set((analysis.relations || []).map((relation) => `${relation.source}|${relation.target}|${relation.type}|${relation.location || ''}`));
+  let added = 0;
+  for (const relation of rows || []) {
+    const key = `${relation.source}|${relation.target}|${relation.type}|${relation.location || ''}`;
+    if (keys.has(key)) continue;
+    relation.id = `rel_${(analysis.relations?.length || 0)+1}`;
+    analysis.relations.push(relation); keys.add(key); added += 1;
+  }
+  return added;
+}
+
+function mergeOperations(analysis, rows) {
+  const keys = new Set((analysis.operations || []).map((operation) => `${operation.scope || ''}|${operation.op}|${operation.location || ''}|${operation.pseudo || ''}`));
+  let added = 0;
+  for (const operation of rows || []) {
+    const key = `${operation.scope || ''}|${operation.op}|${operation.location || ''}|${operation.pseudo || ''}`;
+    if (keys.has(key)) continue;
+    analysis.operations.push(operation); keys.add(key); added += 1;
+  }
+  return added;
+}
+
 function addStandaloneCodeRefs(analysis, buffer) {
   if (analysis?.source?.elf?.bits !== 64 || analysis?.source?.elf?.machine !== 'x86-64') return analysis;
-  const scan = scanX86_64DataRefs(buffer, analysis.sections || [], analysis.objects || [], [], { littleEndian:analysis.source.elf.endian !== 'big' });
-  if (!scan.relations.length) {
-    analysis.summary = { ...(analysis.summary || {}), standaloneCodeRefs:0, standaloneCodeBytes:scan.scannedBytes };
-    analysis.notes = [...(analysis.notes || []), 'Standalone x86-64 code-ref scanner 未找到指向已恢复数据对象的直接 RIP-relative 引用；这不等于程序没有数据引用。'];
-    return analysis;
+  const littleEndian = analysis.source.elf.endian !== 'big';
+  const scan = scanX86_64DataRefs(buffer, analysis.sections || [], analysis.objects || [], [], { littleEndian });
+  const flow = scanX86_64ShortDataflow(buffer, analysis.sections || [], analysis.objects || [], { littleEndian });
+  const directAdded = mergeRelations(analysis, scan.relations);
+  const flowRelationAdded = mergeRelations(analysis, flow.relations);
+  const directOpsAdded = mergeOperations(analysis, scan.operations);
+  const flowOpsAdded = mergeOperations(analysis, flow.operations);
+
+  const recoverKeys = new Set((analysis.recoverableRelations || []).map((item) => `${item.operation}|${item.location}|${(item.objects || []).join('|')}`));
+  let recoverableAdded = 0;
+  for (const item of flow.recoverableRelations || []) {
+    const key = `${item.operation}|${item.location}|${(item.objects || []).join('|')}`;
+    if (recoverKeys.has(key)) continue;
+    analysis.recoverableRelations.push(item); recoverKeys.add(key); recoverableAdded += 1;
   }
-  const relationKeys = new Set((analysis.relations || []).map((relation) => `${relation.source}|${relation.target}|${relation.type}|${relation.location || ''}`));
-  for (const relation of scan.relations) {
-    const key = `${relation.source}|${relation.target}|${relation.type}|${relation.location || ''}`;
-    if (relationKeys.has(key)) continue;
-    relation.id = `rel_${(analysis.relations?.length || 0)+1}`;
-    analysis.relations.push(relation); relationKeys.add(key);
-  }
-  analysis.operations = [...(analysis.operations || []), ...scan.operations];
-  const important = analysis.relations.filter((relation) => ['POINTS_TO','LENGTH_OF','REFERENCES','RELOCATES_TO','READS','COMPARES_WITH','TAKES_ADDRESS'].includes(relation.type));
+
+  const important = analysis.relations.filter((relation) => ['POINTS_TO','LENGTH_OF','REFERENCES','RELOCATES_TO','READS','COMPARES_WITH','TAKES_ADDRESS','XORS_WITH','INDEXES','INPUT_TO'].includes(relation.type));
   analysis.summary = {
     ...(analysis.summary || {}),
     operations:analysis.operations.length,
     relations:analysis.relations.length,
     importantRelations:important.length,
-    standaloneCodeRefs:scan.relations.length,
-    standaloneCodeBytes:scan.scannedBytes
+    recoverableRelations:analysis.recoverableRelations.length,
+    standaloneCodeRefs:directAdded,
+    standaloneCodeBytes:scan.scannedBytes,
+    standaloneShortFlowOps:flowOpsAdded,
+    standaloneShortFlowRelations:flowRelationAdded,
+    standaloneRecoverable:recoverableAdded,
+    standaloneShortFlowBytes:flow.scannedBytes
   };
-  analysis.source.parser = `${analysis.source.parser}+x86-ripref-v0.1`;
+  analysis.source.parser = `${analysis.source.parser}+x86-ripref-v0.1+x86-shortflow-v0.1`;
   analysis.notes = [
     ...(analysis.notes || []),
-    `Standalone x86-64 模式从可执行 section 中恢复 ${scan.relations.length} 条直接 RIP-relative code→data 关系；仅接受目标落入已知数据对象的保守模式。`,
-    '该扫描器不是完整反汇编器：它覆盖 LEA/MOV/MOVZX/XOR/ADD/SUB/CMP 的直接 RIP-relative 数据引用，不推断复杂控制流或跨寄存器别名。'
+    directAdded
+      ? `Standalone x86-64 模式从可执行 section 中恢复 ${directAdded} 条直接 RIP-relative code→data 关系。`
+      : 'Standalone x86-64 direct-ref scanner 未找到指向已恢复数据对象的直接 RIP-relative 引用；这不等于程序没有数据引用。',
+    flowOpsAdded
+      ? `Batch28 short-flow 在局部直线代码中恢复 ${flowOpsAdded} 个 Operation、${flowRelationAdded} 条数据关系、${recoverableAdded} 条可逆关系；未知指令和控制流边界会清空寄存器状态。`
+      : 'Batch28 short-flow 未形成可证明的局部表达式链；不会跨未知指令或控制流边界猜测寄存器状态。',
+    'Standalone 路径仍不是完整反汇编/CFG/SSA：当前聚焦 x86-64 LEA/MOV/MOVZX、索引内存、XOR/ADD/SUB/AND/OR 与 CMP/Jcc 的短程确定性链。'
   ];
   return analysis;
 }
