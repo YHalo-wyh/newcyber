@@ -36,11 +36,11 @@
   function missionPanel(mission){
     if(!mission)return'';
     const progress=mission.progress||{completed:0,total:5};
-    const pct=progress.total?Math.max(0,Math.min(100,Math.round(progress.completed/progress.total*100))):0;
+    const progressStep=Math.max(0,Math.min(5,Number(progress.completed)||0));
     const action=mission.primaryAction||{};
     return `<section class="panel auto-solve-mission ${esc(mission.status||'review')}">
       <div class="auto-solve-head"><div><span class="auto-solve-kicker">AUTO SOLVE · ONE RESULT / ONE NEXT STEP</span><h2>${esc(mission.headline||'自动求解')}</h2><p>${esc(mission.explanation||'')}</p></div><span class="auto-solve-status">${esc(STATUS_LABEL[mission.status]||String(mission.status||'REVIEW').toUpperCase())}</span></div>
-      <div class="auto-solve-progress"><i style="width:${pct}%"></i></div>
+      <div class="auto-solve-progress"><i class="p${progressStep}"></i></div>
       ${resultRow(mission)}
       <div class="auto-solve-grid"><section class="auto-solve-section"><header><b>自动求解阶段</b><span>${progress.completed||0} / ${progress.total||5}</span></header>${stages(mission)}</section><section class="auto-solve-section"><header><b>NewCyber 已替你整合</b><span>只保留高价值事实</span></header>${facts(mission)}</section></div>
       <div class="auto-solve-next"><div><span>唯一下一步</span><b>${esc(action.title||'继续自动求解')}</b><p>${esc(action.detail||'能自动完成的步骤会继续自动跑；只有明确 capability gap 才要求打开专业工具。')}</p></div>${actionButtons(mission)}</div>
