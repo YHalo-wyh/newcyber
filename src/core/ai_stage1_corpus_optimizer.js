@@ -1,7 +1,7 @@
 'use strict';
 
 const {PUBLIC_TRAINING_SEEDS}=require('./ai_stage1_training_corpus');
-const {DIRECTIONS,byDirection}=require('./ai_stage1_source_catalog');
+const {DIRECTIONS,byDirection}=require('./ai_stage1_source_registry');
 
 function normUrl(value){
   return String(value||'').trim().replace(/\/$/,'').toLowerCase();
@@ -25,7 +25,7 @@ function auditCurrentCorpusCoverage(seeds=PUBLIC_TRAINING_SEEDS,options={}){
       distinctCurrentSources:sourceUrls.size,
       matchedCatalogSources:matched.map((x)=>x.id),
       sourceGap,
-      highPriorityMissing:highPriorityMissing.slice(0,10).map((x)=>({
+      highPriorityMissing:highPriorityMissing.slice(0,12).map((x)=>({
         id:x.id,title:x.title,tier:x.tier,priority:x.priority,url:x.url,importMode:x.importMode
       })),
       status:sourceGap===0&&highPriorityMissing.length<=2?'healthy':sourceUrls.size>=3?'expand':'thin'
@@ -67,7 +67,7 @@ function buildTrainingMix(audit=auditCurrentCorpusCoverage()){
       preserveProvenance:true,
       forbidUnsafeArtifactExecution:true
     },
-    importQueue:audit.queue.slice(0,24)
+    importQueue:audit.queue.slice(0,32)
   };
 }
 
