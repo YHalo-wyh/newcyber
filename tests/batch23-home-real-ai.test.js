@@ -43,8 +43,9 @@ test('real AI CTF regression feeds analyzers instead of claiming every challenge
   assert.ok(byName.get('The Silent Heist').findingIds.includes('multivariate-profile'));
   assert.equal(byName.get('prompt_audit').status,'pass');
   assert.ok(byName.get('prompt_audit').findingIds.includes('prompt-injection-rag-surface'));
-  assert.equal(byName.get('CIFAR-10').status,'pass');
+  assert.equal(byName.get('CIFAR-10').status,'miss');
   assert.ok(byName.get('CIFAR-10').findingIds.includes('backdoor-target-asr-candidate'));
+  assert.match(byName.get('CIFAR-10').limitation,/Patch|trigger/i);
   assert.equal(byName.get('Fake Emotion').status,'pass');
   assert.match(byName.get('Fake Emotion').evidence,/shape=8x8x1/);
   assert.equal(byName.get('耄耋').status,'pass');
