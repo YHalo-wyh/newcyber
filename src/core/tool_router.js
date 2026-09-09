@@ -53,7 +53,10 @@ function runTool(tool, payload = {}) {
   if (tool === 'uav-injection-analyze') return analyzeUavChallengeEvidence(payload.input, { category: 'inject' });
   if (tool === 'uav-leak-analyze') return analyzeUavChallengeEvidence(payload.input, { category: 'leak' });
   if (tool === 'uav-challenge-matrix') return { ...analyzeUavChallengeEvidence(payload.input), catalog: getScenarioCatalog() };
-  if (tool === 'lowalt-assessment-mode') return buildLowaltAssessment(payload.input || payload);
+  if (tool === 'lowalt-assessment-mode') {
+    const result=buildLowaltAssessment(payload.input || payload);
+    return { ...result, schema:'newcyber.lowalt-assessment.v1', revision:2 };
+  }
   if (tool === 'lowalt-assessment-catalog') return getLowaltAssessmentCatalog();
   if (tool === 'lowalt-swarm-coordination') return analyzeSwarmCoordination(payload.input || payload, payload.options || {});
   if (tool === 'lowalt-cross-boundary-flow') return analyzeCrossBoundaryFlow(payload.input || payload, payload.options || {});
