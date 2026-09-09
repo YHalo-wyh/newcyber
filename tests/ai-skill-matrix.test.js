@@ -72,12 +72,21 @@ test('tool router exposes the five-direction AI skill matrix',()=>{
   assert.equal(skill(result,'adversarial-example').status,'evidence');
 });
 
-test('AI five-direction matrix renderer compiles and is loaded by toolbox',()=>{
-  const root=path.join(__dirname,'..');const source=fs.readFileSync(path.join(root,'renderer/ai_skill_matrix_tools.js'),'utf8');
-  assert.doesNotThrow(()=>new Function(source));
+test('AI five-direction benchmark workbench compiles, avoids card soup, and loads dedicated CSS',()=>{
+  const root=path.join(__dirname,'..');
+  const source=fs.readFileSync(path.join(root,'renderer/ai_skill_matrix_tools.js'),'utf8');
+  const css=fs.readFileSync(path.join(root,'renderer/styles/ai_stage1_bench.css'),'utf8');
   const html=fs.readFileSync(path.join(root,'renderer/toolbox.html'),'utf8');
+  assert.doesNotThrow(()=>new Function(source));
   assert.match(html,/ai_skill_matrix_tools\.js/);
-  assert.match(source,/AI 一阶段五方向矩阵/);
-  assert.match(source,/TPR@0\.1FPR/);
+  assert.match(html,/ai_stage1_bench\.css/);
+  assert.match(source,/AI STAGE-ONE BENCH/);
+  assert.match(source,/stage1-bench-grid/);
+  assert.match(source,/data-stage1-regression/);
+  assert.match(source,/TPR@0\.1FPR|competition/i);
+  assert.doesNotMatch(source,/function skillCard/);
+  assert.doesNotMatch(source,/<article class="panel">/);
+  assert.match(css,/grid-template-columns:250px minmax\(420px,1fr\) 305px/);
+  assert.match(css,/font-size:12\.5px/);
   assert.doesNotMatch(source,/AI 安全六考点矩阵/);
 });
