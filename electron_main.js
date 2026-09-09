@@ -1,5 +1,6 @@
 const {app,BrowserWindow,ipcMain,nativeTheme}=require('electron');
 const os=require('os');
+const {registerBinaryElfIpc}=require('./src/electron/binary_elf_ipc');
 
 let activeWindow=null;
 const materialByWindow=new WeakMap();
@@ -71,4 +72,11 @@ nativeTheme.on('updated',()=>emitState());
 app.setName('NewCyber');
 if(process.platform==='win32')app.setAppUserModelId('NewCyber.SecurityWorkbench');
 
+// Keep the historical import path stable while upgrading the local PoC metadata importer.
+// Existing analyzer modules continue to consume the same v1 index schema.
+const pocIndexBase=require('./src/core/poc_reference_index');
+const pocIndexV2=require('./src/core/poc_reference_index_v2');
+pocIndexBase.buildPocIndexFromDirectory=pocIndexV2.buildPocIndexFromDirectory;
+
+registerBinaryElfIpc();
 require('./main');
