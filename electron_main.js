@@ -1,6 +1,14 @@
 const {app,BrowserWindow,ipcMain,nativeTheme}=require('electron');
+const os=require('os');
 
 let activeWindow=null;
+const materialByWindow=new WeakMap();
+
+function supportsWindowsBackdrop(){
+  if(process.platform!=='win32')return false;
+  const build=Number(String(os.release()).split('.').pop());
+  return Number.isFinite(build)&&build>=22621;
+}
 
 function stateOf(win=activeWindow){
   if(!win||win.isDestroyed())return {available:false,platform:process.platform};
@@ -12,7 +20,7 @@ function stateOf(win=activeWindow){
     alwaysOnTop:win.isAlwaysOnTop(),
     focused:win.isFocused(),
     dark:nativeTheme.shouldUseDarkColors,
-    material:process.platform==='win32'?'mica':process.platform==='darwin'?'vibrancy':'native'
+    material:materialByWindow.get(win)||'native'
   };
 }
 
@@ -22,14 +30,16 @@ function emitState(win=activeWindow){
 }
 
 function applyNativeMaterial(win){
-  if(process.platform==='win32'&&typeof win.setBackgroundMaterial==='function'){
-    try{win.setBackgroundMaterial('mica');}
-    catch{try{win.setBackgroundMaterial('acrylic');}catch{}}
+  let material='native';
+  if(supportsWindowsBackdrop()&&typeof win.setBackgroundMaterial==='function'){
+    try{win.setBackgroundMaterial('mica');material='mica';}
+    catch{material='native';}
   }
   if(process.platform==='darwin'){
-    try{win.setVibrancy('under-window');}catch{}
+    try{win.setVibrancy('under-window');material='vibrancy';}catch{}
     try{win.setVisualEffectState('active');}catch{}
   }
+  materialByWindow.set(win,material);
 }
 
 app.on('browser-window-created',(_event,win)=>{
