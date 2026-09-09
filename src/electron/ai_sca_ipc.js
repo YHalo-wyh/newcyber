@@ -8,11 +8,16 @@ const { runtimeStatus, inspectOnnxModel, runOnnxModel } = require('../core/local
 const { inspectTransformerModel, runTransformerDecode } = require('../core/transformer_oracle');
 const { createGpt2Bpe } = require('../core/gpt2_bpe');
 const { fitLeakageProfile, recoverProbeCandidates } = require('../core/side_channel_probe');
+const { runScaAutopilotPaths } = require('../core/sca_autopilot');
 
 const MAX_SOURCE_BYTES = 2 * 1024 * 1024;
 const MAX_ONNX_BYTES = 4 * 1024 * 1024 * 1024;
 const MAX_VOCAB_BYTES = 32 * 1024 * 1024;
 const MAX_MERGES_BYTES = 16 * 1024 * 1024;
+const MAX_AUTOPILOT_FILES = 256;
+const MAX_AUTOPILOT_DEPTH = 8;
+const AUTOPILOT_EXT = new Set(['.npy','.onnx','.safetensors','.py','.pyw','.json','.txt','.md','.toml','.yaml','.yml']);
+const SKIP_DIRS = new Set(['.git','node_modules','.venv','venv','__pycache__','.idea','.vscode','dist','build']);
 const approvedTraceFiles = new Set();
 const approvedOnnxFiles = new Set();
 
@@ -71,6 +76,44 @@ async function analyzeScaPaths(filePaths) {
     sourceFiles: paths.filter((candidate) => ['.py', '.pyw', '.txt', '.md', '.json', '.toml', '.yaml', '.yml'].includes(path.extname(candidate).toLowerCase())).map((candidate) => path.basename(candidate)).slice(0, 32),
     analysis
   };
+}
+
+async function collectAutopilotFiles(rootPath) {
+  const root = resolvedPath(rootPath);
+  const stat = await fs.stat(root);
+  if (!stat.isDirectory()) throw new Error('SCA Autopilot 入口必须是目录');
+  const out = [];
+  async function walk(current, depth) {
+    if (depth > MAX_AUTOPILOT_DEPTH || out.length >= MAX_AUTOPILOT_FILES) return;
+    let entries = await fs.readdir(current, { withFileTypes: true });
+    entries = entries.sort((a, b) => a.name.localeCompare(b.name));
+    for (const entry of entries) {
+      if (out.length >= MAX_AUTOPILOT_FILES) break;
+      if (entry.isSymbolicLink()) continue;
+      const target = path.join(current, entry.name);
+      if (entry.isDirectory()) {
+        if (!SKIP_DIRS.has(entry.name.toLowerCase())) await walk(target, depth + 1);
+        continue;
+      }
+      if (!entry.isFile() || !AUTOPILOT_EXT.has(path.extname(entry.name).toLowerCase())) continue;
+      out.push(target);
+    }
+  }
+  await walk(root, 0);
+  if (!out.length) throw new Error('目录内没有可识别的 SCA 工件');
+  return out;
+}
+
+async function runScaAutopilotDirectory(rootPath, options = {}) {
+  const paths = await collectAutopilotFiles(rootPath);
+  const result = await runScaAutopilotPaths(paths, { provider: options.provider || 'cpu' });
+  const model = result?.discovery?.roles?.model?.file?.filePath;
+  if (model) approvedOnnxFiles.add(path.resolve(model));
+  for (const key of ['profileTrace','targetTrace']) {
+    const trace = result?.discovery?.roles?.[key]?.file?.filePath;
+    if (trace) approvedTraceFiles.add(path.resolve(trace));
+  }
+  return result;
 }
 
 async function optionalSibling(filePath,name,maxBytes) {
@@ -158,6 +201,12 @@ function registerAiScaIpc() {
     return analyzeScaPaths(result.filePaths);
   });
 
+  ipcMain.handle('ai:sca-autopilot-choose', async () => {
+    const result = await openDialog({ title: '选择 Power SCA / Transformer 赛题目录', properties: ['openDirectory'] });
+    if (result.canceled || !result.filePaths[0]) return null;
+    return runScaAutopilotDirectory(result.filePaths[0], { provider: 'cpu' });
+  });
+
   ipcMain.handle('ai:sca-analyze-dropped', async (_event, filePaths) => analyzeScaPaths(filePaths));
 
   ipcMain.handle('ai:sca-extract-windows', async (_event, payload) => {
@@ -198,4 +247,4 @@ function registerAiScaIpc() {
   ipcMain.handle('ai:transformer-run', async (_event,payload) => runTransformerPath(payload||{}));
 }
 
-module.exports = { registerAiScaIpc, analyzeScaPaths, inspectOnnxPath, tokenizerSibling, runTransformerPath };
+module.exports = { registerAiScaIpc, analyzeScaPaths, collectAutopilotFiles, runScaAutopilotDirectory, inspectOnnxPath, tokenizerSibling, runTransformerPath };
