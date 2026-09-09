@@ -11,7 +11,7 @@ const { fitLeakageProfile, recoverProbeCandidates } = require('../core/side_chan
 const { runScaAutopilotPaths } = require('../core/sca_autopilot');
 const { planHfOnnxExport } = require('../core/hf_onnx_export');
 const { inspectTrustedConverter, executeTrustedHfOnnxPlan } = require('../core/trusted_hf_converter');
-const { convertAndResumeSca } = require('../core/hf_sca_bridge');
+const { convertAndResumeSca, isSafeTensorOracleGap } = require('../core/hf_sca_bridge');
 
 const MAX_SOURCE_BYTES = 2 * 1024 * 1024;
 const MAX_ONNX_BYTES = 4 * 1024 * 1024 * 1024;
@@ -25,6 +25,7 @@ const approvedTraceFiles = new Set();
 const approvedOnnxFiles = new Set();
 const approvedHfRoots = new Set();
 const approvedAutopilotRoots = new Set();
+const approvedScaConversionRoots = new Set();
 let trustedHfConverter = null;
 
 function openDialog(options) {
@@ -132,6 +133,8 @@ async function runScaAutopilotDirectory(rootPath, options = {}) {
   const paths = await collectAutopilotFiles(root);
   approvedAutopilotRoots.add(root);
   const result = await runScaAutopilotPaths(paths, { provider: options.provider || 'cpu' });
+  if (isSafeTensorOracleGap(result)) approvedScaConversionRoots.add(root);
+  else approvedScaConversionRoots.delete(root);
   approveResultArtifacts(result);
   return { ...result, workspaceRoot: root };
 }
@@ -248,11 +251,13 @@ async function executeApprovedHfConversion(rootPath, options = {}) {
 async function continueScaAutopilotDirectory(rootPath, options = {}) {
   const root = resolvedPath(rootPath);
   if (!approvedAutopilotRoots.has(root)) throw new Error('请先通过 Power SCA Autopilot 选择器打开赛题目录');
+  if (!approvedScaConversionRoots.has(root)) throw new Error('当前赛题未获得 SafeTensors ORACLE_ARTIFACT_GAP 转换许可');
   if (!trustedHfConverter) throw new Error('请先显式选择并审计 optimum-cli');
   const runtime = runtimeStatus();
   if (!runtime.available) return { schema:'newcyber.sca-autopilot-conversion.v1', status:'gap', gap:{ code:'MODEL_RUNTIME_GAP', detail:runtime.installHint, stage:'preflight' }, runtime, workspaceRoot:root };
   const paths = await collectAutopilotFiles(root);
   const bridged = await convertAndResumeSca(paths, trustedHfConverter, { provider: options.provider || 'cpu', timeoutMs: options.timeoutMs, maxOutputBytes: options.maxOutputBytes });
+  if (bridged?.conversion?.status === 'converted') approvedScaConversionRoots.delete(root);
   approveResultArtifacts(bridged);
   return { ...bridged, workspaceRoot: root, runtime };
 }
