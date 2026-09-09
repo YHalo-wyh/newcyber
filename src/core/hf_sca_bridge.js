@@ -5,7 +5,7 @@ const path = require('path');
 const { planHfOnnxExport } = require('./hf_onnx_export');
 const { executeTrustedHfOnnxPlan } = require('./trusted_hf_converter');
 const { validateTrustedConverterLocation } = require('./trusted_converter_location');
-const { runScaAutopilotPaths } = require('./sca_autopilot');
+const { runScaAutopilotPaths } = require('./sca_autopilot_batch42');
 
 const BRIDGE_SCHEMA = 'newcyber.sca-autopilot-conversion.v1';
 const MAX_CANDIDATE_ROOTS = 16;
