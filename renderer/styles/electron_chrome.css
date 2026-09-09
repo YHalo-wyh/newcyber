@@ -1,0 +1,28 @@
+:root{--electron-glass:rgba(15,19,27,.72);--electron-glass-strong:rgba(17,22,31,.88);--electron-line:rgba(255,255,255,.075);--electron-highlight:rgba(255,255,255,.12);--electron-shadow:0 18px 48px rgba(0,0,0,.24)}
+body.electron-native-shell{background:radial-gradient(circle at 16% -10%,rgba(90,112,150,.13),transparent 34%),radial-gradient(circle at 86% 8%,rgba(88,138,130,.08),transparent 30%),#0b0e13}
+body.electron-native-shell .shell{background:transparent}
+body.electron-native-shell .sidebar{background:linear-gradient(180deg,rgba(15,19,27,.88),rgba(11,14,20,.8));border-right:1px solid var(--electron-line);box-shadow:12px 0 38px rgba(0,0,0,.18);backdrop-filter:blur(30px) saturate(1.16)}
+body.electron-native-shell main{background:linear-gradient(180deg,rgba(11,14,19,.3),rgba(11,14,19,.52));position:relative}
+body.electron-native-shell main::before{content:"";position:absolute;inset:0;pointer-events:none;background:linear-gradient(115deg,rgba(255,255,255,.018),transparent 24%,transparent 76%,rgba(255,255,255,.012));z-index:0}
+body.electron-native-shell main>*{position:relative;z-index:1}
+.electron-glass-topbar{background:linear-gradient(180deg,rgba(18,23,32,.84),rgba(14,18,26,.7))!important;border-bottom:1px solid var(--electron-line)!important;box-shadow:0 10px 34px rgba(0,0,0,.16);backdrop-filter:blur(28px) saturate(1.2)}
+.electron-glass-topbar::after{content:"";position:absolute;left:0;right:0;bottom:-1px;height:1px;background:linear-gradient(90deg,transparent,rgba(255,255,255,.11),transparent);pointer-events:none}
+.electron-native-cluster{display:flex;align-items:center;gap:6px;margin-right:4px;padding:4px;border:1px solid rgba(255,255,255,.06);border-radius:10px;background:rgba(255,255,255,.025);box-shadow:inset 0 1px rgba(255,255,255,.035)}
+.electron-material{height:28px;display:inline-flex;align-items:center;padding:0 8px;font-size:9px;letter-spacing:.14em;color:rgba(213,223,239,.48);font-weight:700}
+.electron-native-button{height:28px;min-width:42px;border:1px solid transparent;border-radius:7px;background:transparent;color:rgba(226,234,247,.58);font:700 9px/1 ui-monospace,SFMono-Regular,Consolas,monospace;letter-spacing:.1em;cursor:pointer;transition:background .16s ease,border-color .16s ease,color .16s ease,transform .16s ease}
+.electron-native-button:hover{background:rgba(255,255,255,.06);border-color:rgba(255,255,255,.075);color:#edf3ff}
+.electron-native-button:active{transform:translateY(1px)}
+.electron-native-button.active{background:rgba(124,162,210,.12);border-color:rgba(145,182,228,.22);color:#e7f1ff;box-shadow:inset 0 0 18px rgba(111,157,214,.08)}
+body.electron-pinned .electron-pin::before{content:"";width:5px;height:5px;border-radius:50%;background:currentColor;display:inline-block;margin-right:5px;box-shadow:0 0 10px currentColor}
+body.electron-native-shell .panel,body.electron-native-shell .tool-card,body.electron-native-shell .domain-card,body.electron-native-shell .quick-card,body.electron-native-shell .simple-result{border-color:rgba(255,255,255,.065);background:linear-gradient(155deg,rgba(26,32,43,.76),rgba(17,22,30,.7));box-shadow:inset 0 1px rgba(255,255,255,.035),0 12px 34px rgba(0,0,0,.13);backdrop-filter:blur(18px) saturate(1.08)}
+body.electron-native-shell .tool-card:hover,body.electron-native-shell .domain-card:hover,body.electron-native-shell .quick-card:hover{border-color:rgba(175,198,229,.15);box-shadow:inset 0 1px rgba(255,255,255,.05),0 18px 40px rgba(0,0,0,.18);transform:translateY(-2px)}
+body.electron-native-shell .surface-device-bar,body.electron-native-shell .result-title{border-color:rgba(255,255,255,.065)}
+body.electron-busy::before{content:"";position:fixed;z-index:9999;top:0;left:0;width:100%;height:2px;background:linear-gradient(90deg,transparent,rgba(150,190,240,.9),transparent);background-size:35% 100%;animation:electron-task-scan 1.25s linear infinite;pointer-events:none;box-shadow:0 0 12px rgba(130,180,235,.35)}
+body.electron-unfocused .electron-glass-topbar,body.electron-unfocused .sidebar{filter:saturate(.78)}
+body.electron-focus-mode .sidebar{width:72px!important;min-width:72px!important}
+body.electron-focus-mode .sidebar .brand span:last-child,body.electron-focus-mode .sidebar .nav-section>b,body.electron-focus-mode .sidebar-status div{display:none!important}
+body.electron-focus-mode .sidebar .nav-item{justify-content:center;padding-inline:0}
+body.electron-focus-mode .content{padding-left:22px;padding-right:22px}
+@keyframes electron-task-scan{from{background-position:-45vw 0}to{background-position:145vw 0}}
+@media (prefers-reduced-motion:reduce){.electron-native-button,body.electron-native-shell .tool-card,body.electron-native-shell .domain-card,body.electron-native-shell .quick-card{transition:none!important}body.electron-busy::before{animation:none;background:rgba(150,190,240,.8)}}
+@media (max-width:900px){.electron-material{display:none}.electron-native-cluster{padding:2px}.electron-native-button{min-width:36px}.electron-focus{display:none}}

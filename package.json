@@ -2,7 +2,7 @@
   "name": "newcyber",
   "version": "0.1.0",
   "description": "面向 CTF 与 AI 安全赛题的本地分析工作台",
-  "main": "main.js",
+  "main": "electron_main.js",
   "scripts": {
     "start": "electron .",
     "test": "node --test tests/*.test.js"

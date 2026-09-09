@@ -21,5 +21,14 @@ contextBridge.exposeInMainWorld('newcyber', {
   getAiBackendStatus: () => ipcRenderer.invoke('ai:backend-status'),
   chooseAndScanAiModel: () => ipcRenderer.invoke('ai:model-choose-scan'),
   rescanAiModel: (filePath) => ipcRenderer.invoke('ai:model-rescan', filePath),
-  runTool: (tool, payload) => ipcRenderer.invoke('toolbox:run', tool, payload)
+  runTool: (tool, payload) => ipcRenderer.invoke('toolbox:run', tool, payload),
+  getWindowState: () => ipcRenderer.invoke('window:state'),
+  toggleAlwaysOnTop: () => ipcRenderer.invoke('window:toggle-always-on-top'),
+  setTaskProgress: (value) => ipcRenderer.invoke('window:task-progress', value),
+  onWindowState: (listener) => {
+    if (typeof listener !== 'function') return () => {};
+    const handler = (_event, state) => listener(state);
+    ipcRenderer.on('window:state-changed', handler);
+    return () => ipcRenderer.removeListener('window:state-changed', handler);
+  }
 });
