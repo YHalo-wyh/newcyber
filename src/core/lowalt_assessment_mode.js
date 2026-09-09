@@ -155,13 +155,17 @@ function normalizeObservation(item,index) {
     impact:String(item.impact || '').slice(0,1200),
     remediation:String(item.remediation || '').slice(0,1200),
     retest:String(item.retest || '').slice(0,1200),
-    state
+    state,
+    source:'analyst-observation',
+    closureTracked:true
   };
 }
 
 function gateState(findings, gate) {
-  if (!findings.length) return { id:gate.id,title:gate.title,status:'not-started',need:gate.need,complete:0,total:0 };
-  const checks=findings.map((finding)=>{
+  const tracked=findings.filter((finding)=>finding.closureTracked !== false);
+  const queuedCandidates=findings.filter((finding)=>finding.closureTracked === false).length;
+  if (!tracked.length) return { id:gate.id,title:gate.title,status:'not-started',need:gate.need,complete:0,total:0,queuedCandidates };
+  const checks=tracked.map((finding)=>{
     if (gate.id==='discover') return Boolean(finding.evidence || finding.title);
     if (gate.id==='verify') return ['validated','remediated','retested'].includes(finding.state);
     if (gate.id==='impact') return Boolean(finding.impact);
@@ -170,7 +174,7 @@ function gateState(findings, gate) {
     return false;
   });
   const complete=checks.filter(Boolean).length;
-  return { id:gate.id,title:gate.title,status:complete===checks.length?'complete':complete?'partial':'missing',need:gate.need,complete,total:checks.length };
+  return { id:gate.id,title:gate.title,status:complete===checks.length?'complete':complete?'partial':'missing',need:gate.need,complete,total:checks.length,queuedCandidates };
 }
 
 function buildLowaltAssessment(input, options={}) {
@@ -190,7 +194,7 @@ function buildLowaltAssessment(input, options={}) {
       title:hit.title || hit.scenarioId || 'UAV evidence candidate',
       evidence:(hit.evidence||[]).join(' · '),
       impact:'', remediation:hit.action || '', retest:'',
-      state:'candidate', confidence:Number(hit.confidence)||0, source:'existing-uav-analyzer'
+      state:'candidate', confidence:Number(hit.confidence)||0, source:'existing-uav-analyzer', closureTracked:false
     });
   }
   const findings=[...manual,...auto];
@@ -231,7 +235,7 @@ function buildLowaltAssessment(input, options={}) {
     findings,
     gates,
     priority,
-    coverage:{ surfaces:SURFACES.length, observed, validated, findings:findings.length, closureComplete, closureTotal:CLOSURE_GATES.length },
+    coverage:{ surfaces:SURFACES.length, observed, validated, findings:findings.length, triageCandidates:auto.length, trackedFindings:manual.length, closureComplete, closureTotal:CLOSURE_GATES.length },
     deliverableTemplate:[
       '资产 / 业务对象与信任边界',
       '风险标题与严重度',
@@ -246,6 +250,7 @@ function buildLowaltAssessment(input, options={}) {
     ],
     notes:[
       'AUTO 命中只产生 candidate，不自动宣告漏洞成立。',
+      'AUTO triage candidate 不进入闭环完成度分母；只有分析员记录/提升后的 finding 才参与验证、影响、整改与复测状态。',
       '单纯开放端口、单条异常遥测、单次控制命令或关键字命中不能替代漏洞验证。',
       options.strict===false ? '当前为宽松准备模式。' : '默认采用保守证据边界：验证、影响、修复、复测分别计数。'
     ]
