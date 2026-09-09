@@ -19,6 +19,14 @@ function addFinding(findings, text, match, spec) {
   });
 }
 
+function addTorchCompatibilityFinding(findings,text,match) {
+  addFinding(findings,text,match,{
+    id:'unsafe-model-deserialization-call',severity:'medium',title:'可执行语义模型/对象加载',
+    meaning:'torch.load 在未限制为 weights_only=True 时保留 pickle/对象反序列化风险边界；该 generic finding 保留给旧版调查图和回归消费者，精确策略见同一调用对应的 torch-load-* finding。',
+    fixTarget:'torch.load 调用',fixAction:'仅需权重时显式使用 weights_only=True 或 SafeTensors，并固定 artifact 来源/hash；完整对象加载前先做静态模型文件审计。',regression:'weights_only=False/隐式策略必须继续触发此兼容 finding；weights_only=True 不得被等价为 unrestricted pickle。'
+  });
+}
+
 function scanPythonSource(text) {
   const findings=[];
   const patterns=[
@@ -59,18 +67,24 @@ function scanPythonSource(text) {
 
   // torch.load needs call-level handling: weights_only=False is stronger evidence;
   // weights_only=True is intentionally not treated as equivalent to unrestricted pickle execution.
+  // The generic unsafe-model-deserialization-call is also emitted for backward-compatible consumers.
   for (const match of text.matchAll(/\btorch\.load\s*\(([\s\S]{0,1000}?)\)/gi)) {
     const call=match[0];
-    if (/\bweights_only\s*=\s*False\b/i.test(call)) addFinding(findings,text,match,{
-      id:'torch-load-weights-only-false',severity:'high',title:'PyTorch 显式关闭 weights_only 限制',
-      meaning:'torch.load(..., weights_only=False) 允许完整 pickle 对象反序列化语义；对第三方/上传模型属于高风险供应链加载边界。',
-      fixTarget:'torch.load 调用',fixAction:'对只需要权重的路径改用 weights_only=True 或 SafeTensors；同时固定来源、hash 并在加载前做静态 artifact 审计。',regression:'带危险 pickle GLOBAL/REDUCE 的模型必须在进入 torch.load 前被阻断。'
-    });
-    else if (!/\bweights_only\s*=\s*True\b/i.test(call)) addFinding(findings,text,match,{
-      id:'torch-load-policy-implicit',severity:'medium',title:'PyTorch 模型加载策略未显式限定',
-      meaning:'torch.load 未显式声明 weights_only 策略；实际行为受 PyTorch 版本和文件类型影响，比赛复现与供应链边界不够确定。',
-      fixTarget:'torch.load 调用',fixAction:'明确声明 weights_only 策略，并对来源、格式和 hash 做独立校验。',regression:'升级 PyTorch 版本后，模型加载安全策略与功能行为必须保持可解释且有回归。'
-    });
+    if (/\bweights_only\s*=\s*False\b/i.test(call)) {
+      addFinding(findings,text,match,{
+        id:'torch-load-weights-only-false',severity:'high',title:'PyTorch 显式关闭 weights_only 限制',
+        meaning:'torch.load(..., weights_only=False) 允许完整 pickle 对象反序列化语义；对第三方/上传模型属于高风险供应链加载边界。',
+        fixTarget:'torch.load 调用',fixAction:'对只需要权重的路径改用 weights_only=True 或 SafeTensors；同时固定来源、hash 并在加载前做静态 artifact 审计。',regression:'带危险 pickle GLOBAL/REDUCE 的模型必须在进入 torch.load 前被阻断。'
+      });
+      addTorchCompatibilityFinding(findings,text,match);
+    } else if (!/\bweights_only\s*=\s*True\b/i.test(call)) {
+      addFinding(findings,text,match,{
+        id:'torch-load-policy-implicit',severity:'medium',title:'PyTorch 模型加载策略未显式限定',
+        meaning:'torch.load 未显式声明 weights_only 策略；实际行为受 PyTorch 版本和文件类型影响，比赛复现与供应链边界不够确定。',
+        fixTarget:'torch.load 调用',fixAction:'明确声明 weights_only 策略，并对来源、格式和 hash 做独立校验。',regression:'升级 PyTorch 版本后，模型加载安全策略与功能行为必须保持可解释且有回归。'
+      });
+      addTorchCompatibilityFinding(findings,text,match);
+    }
   }
 
   for (const match of text.matchAll(/\b(?:AutoModel\w*|AutoTokenizer|AutoConfig|PeftModel|SentenceTransformer)\.from_pretrained\s*\(([\s\S]{0,900}?)\)/gi)) {
