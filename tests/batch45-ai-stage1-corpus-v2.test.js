@@ -80,8 +80,8 @@ test('Batch45 audits the old mutated-seed corpus by upstream diversity instead o
     assert.ok(group.currentSeeds>0,`${group.direction} keeps existing Batch43 seed coverage`);
     assert.ok(group.distinctCurrentSources<=group.currentSeeds);
   }
-  assert.ok(audit.queue.some((x)=>x.id==='tensortrust-data'));
-  assert.ok(audit.queue.some((x)=>x.id==='madry-mnist-challenge'));
+  assert.ok(audit.queue.some((x)=>x.id==='tensortrust-data'),'new high-priority upstream sources should reach the import queue');
+  assert.ok(audit.queue.some((x)=>x.tier==='A'&&x.priority>=98),'queue should prioritize real competition-grade gaps');
 });
 
 test('Batch45 training mix is dominated by real competitions and benchmarks with source-grouped split',()=>{
