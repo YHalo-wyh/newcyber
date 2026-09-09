@@ -141,7 +141,8 @@ function cnnFixture() {
   let state=0x13579bdf;
   const next=()=>{state=(Math.imul(state,1664525)+1013904223)>>>0;return state;};
   const samples=[];
-  for(let sample=0;sample<14;sample++) samples.push(Array.from({length:6},()=>Array.from({length:6},()=>next()%8)));
+  // Use upper LCG bits. The low three bits have a very short period and accidentally create a rank-2 feature system.
+  for(let sample=0;sample<14;sample++) samples.push(Array.from({length:6},()=>Array.from({length:6},()=>(next()>>>16)%8)));
   const features=samples.map((x)=>{
     const base=[];
     for(const k of Object.values(kernels)) for(const row of pool(relu(convValid(x,k)))) base.push(...row);
@@ -186,6 +187,14 @@ test('Batch31 CNN recipe generalizes to different modulus/data and recovers secr
   assert.deepEqual(result.solver.candidates[0].secretSigned,fixture.secret);
   assert.equal(result.flag,'flag{cnn_recipe_is_not_latticecnn_specific}');
   assert.ok(result.solver.enumerations<=3**8);
+});
+
+test('Batch31 rank-deficient modular samples stay unresolved instead of inventing a unique secret',()=>{
+  const A=[[1,2,3],[2,4,6],[3,6,9],[4,8,12]];
+  const b=[14,28,42,56];
+  const result=solveBoundedModular(A,b,257,1);
+  assert.equal(result.status,'no-invertible-subsystem');
+  assert.equal(result.candidates.length,0);
 });
 
 test('Batch31 refuses to reinterpret arbitrary NPY as LWE without source proof',()=>{
