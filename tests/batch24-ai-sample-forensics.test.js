@@ -37,7 +37,7 @@ function raster(size=32,patch=false,checker=false){
     for(let x=0;x<size;x+=1){
       let value=100;
       if(checker) value=((x+y)&1)?255:0;
-      else if(patch&&x>=size-5&&y>=size-5) value=255;
+      else if(patch&&x>=size-4&&y>=size-4) value=255;
       else value=100+((x+y)%3);
       data.push(value,value,value,255);
     }
