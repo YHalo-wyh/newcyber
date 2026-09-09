@@ -112,8 +112,10 @@ test('Batch39 Electron bridge supports isolated file sessions add-files rescan a
   assert.match(main,/registerChallengeSessionIpc/);
 });
 
-test('Batch39 compatibility entry keeps old markers and points to newest analyzer',()=>{
+test('Batch39 compatibility entry keeps old markers while allowing a newer analyzer to take over',()=>{
   const entry=read('src/core/finals_analyzer_batch15.js');
   for(const marker of ['finals_analyzer_batch22','finals_analyzer_batch35','finals_analyzer_batch38','finals_analyzer_batch39'])assert.match(entry,new RegExp(marker));
-  assert.match(entry,/require\('\.\/finals_analyzer_batch39'\)/);
+  const match=entry.match(/require\('\.\/finals_analyzer_batch(\d+)'\)/);
+  assert.ok(match,'compatibility entry must require a batch analyzer');
+  assert.ok(Number(match[1])>=39,'compatibility entry must not regress below Batch39');
 });
