@@ -2,7 +2,7 @@ const toolbox = require('./toolbox');
 const { analyzeCanAdvanced, decodeUdsAdvanced } = require('./vehicle_final');
 const { auditAiChallengeSource } = require('./ai_source_batch9');
 const { analyzeTabularDataset, evaluateTabularCandidate } = require('./ai_tabular');
-const { analyzeAdversarialPair, buildAdversarialHarness } = require('./ai_adversarial');
+const { analyzeAdversarialPair, analyzeAdversarialBatch, buildAdversarialHarness } = require('./ai_adversarial');
 const { analyzePrivacyTranscript, buildPrivacyHarness } = require('./ai_privacy');
 const { analyzeDatasetSecurity, buildDatasetHarness } = require('./ai_dataset_security');
 const { analyzePoisoningImpact, analyzeBackdoorBehavior } = require('./ai_poison_backdoor_validation');
@@ -13,6 +13,7 @@ const { analyzeOcrExtractionTranscript, buildOcrExtractionHarness } = require('.
 const { analyzeModelInversion } = require('./ai_model_inversion');
 const { diagnoseAiSkillMatrix } = require('./ai_skill_matrix');
 const { runAiRealCtfRegression, getAiRealCtfCorpus } = require('./ai_real_ctf_regression');
+const { runAiStage1TrainingRegression, PUBLIC_TRAINING_SEEDS } = require('./ai_stage1_training_corpus');
 const { analyzeRasterImage, compareRasterImages, analyzeNpySample, compareNpySamples } = require('./ai_sample_forensics');
 const { analyzeModelArithmeticBundle } = require('./ai_model_arithmetic');
 const { analyzeBinaryDataListing } = require('./binary_data_graph');
@@ -68,6 +69,8 @@ function runTool(tool, payload = {}) {
   if (tool === 'binary-data-graph') return analyzeBinaryDataListing(payload.input);
   if (tool === 'ai-source-scan') return auditAiChallengeSource(payload.input);
   if (tool === 'ai-skill-matrix') return diagnoseAiSkillMatrix(payload.input ?? payload);
+  if (tool === 'ai-stage1-training-regression') return runAiStage1TrainingRegression(payload.options || payload.input || {});
+  if (tool === 'ai-stage1-training-corpus') return {schema:'newcyber.ai-stage1-training-corpus.v1',cases:PUBLIC_TRAINING_SEEDS};
   if (tool === 'ai-real-ctf-regression') return runAiRealCtfRegression();
   if (tool === 'ai-real-ctf-corpus') return { schema:'newcyber.ai-real-ctf-corpus.v1', cases:getAiRealCtfCorpus() };
   if (tool === 'ai-model-arithmetic-auto') return analyzeModelArithmeticBundle(payload.input || payload, payload.options || {});
@@ -84,6 +87,7 @@ function runTool(tool, payload = {}) {
   if (tool === 'ai-tabular-profile') return analyzeTabularDataset(payload.input);
   if (tool === 'ai-tabular-candidate') return evaluateTabularCandidate(payload.input);
   if (tool === 'ai-adversarial-audit') return analyzeAdversarialPair(payload.input);
+  if (tool === 'ai-adversarial-batch') return analyzeAdversarialBatch(payload.input || payload);
   if (tool === 'ai-adversarial-harness') return buildAdversarialHarness(payload.input || payload);
   if (tool === 'ai-privacy-audit') return analyzePrivacyTranscript(payload.input);
   if (tool === 'ai-privacy-harness') return buildPrivacyHarness(payload.input || payload);
