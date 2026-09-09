@@ -3,7 +3,8 @@
 const { pseudoinverseSolve } = require('./power_side_channel');
 
 const MAX_ROWS = 50000;
-const MAX_HIDDEN_DIM = 256;
+const MAX_HIDDEN_DIM = 4096;
+const MAX_SOLVE_DIM = 1024;
 const MAX_LEAKAGE_DIM = 1024;
 const MAX_PROBE_CANDIDATES = 200000;
 
@@ -55,52 +56,102 @@ function solveCholeskyMany(L,rhs){
   return x;
 }
 
+function columnMeans(matrix){
+  const [rows,cols]=matrixShape(matrix);
+  const means=Array(cols).fill(0);
+  for(const row of matrix)for(let c=0;c<cols;c+=1)means[c]+=Number(row[c]);
+  for(let c=0;c<cols;c+=1)means[c]/=rows;
+  return means;
+}
+
+function centerMatrix(matrix,means){
+  return matrix.map((row)=>row.map((value,index)=>Number(value)-Number(means[index]||0)));
+}
+
 function fitLeakageProfile(hiddenStates,leakageFeatures,options={}){
   const [rows,hiddenDim]=matrixShape(hiddenStates,'hiddenStates');
   const [leakRows,leakDim]=matrixShape(leakageFeatures,'leakageFeatures');
   if(rows!==leakRows) throw new Error('hiddenStates 与 leakageFeatures 行数不一致');
-  if(hiddenDim>MAX_HIDDEN_DIM) return {schema:'newcyber.sca-leakage-profile.v1',status:'dimension-budget-gap',rows,hiddenDim,leakageDim:leakDim,limit:MAX_HIDDEN_DIM};
+  if(hiddenDim>MAX_HIDDEN_DIM) return {schema:'newcyber.sca-leakage-profile.v1',status:'hidden-budget-gap',rows,hiddenDim,leakageDim:leakDim,limit:MAX_HIDDEN_DIM};
   if(leakDim>MAX_LEAKAGE_DIM) return {schema:'newcyber.sca-leakage-profile.v1',status:'leakage-budget-gap',rows,hiddenDim,leakageDim:leakDim,limit:MAX_LEAKAGE_DIM};
+  const solveDim=Math.min(rows,hiddenDim);
+  if(solveDim>MAX_SOLVE_DIM) return {schema:'newcyber.sca-leakage-profile.v1',status:'dimension-budget-gap',rows,hiddenDim,leakageDim:leakDim,solveDim,limit:MAX_SOLVE_DIM};
   const intercept=options.intercept!==false;
-  const p=hiddenDim+(intercept?1:0);
-  if(rows<p) return {schema:'newcyber.sca-leakage-profile.v1',status:'underdetermined',rows,hiddenDim,leakageDim:leakDim,parameters:p};
   const lambda=Math.max(0,Number(options.lambda??1e-8));
   if(!Number.isFinite(lambda)) throw new Error('lambda 非法');
-  const gram=Array.from({length:p},()=>Array(p).fill(0));
-  const cross=Array.from({length:p},()=>Array(leakDim).fill(0));
-  for(let r=0;r<rows;r+=1){
-    const x=intercept?[1,...hiddenStates[r].map(Number)]:hiddenStates[r].map(Number);
-    const y=leakageFeatures[r];
-    for(let i=0;i<p;i+=1){
-      for(let j=0;j<=i;j+=1) gram[i][j]+=x[i]*x[j];
-      for(let c=0;c<leakDim;c+=1) cross[i][c]+=x[i]*Number(y[c]);
+  if(lambda===0&&rows<hiddenDim) return {schema:'newcyber.sca-leakage-profile.v1',status:'underdetermined',rows,hiddenDim,leakageDim:leakDim,parameters:hiddenDim};
+
+  const hiddenMean=intercept?columnMeans(hiddenStates):Array(hiddenDim).fill(0);
+  const leakageMean=intercept?columnMeans(leakageFeatures):Array(leakDim).fill(0);
+  const X=intercept?centerMatrix(hiddenStates,hiddenMean):hiddenStates.map((row)=>row.map(Number));
+  const Y=intercept?centerMatrix(leakageFeatures,leakageMean):leakageFeatures.map((row)=>row.map(Number));
+  let weights;
+  let method;
+
+  if(hiddenDim<=rows){
+    method='ridge-primal-cholesky';
+    const gram=Array.from({length:hiddenDim},()=>Array(hiddenDim).fill(0));
+    const cross=Array.from({length:hiddenDim},()=>Array(leakDim).fill(0));
+    for(let r=0;r<rows;r+=1){
+      for(let i=0;i<hiddenDim;i+=1){
+        const xi=X[r][i];
+        for(let j=0;j<=i;j+=1)gram[i][j]+=xi*X[r][j];
+        for(let c=0;c<leakDim;c+=1)cross[i][c]+=xi*Y[r][c];
+      }
+    }
+    for(let i=0;i<hiddenDim;i+=1){
+      for(let j=0;j<i;j+=1)gram[j][i]=gram[i][j];
+      gram[i][i]+=lambda;
+    }
+    const L=cholesky(gram,Number(options.tolerance)||1e-12);
+    if(!L)return {schema:'newcyber.sca-leakage-profile.v1',status:'rank-deficient',method,rows,hiddenDim,leakageDim:leakDim,lambda,solveDim:hiddenDim};
+    weights=solveCholeskyMany(L,cross);
+  } else {
+    method='ridge-dual-cholesky';
+    const gram=Array.from({length:rows},()=>Array(rows).fill(0));
+    for(let i=0;i<rows;i+=1){
+      for(let j=0;j<=i;j+=1){
+        let value=0;
+        for(let d=0;d<hiddenDim;d+=1)value+=X[i][d]*X[j][d];
+        gram[i][j]=value;
+      }
+    }
+    for(let i=0;i<rows;i+=1){
+      for(let j=0;j<i;j+=1)gram[j][i]=gram[i][j];
+      gram[i][i]+=lambda;
+    }
+    const L=cholesky(gram,Number(options.tolerance)||1e-12);
+    if(!L)return {schema:'newcyber.sca-leakage-profile.v1',status:'rank-deficient',method,rows,hiddenDim,leakageDim:leakDim,lambda,solveDim:rows};
+    const alpha=solveCholeskyMany(L,Y);
+    weights=Array.from({length:hiddenDim},()=>Array(leakDim).fill(0));
+    for(let d=0;d<hiddenDim;d+=1){
+      for(let r=0;r<rows;r+=1){
+        const x=X[r][d];
+        for(let c=0;c<leakDim;c+=1)weights[d][c]+=x*alpha[r][c];
+      }
     }
   }
-  for(let i=0;i<p;i+=1){
-    for(let j=0;j<i;j+=1) gram[j][i]=gram[i][j];
-    if(!(intercept&&i===0)) gram[i][i]+=lambda;
+
+  const interceptVector=Array(leakDim).fill(0);
+  if(intercept){
+    for(let c=0;c<leakDim;c+=1){
+      let value=leakageMean[c];
+      for(let d=0;d<hiddenDim;d+=1)value-=hiddenMean[d]*weights[d][c];
+      interceptVector[c]=value;
+    }
   }
-  const L=cholesky(gram,Number(options.tolerance)||1e-12);
-  if(!L) return {schema:'newcyber.sca-leakage-profile.v1',status:'rank-deficient',rows,hiddenDim,leakageDim:leakDim,lambda};
-  const beta=solveCholeskyMany(L,cross);
-  const interceptVector=intercept?beta[0].slice():Array(leakDim).fill(0);
-  const weights=(intercept?beta.slice(1):beta).map((row)=>row.slice());
-  let sse=0; let sst=0; let count=0;
-  const means=Array(leakDim).fill(0);
-  for(const row of leakageFeatures) for(let c=0;c<leakDim;c+=1) means[c]+=Number(row[c]);
-  for(let c=0;c<leakDim;c+=1) means[c]/=rows;
+  let sse=0;let sst=0;let count=0;
   for(let r=0;r<rows;r+=1){
     for(let c=0;c<leakDim;c+=1){
       let pred=interceptVector[c];
-      for(let d=0;d<hiddenDim;d+=1) pred+=Number(hiddenStates[r][d])*weights[d][c];
+      for(let d=0;d<hiddenDim;d+=1)pred+=Number(hiddenStates[r][d])*weights[d][c];
       const actual=Number(leakageFeatures[r][c]);
-      const err=actual-pred;
-      sse+=err*err;
-      const centered=actual-means[c]; sst+=centered*centered; count+=1;
+      const err=actual-pred;sse+=err*err;
+      const centered=actual-leakageMean[c];sst+=centered*centered;count+=1;
     }
   }
   return {
-    schema:'newcyber.sca-leakage-profile.v1',status:'ok',method:'ridge-normal-equation',rows,hiddenDim,leakageDim:leakDim,lambda,
+    schema:'newcyber.sca-leakage-profile.v1',status:'ok',method,rows,hiddenDim,leakageDim:leakDim,solveDim,lambda,
     intercept:interceptVector,weights,rmse:Math.sqrt(sse/Math.max(1,count)),r2:sst>0?1-sse/sst:null
   };
 }
@@ -146,7 +197,7 @@ function rankProbeCandidates(hiddenVector,probeMatrix,options={}){
     const vector=orientation==='candidate-rows'?probeMatrix[i].map(Number):Array.from({length:rows},(_,r)=>Number(probeMatrix[r][i]));
     let score;
     if(metric==='cosine') score=dot(hidden,vector)/(hnorm*(norm(vector)||1));
-    else if(metric==='negative-l2') {let s=0;for(let d=0;d<hidden.length;d+=1){const e=hidden[d]-vector[d];s+=e*e;}score=-s;}
+    else if(metric==='negative-l2'){let s=0;for(let d=0;d<hidden.length;d+=1){const e=hidden[d]-vector[d];s+=e*e;}score=-s;}
     else score=dot(hidden,vector);
     ranked.push({index:i,tokenId:ids?ids[i]:i,score});
   }
@@ -163,6 +214,6 @@ function recoverProbeCandidates(profile,targetLeakage,probeMatrix,options={}){
 }
 
 module.exports={
-  MAX_HIDDEN_DIM,MAX_LEAKAGE_DIM,
+  MAX_HIDDEN_DIM,MAX_SOLVE_DIM,MAX_LEAKAGE_DIM,
   fitLeakageProfile,recoverHiddenState,rankProbeCandidates,recoverProbeCandidates
 };
