@@ -14,6 +14,7 @@ const { analyzeModelInversion } = require('./ai_model_inversion');
 const { diagnoseAiSkillMatrix } = require('./ai_skill_matrix');
 const { runAiRealCtfRegression, getAiRealCtfCorpus } = require('./ai_real_ctf_regression');
 const { analyzeRasterImage, compareRasterImages, analyzeNpySample, compareNpySamples } = require('./ai_sample_forensics');
+const { analyzeModelArithmeticBundle } = require('./ai_model_arithmetic');
 const { analyzeBinaryDataListing } = require('./binary_data_graph');
 const { scanRegulatoryApi } = require('./low_altitude_regulatory');
 const { analyzeGnssLog } = require('./gnss_audit');
@@ -69,6 +70,7 @@ function runTool(tool, payload = {}) {
   if (tool === 'ai-skill-matrix') return diagnoseAiSkillMatrix(payload.input ?? payload);
   if (tool === 'ai-real-ctf-regression') return runAiRealCtfRegression();
   if (tool === 'ai-real-ctf-corpus') return { schema:'newcyber.ai-real-ctf-corpus.v1', cases:getAiRealCtfCorpus() };
+  if (tool === 'ai-model-arithmetic-auto') return analyzeModelArithmeticBundle(payload.input || payload, payload.options || {});
   if (tool === 'ai-image-raster-forensics') return analyzeRasterImage(payload.input || payload);
   if (tool === 'ai-image-raster-compare') return compareRasterImages(payload.input || payload);
   if (tool === 'ai-npy-sample-forensics') {
