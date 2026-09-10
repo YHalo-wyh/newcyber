@@ -7,7 +7,7 @@ const os=require('os');
 const path=require('path');
 const {bytesToUnicodeMaps}=require('../src/core/gpt2_bpe');
 const {hannWeight}=require('../src/core/sca_streaming_feature_source');
-const {runQualityGroupedScaAutopilotPaths}=require('../src/core/sca_quality_grouped_core');
+const {runQualityGroupedScaAutopilotPaths}=require('../src/core/sca_autopilot_batch50_core');
 
 function npy(values,shape,descr='<f4'){
   const count=shape.reduce((a,b)=>a*b,1);assert.equal(values.length,count);
@@ -91,18 +91,17 @@ async function makeBundle(flag='ynuctf{b50}'){
 
 async function paths(root){return (await fsp.readdir(root)).map((name)=>path.join(root,name));}
 
-test('Batch50 mini end-to-end closes raw Hann traces through calibrated probe and unknown-prefix oracle',async(t)=>{
+test('Batch50 mini end-to-end closes raw Hann traces through calibrated probe and contextual hidden oracle',async(t)=>{
   const bundle=await makeBundle();t.after(()=>fsp.rm(bundle.root,{recursive:true,force:true}));
   const result=await runQualityGroupedScaAutopilotPaths(await paths(bundle.root),{
     ort:fakeOrt(bundle.targetIds),provider:'cpu',version:'fixture',probeCalibration:{minCosineGain:0}
   });
-  const diagnostic=JSON.stringify({status:result.status,flag:result.flag,gap:result.gap,stages:result.stages,recipe:result.featureRecipe,calibration:result.probeCalibration,oracle:result.unknownPrefixOracle},null,2);
-  assert.equal(result.schema,'newcyber.sca-autopilot.v4',diagnostic);
+  const diagnostic=JSON.stringify({status:result.status,flag:result.flag,gap:result.gap,stages:result.stages,recipe:result.featureRecipe,calibration:result.probeCalibration,contextual:result.contextualHiddenOracle,verifiedRecovery:result.verifiedRecovery},null,2);
+  assert.match(result.schema,/newcyber\.sca-autopilot\.v[45]/,diagnostic);
   assert.equal(result.status,'flag-recovered',diagnostic);
   // The generic flag extractor is intentionally prefix-agnostic and normalizes the
-  // embedded token "ctf{...}". The oracle text must still preserve the exact recovered
-  // byte stream so challenge-specific prefixes are never invented by the verifier.
-  assert.equal(result.unknownPrefixOracle.recoveredText,bundle.flag,diagnostic);
+  // embedded token "ctf{...}". Exact recovered text remains available separately.
+  assert.equal(result.contextualHiddenOracle.recoveredText,bundle.flag,diagnostic);
   assert.equal(result.flag,'ctf{b50}',diagnostic);
   assert.equal(result.featureRecipe.windowFunction,'hann',diagnostic);
   assert.equal(result.featureRecipe.rawCols,18,diagnostic);
@@ -110,9 +109,12 @@ test('Batch50 mini end-to-end closes raw Hann traces through calibrated probe an
   assert.equal(result.featureRecipe.offset,2,diagnostic);
   assert.ok(result.profile.r2>0.99,diagnostic);
   assert.equal(result.probeCalibration.status,'accepted',diagnostic);
-  assert.equal(result.unknownPrefixOracle.status,'flag-recovered',diagnostic);
-  assert.equal(result.unknownPrefixOracle.mode,'candidate-guided',diagnostic);
+  assert.equal(result.contextualHiddenOracle.status,'decoded',diagnostic);
+  assert.equal(result.contextualHiddenOracle.recoveredTokenIds.length,bundle.targetIds.length,diagnostic);
+  assert.ok(result.contextualHiddenOracle.positions.every((item)=>item.status==='matched'&&item.cosine>=result.contextualHiddenOracle.threshold),diagnostic);
+  assert.equal(result.verifiedRecovery.method,'contextual-hidden-oracle',diagnostic);
   assert.ok(result.stages.some((item)=>item.id==='feature-recipe'&&item.status==='ok'),diagnostic);
   assert.ok(result.stages.some((item)=>item.id==='probe-calibration'&&item.status==='ok'),diagnostic);
-  assert.ok(result.stages.some((item)=>item.id==='unknown-prefix-oracle'&&item.status==='ok'),diagnostic);
+  assert.ok(result.stages.some((item)=>item.id==='contextual-hidden-oracle'&&item.status==='ok'),diagnostic);
+  assert.ok(result.stages.some((item)=>item.id==='flag'&&item.status==='ok'),diagnostic);
 });
