@@ -34,6 +34,8 @@ test('real AI CTF regression separates recognized candidate and verified maturit
   const result=runAiRealCtfRegression();
   assert.equal(result.schema,'newcyber.ai-real-ctf-regression.v1');
   assert.equal(result.maturitySchema,'newcyber.ai-real-ctf-maturity.v1');
+  // Historical Batch47/base-wrapper baseline remains frozen at 11; production
+  // routing is allowed to advance through newer batch wrappers.
   assert.equal(result.summary.total,11);
   assert.ok(result.summary.recognitionPass>=10);
   assert.ok(result.summary.candidatePass>=1);
@@ -76,7 +78,8 @@ test('tool router exposes expanded real corpus and maturity regression',()=>{
   assert.equal(corpus.schema,'newcyber.ai-real-ctf-corpus.v1');
   assert.ok(corpus.cases.length>=11);
   const result=runTool('ai-real-ctf-regression',{});
-  assert.equal(result.summary.total,11);
+  assert.equal(result.summary.total,corpus.cases.length);
+  assert.ok(result.summary.total>=11);
   assert.ok(result.summary.recognitionPass>=result.summary.candidatePass);
   assert.ok(result.summary.candidatePass>=result.summary.verifiedPass);
 });
@@ -102,12 +105,12 @@ test('homepage is a compact desktop start center, not the legacy marketing hero'
   assert.match(html,/home-start-center/);
   assert.match(html,/<h1>NewCyber<\/h1>/);
   assert.match(html,/选择赛题目录/);
-  assert.match(html,/11 CASES/);
+  assert.match(html,/13 CASES/);
   assert.match(html,/Recognized → Candidate → Verified/);
   assert.doesNotMatch(html,/legacy marketing|competition-hero|把题目丢进来/);
 });
 
-test('specialized real CTF UI exposes maturity funnel and synchronized 11-case catalog',()=>{
+test('specialized real CTF UI exposes maturity funnel and synchronized 13-case catalog',()=>{
   const html=read('renderer/toolbox.html');
   const real=read('renderer/ai_real_ctf_tools.js');
   const home=read('renderer/home_dashboard.js');
@@ -117,11 +120,11 @@ test('specialized real CTF UI exposes maturity funnel and synchronized 11-case c
   assert.ok(html.indexOf('home_dashboard.js')>html.indexOf('workspace_autopilot.js'));
   assert.match(html,/styles\/home_dashboard\.css/);
   assert.match(html,/styles\/ai_real_ctf\.css/);
-  for(const label of ['国内 AI CTF 真题回归','SU_easyLLM','easy_poison','耄耋','RECOGNIZED','CANDIDATE','VERIFIED']) assert.match(real,new RegExp(label));
+  for(const label of ['国内 AI CTF 真题回归','SU_easyLLM','easy_poison','耄耋','06-ai_summarizer-攻击','07-ai_sms-攻击','RECOGNIZED','CANDIDATE','VERIFIED']) assert.match(real,new RegExp(label));
   assert.match(real,/\$\{CASES\.length\} CASES/);
-  assert.doesNotMatch(real,/8 CASES|8 个公开真题|9 CASES/);
-  assert.match(home,/11 CASES/);
-  assert.doesNotMatch(home,/8 CASES|9 CASES/);
+  assert.doesNotMatch(real,/8 CASES|8 个公开真题|9 CASES|11 CASES/);
+  assert.match(home,/13 CASES/);
+  assert.doesNotMatch(home,/8 CASES|9 CASES|11 CASES/);
   assert.match(css,/\.home-brand-line h1\{font-size:21px/);
   assert.doesNotMatch(css,/font-size:46px/);
 });
