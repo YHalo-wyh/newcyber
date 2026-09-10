@@ -26,17 +26,34 @@ async function featureTelemetry(result){
 
 async function fullProbeTelemetry(result){
   const calibration=result?.probeCalibration;
-  if(calibration?.status!=='accepted')return {executed:false,reason:'probe calibration not accepted'};
+  if(calibration?.status!=='accepted')return {executed:false,actual:false,estimated:false,reason:'probe calibration not accepted'};
+
+  const actual=calibration?.rerankTelemetry;
+  if(actual&&typeof actual==='object'&&actual.status!=='not-run'){
+    const targetRows=Number(result?.target?.rows)||Number(actual.rows)||0;
+    if(actual.status==='ok')return {
+      ...actual,
+      actual:true,estimated:false,targetRows,
+      executed:Number(actual.fullScanSucceededRows)>0,
+      fullProbeExpandedRows:Number(actual.fullProbeExpandedRows??actual.fullProbeRecovered)||0,
+      legacyFullProbeRecovered:Number(actual.fullProbeRecovered)||0
+    };
+    return {executed:false,actual:true,estimated:false,targetRows,reason:actual.reason||actual.status,...actual};
+  }
+
+  // Compatibility fallback for pre-Batch55 quality results. This is explicitly
+  // labelled estimated so the UI never presents a budget calculation as work
+  // that actually ran.
   const probeFile=roleFile(result,'probe');const hiddenDim=Number(result?.profile?.hiddenDim)||0;const targetRows=Number(result?.target?.rows)||0;
-  if(!probeFile?.filePath||!hiddenDim||!targetRows)return {executed:false,reason:'probe/header/target telemetry unavailable'};
+  if(!probeFile?.filePath||!hiddenDim||!targetRows)return {executed:false,actual:false,estimated:false,reason:'probe/header/target telemetry unavailable'};
   try{
     const header=await readNpyHeaderPath(probeFile.filePath);const probeOptions=batch50.resolveProbeOptions(result.discovery,header.shape,hiddenDim);
-    if(probeOptions.status!=='ok')return {executed:false,reason:probeOptions.detail||probeOptions.code||'probe orientation unavailable'};
+    if(probeOptions.status!=='ok')return {executed:false,actual:false,estimated:false,reason:probeOptions.detail||probeOptions.code||'probe orientation unavailable'};
     const candidateCount=probeOptions.orientation==='candidate-rows'?Number(header.shape[0]):Number(header.shape[1]);
     const workPerRow=candidateCount*hiddenDim;const fullScanRows=workPerRow>0?Math.min(targetRows,Math.floor(MAX_CALIBRATED_SCORE_OPS/workPerRow)):0;
     const calibratedProbeRan=list(result.stages).some((item)=>item.id==='probe'&&item.status==='ok'&&/calibrated/i.test(String(item.detail||'')));
-    return {executed:Boolean(calibratedProbeRan&&fullScanRows>0),fullScanRows:calibratedProbeRan?fullScanRows:0,targetRows,candidateCount,hiddenDim,orientation:probeOptions.orientation,metric:probeOptions.metric,workPerRow,workBudget:MAX_CALIBRATED_SCORE_OPS,budgetLimited:fullScanRows<targetRows};
-  }catch(error){return {executed:false,reason:error?.message||String(error)};}
+    return {executed:Boolean(calibratedProbeRan&&fullScanRows>0),actual:false,estimated:true,fullScanRows:calibratedProbeRan?fullScanRows:0,targetRows,candidateCount,hiddenDim,orientation:probeOptions.orientation,metric:probeOptions.metric,workPerRow,workBudget:MAX_CALIBRATED_SCORE_OPS,budgetLimited:fullScanRows<targetRows,reason:'legacy quality result lacks actual rerank telemetry'};
+  }catch(error){return {executed:false,actual:false,estimated:false,reason:error?.message||String(error)};}
 }
 
 function qualityDowngradeGap(intent,result,reason){
@@ -61,8 +78,10 @@ async function decorateResult(result,intent,prioritized,original){
   const extra=[];
   if(feature)extra.push(stage('feature-telemetry','ok',`${feature.rawDim??'?'} raw → ${feature.effectiveDim??'?'} effective · ${feature.windowFunction||'window'} · streaming`,feature));
   if(result?.probeCalibration?.status==='accepted')extra.push(stage('calibration-telemetry','ok',`${result.probeCalibration.mode||'ridge'} · cosine gain=${Number(result.probeCalibration.cosineGain||0).toFixed(6)}`,{mode:result.probeCalibration.mode,cosineGain:result.probeCalibration.cosineGain,evaluation:result.probeCalibration.evaluation}));
-  if(fullProbe.executed)extra.push(stage('full-probe','ok',`${fullProbe.fullScanRows}/${fullProbe.targetRows} target rows × ${fullProbe.candidateCount} candidates · budget ${fullProbe.workBudget}`,fullProbe));
-  else if(result?.probeCalibration?.status==='accepted')extra.push(stage('full-probe','skip',fullProbe.reason||`budget permits ${fullProbe.fullScanRows||0}/${fullProbe.targetRows||0} rows`,fullProbe));
+  if(fullProbe.executed){
+    if(fullProbe.actual)extra.push(stage('full-probe','ok',`${fullProbe.fullScanSucceededRows}/${fullProbe.targetRows} actual full-vocab rows · expanded ${fullProbe.fullProbeExpandedRows} · top1 changed ${fullProbe.top1ChangedRows} · fallback ${fullProbe.fallbackRows} · budget ${fullProbe.workBudget}`,fullProbe));
+    else extra.push(stage('full-probe','ok',`${fullProbe.fullScanRows}/${fullProbe.targetRows} estimated full-vocab rows · legacy telemetry · budget ${fullProbe.workBudget}`,fullProbe));
+  }else if(result?.probeCalibration?.status==='accepted')extra.push(stage('full-probe','skip',fullProbe.reason||`full-vocab scan did not execute`,fullProbe));
 
   const stages=[routeStage,sourceStage,...list(result?.stages)];
   const insertAt=Math.max(2,stages.findIndex((item)=>item.id==='oracle'));
