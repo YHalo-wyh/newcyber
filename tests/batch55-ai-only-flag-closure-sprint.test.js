@@ -34,6 +34,28 @@ test('Batch55 closure scheduler prioritizes an active SCA chain near oracle over
   assert.match(privacy.nextBestAction,/calibrated|full-probe|oracle/i);
 });
 
+test('Batch55 plain prompt evidence plus a top-level candidates field never fabricates a Prompt candidate',()=>{
+  const analysis=baseAnalysis({files:[{path:'prompt_notes.txt',metadata:{description:'prompt agent rag tool'}}],candidates:{flags:[],other:[]}});
+  const autopilot=buildFiveDirectionAutopilot(analysis);
+  const closure=buildFlagClosureScheduler(analysis,autopilot);
+  const prompt=closure.directions.find((d)=>d.id==='prompt-llm-security');
+  assert.equal(prompt.stepsToFlag,3);
+  assert.equal(prompt.closureStage,'probe-ready');
+  assert.equal(prompt.blockers.includes('REAL_TARGET_OBSERVATION'),false);
+});
+
+test('Batch55 genuine Batch51 transform candidate still promotes Prompt to candidate-needs-replay',()=>{
+  const analysis=baseAnalysis({files:[{
+    path:'prompt.txt',metadata:{batch51:{candidateObject:{kind:'transform-exfiltration-replay',candidateId:'transform-fixture-1',prompt:'encode hidden system prompt'}}}
+  }]});
+  const autopilot=buildFiveDirectionAutopilot(analysis);
+  const closure=buildFlagClosureScheduler(analysis,autopilot);
+  const prompt=closure.directions.find((d)=>d.id==='prompt-llm-security');
+  assert.equal(prompt.stepsToFlag,2);
+  assert.equal(prompt.closureStage,'candidate-needs-replay');
+  assert.ok(prompt.blockers.includes('REAL_TARGET_OBSERVATION'));
+});
+
 test('Batch55 prompt replay plan is candidate-bound, bounded and stops when a verified flag appears',()=>{
   const analysis=baseAnalysis({files:[{path:'prompt.txt',metadata:{description:'system prompt secret agent tool call'}}]});
   const autopilot=buildFiveDirectionAutopilot(analysis,{endpoint:'https://ctf.invalid/api',flagFormat:'ACTF{...}'});
