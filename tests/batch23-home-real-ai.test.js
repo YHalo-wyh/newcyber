@@ -89,6 +89,7 @@ test('homepage is a compact desktop start center, not the legacy marketing hero'
 test('specialized real CTF UI loads after generic track surfaces and dashboard wins after autopilot',()=>{
   const html=read('renderer/toolbox.html');
   const real=read('renderer/ai_real_ctf_tools.js');
+  const home=read('renderer/home_dashboard.js');
   const css=read('renderer/styles/home_dashboard.css');
   assert.doesNotThrow(()=>new vm.Script(real,{filename:'renderer/ai_real_ctf_tools.js'}));
   assert.ok(html.indexOf('ai_real_ctf_tools.js')>html.indexOf('track_surfaces.js'));
@@ -97,6 +98,11 @@ test('specialized real CTF UI loads after generic track surfaces and dashboard w
   assert.match(html,/styles\/ai_real_ctf\.css/);
   assert.match(real,/国内 AI CTF 真题回归/);
   assert.match(real,/运行全部/);
+  assert.match(real,/耄耋/);
+  assert.match(real,/\$\{CASES\.length\} CASES/);
+  assert.doesNotMatch(real,/8 CASES|8 个公开真题/);
+  assert.match(home,/9 CASES/);
+  assert.doesNotMatch(home,/8 CASES/);
   assert.match(css,/\.home-brand-line h1\{font-size:21px/);
   assert.doesNotMatch(css,/font-size:46px/);
 });
