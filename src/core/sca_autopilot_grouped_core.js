@@ -37,12 +37,16 @@ async function promptTokensOptional(discovery){
   const read=await tokenSequences(role.file,'promptTokenIds');if(read.status!=='ok')return read;if(read.sequences.length!==1)return {status:'gap',code:'PROMPT_TOKEN_GAP',detail:'promptTokenIds 文件必须只描述一个 prompt sequence'};return {status:'ok',ids:read.sequences[0],source:role.file.fileName};
 }
 
+function filenameTokens(stem){return String(stem||'').toLowerCase().split(/[_-]+/).filter(Boolean);}
 function explicitCandidateIdFile(discovery){
   const files=list(discovery?.files).filter((file)=>String(file?.extension||'').toLowerCase()==='.npy');
   const explicit=files.filter((file)=>{
     const stem=String(file?.fileName||path.basename(file?.filePath||'')).toLowerCase().replace(/\.[^.]+$/,'');
-    if(/(?:profil|train|known|reference|prompt|prefix|seed)/.test(stem))return false;
-    return /(?:candidate|vocab)/.test(stem)&&/(?:token|input|id)/.test(stem);
+    const tokens=filenameTokens(stem);
+    if(tokens.some((token)=>['profile','profiling','train','training','known','reference','prompt','prefix','seed'].includes(token)))return false;
+    const hasCandidate=tokens.some((token)=>['candidate','candidates','vocab','vocabulary'].includes(token));
+    const hasId=tokens.some((token)=>['token','tokens','input','inputs','id','ids'].includes(token));
+    return hasCandidate&&hasId;
   });
   if(explicit.length===1)return {status:'ok',file:explicit[0],source:'explicit candidate/vocab filename'};
   if(explicit.length>1)return {status:'ambiguous',files:explicit.map((file)=>file.fileName)};
@@ -141,4 +145,4 @@ async function runScaAutopilotPaths(filePaths,options={}){
   return baseline;
 }
 
-module.exports={...base,runScaAutopilotPaths,runGroupedScaAutopilotPaths,freeProbeDecode,resolveCandidateIds,explicitCandidateIdFile};
+module.exports={...base,runScaAutopilotPaths,runGroupedScaAutopilotPaths,freeProbeDecode,resolveCandidateIds,explicitCandidateIdFile,filenameTokens};
