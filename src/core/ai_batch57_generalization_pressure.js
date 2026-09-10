@@ -45,7 +45,7 @@ function positiveBoundaryCases(count=64){
   return cases;
 }
 function directTokenCases(count=16){
-  const rng=lcg(0x57d1rect);const cases=[];
+  const rng=lcg(0x57d1ec7);const cases=[];
   for(let index=0;index<count;index++){
     const promptCount=2+Math.floor(rng()*8),promptTokens=[];
     for(let p=0;p<promptCount;p++)promptTokens.push(1+Math.floor(rng()*16));
