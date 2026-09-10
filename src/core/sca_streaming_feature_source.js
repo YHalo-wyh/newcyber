@@ -54,26 +54,38 @@ function uniquePlausible(constants,patterns,max){
   return [...new Set(values)];
 }
 
+function uniqueOffsets(constants,rawCols){
+  const values=[];
+  for(const [name,value] of Object.entries(constants)){
+    if(!/(?:FEATURE|TRACE|WINDOW|WIN|SLOT).*(?:OFFSET|START)/i.test(name))continue;
+    if(Number.isSafeInteger(value)&&value>=0&&value<=rawCols)values.push(value);
+  }
+  return [...new Set(values)];
+}
+
 function sourceRecipe(sourceText,rawCols){
   const text=String(sourceText||'');
   const hannEvidence=/(?:np\.(?:hanning|hann)|torch\.hann_window|(?:signal\.)?windows\.hann)\s*\(/i.test(text);
   if(!hannEvidence)return null;
   const constants=constantMap(text);
-  let sizes=uniquePlausible(constants,[/(?:WINDOW|WIN|SLOT|SEGMENT).*(?:SIZE|WIDTH|SAMPLES)/i,/(?:SAMPLES).*(?:WINDOW|WIN|SLOT)/i],Math.min(MAX_WINDOW_LENGTH,rawCols));
+  let sizes=uniquePlausible(constants,[/(?:WINDOW|WIN|SLOT|SEGMENT).*(?:SIZE|WIDTH|SAMPLES)/i,/(?:SAMPLES).*(?:WINDOW|WIN|SLOT|TRACE|FEATURE)/i,/^SAMPLES_PER_TRACE$/i],Math.min(MAX_WINDOW_LENGTH,rawCols));
   for(const match of text.matchAll(/(?:hanning|hann|hann_window)\s*\(\s*(\d+)\s*\)/gi))sizes.push(Number(match[1]));
   sizes=[...new Set(sizes.filter((x)=>Number.isSafeInteger(x)&&x>0&&x<=rawCols))];
   if(sizes.length!==1)return null;
   const windowSize=sizes[0];
 
   let slots=uniquePlausible(constants,[/(?:FEATURE|LEAKAGE).*(?:SLOTS|WINDOWS|COUNT|DIM)/i,/(?:NUM|N)_(?:WINDOWS|SLOTS)/i],MAX_WINDOWS);
+  if(Number.isSafeInteger(constants.TRACE_DIM)&&constants.TRACE_DIM>0&&constants.TRACE_DIM<=MAX_WINDOWS&&constants.TRACE_DIM*windowSize<=rawCols)slots.push(constants.TRACE_DIM);
   const localRange=[...text.matchAll(/(?:hanning|hann_window|windows\.hann)[\s\S]{0,500}?range\s*\(\s*(\d+)\s*\)/gi)].map((m)=>Number(m[1]));
   slots=[...new Set([...slots,...localRange].filter((x)=>Number.isSafeInteger(x)&&x>0&&x<=MAX_WINDOWS))];
   if(slots.length!==1)return null;
   const slotCount=slots[0];
 
-  let offsets=uniquePlausible(constants,[/(?:FEATURE|TRACE|WINDOW|WIN|SLOT).*(?:OFFSET|START)/i],rawCols);
-  if(!offsets.length&&new RegExp(`\\[\\s*(?:i|j|idx|slot)\\s*\\*\\s*(?:${windowSize}|[A-Z_][A-Z0-9_]*)\\s*:`,'i').test(text))offsets=[0];
-  offsets=[...new Set(offsets)];
+  let offsets=uniqueOffsets(constants,rawCols);
+  const literalOffsetPattern=new RegExp(`\\[\\s*(\\d+)\\s*\\+\\s*(?:i|j|idx|slot)\\s*\\*\\s*(?:${windowSize}|[A-Z_][A-Z0-9_]*)\\s*:`,`ig`);
+  for(const match of text.matchAll(literalOffsetPattern))offsets.push(Number(match[1]));
+  if(!offsets.length&&new RegExp(`\\[\\s*(?:i|j|idx|slot)\\s*\\*\\s*(?:${windowSize}|[A-Z_][A-Z0-9_]*)\\s*:`,`i`).test(text))offsets=[0];
+  offsets=[...new Set(offsets.filter((x)=>Number.isSafeInteger(x)&&x>=0&&x<=rawCols))];
   if(offsets.length!==1)return null;
   const offset=offsets[0];
   if(offset+slotCount*windowSize>rawCols)return null;
@@ -105,6 +117,14 @@ function manifestRecipe(manifest,rawCols){
   return {schema:'newcyber.sca-streaming-feature-recipe.v1',mode:'windows',source:'manifest-feature-recipe',rawCols,windows,slots,windowSize,offset,metric,windowFunction};
 }
 
+function declaredFeatureMismatch(sourceText,rawCols){
+  const constants=constantMap(sourceText);
+  const values=['FEATURE_DIM','LEAKAGE_DIM','TRACE_DIM'].map((name)=>constants[name]).filter((value)=>Number.isSafeInteger(value)&&value>0&&value<=4096);
+  if(!values.length||values.includes(rawCols))return null;
+  const compact=[...new Set(values)];
+  return {declared:compact,rawCols};
+}
+
 function resolveGroupedFeatureRecipe(discovery,rawCols){
   rawCols=finiteInt(rawCols);
   if(rawCols==null||rawCols<=0)return {status:'gap',code:'GROUP_FEATURE_RECIPE_GAP',detail:'raw grouped row width is invalid'};
@@ -112,8 +132,12 @@ function resolveGroupedFeatureRecipe(discovery,rawCols){
     const manifest=manifestRecipe(discovery?.manifest||{},rawCols);
     if(manifest)return {status:'ok',recipe:manifest};
   }catch(error){return {status:'gap',code:'GROUP_FEATURE_RECIPE_GAP',detail:error?.message||String(error)};}
-  const source=sourceRecipe(discovery?.sourceText||'',rawCols);
-  return source?{status:'ok',recipe:source}:{status:'missing',recipe:null};
+  const sourceText=discovery?.sourceText||'';
+  const source=sourceRecipe(sourceText,rawCols);
+  if(source)return {status:'ok',recipe:source};
+  const mismatch=declaredFeatureMismatch(sourceText,rawCols);
+  if(mismatch)return {status:'gap',code:'GROUP_FEATURE_RECIPE_GAP',detail:`source declares feature dimension ${mismatch.declared.join('/')} but raw grouped row width is ${rawCols}; refusing raw-feature downgrade without a proven window recipe`};
+  return {status:'missing',recipe:null};
 }
 
 function featureValue(row,window){
@@ -152,4 +176,4 @@ function wrapStreamingFeatureSource(rowSource,recipe){
   };
 }
 
-module.exports={hannWeight,sourceRecipe,manifestRecipe,resolveGroupedFeatureRecipe,transformRow,wrapStreamingFeatureSource};
+module.exports={hannWeight,sourceRecipe,manifestRecipe,declaredFeatureMismatch,resolveGroupedFeatureRecipe,transformRow,wrapStreamingFeatureSource};
