@@ -20,6 +20,14 @@
     return `full-probe ${mode} ${done}/${target} · expanded ${expanded} · top1 Δ ${changed}`;
   }
 
+  function verifiedRecoveryText(sca){
+    const value=sca?.verifiedRecovery;if(!value)return'';
+    const tokens=Number(value.tokens)||0;
+    const min=Number(value.minCosine),mean=Number(value.meanCosine),threshold=Number(value.threshold);
+    const fmt=(x)=>Number.isFinite(x)?x.toFixed(6):'n/a';
+    return `VERIFIED RECOVERY · ${tokens} tokens · cos min ${fmt(min)} · mean ${fmt(mean)} · gate ${fmt(threshold)} · recovered text hidden`;
+  }
+
   function feedbackLine(feedback){
     if(!feedback)return'';
     const action=feedback.pauseForVerifier?'STOP / VERIFY':feedback.status==='hold'?'HOLD':feedback.status==='adaptive-ready'?'ADAPT':'OBSERVE';
@@ -32,11 +40,12 @@
   function strip(c,replay,sca,feedback){
     if(!c)return'';
     const primary=(c.directions||[]).find((x)=>x.id===c.primaryDirection)||c.directions?.[0];
-    const route=sca?.qualityRoute;const contract=replay?.contracts?.[0];
+    const route=sca?.qualityRoute;const contract=replay?.contracts?.[0];const recovery=verifiedRecoveryText(sca);
     return `<details class="cs55-closure" open>
       <summary><span>AI FLAG CLOSURE</span><b>${esc(c.closed?'VERIFIED / CLOSED':primary?.title||'自动判定中')}</b><code>${Number(c.minStepsToFlag)||0} steps to flag</code><small>${Number(replay?.contractCount)||0} replay contracts${feedback?.nextContractCount?` · ${Number(feedback.nextContractCount)} adaptive`:''}</small><em>${esc(feedback?.pauseForVerifier?'LOCAL VERIFY FIRST':route?`SCA ${route.selectedEngine}`:'AI-ONLY SPRINT')}</em></summary>
       <div class="cs55-closure-list">${(c.directions||[]).map((d,i)=>row(d,i,c.primaryDirection)).join('')}</div>
       ${route?`<div class="cs55-route"><strong>SCA QUALITY ROUTE</strong><span>${esc(route.engine||'batch55')} → ${esc(route.selectedEngine||'unknown')}</span><code>${esc(route.feature?`${route.feature.rawDim??'?'}→${route.feature.effectiveDim??'?'} · ${route.feature.windowFunction||'window'}`:'feature pending')}</code><small>${esc(fullProbeText(route.fullProbe))}</small></div>`:''}
+      ${recovery?`<div class="cs55-route"><strong>VERIFIED RECOVERY</strong><span>${esc(recovery)}</span><code>ANSWER EXTRACTION ONLY</code><small>正文默认隐藏；仅在明确提交时查看 SCA 结果</small></div>`:''}
       ${feedbackLine(feedback)}
       ${contract?`<div class="cs55-replay"><strong>AUTHORIZED REPLAY</strong><span>${esc(contract.probeId||contract.direction||'contract')}</span><code>${esc(contract.contractId||'')}</code><small>显式授权后执行 · 命中 candidate/leak/tool-call 即停并本地验证</small></div>`:''}
     </details>`;
