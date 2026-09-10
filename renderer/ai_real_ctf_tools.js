@@ -9,7 +9,8 @@
     ['2025 CISCN 总决赛','what-is-model','GRAY-BOX MODEL','PARTIAL'],
     ['2026 蓝桥杯决赛','prompt_audit','RAG / PROMPT','PARTIAL'],
     ['2026 软件系统安全赛','CIFAR-10','IMAGE BACKDOOR','PARTIAL'],
-    ['2026 软件系统安全赛','Fake Emotion','NPY / SAMPLE','GAP'],
+    ['2026 软件系统安全赛','Fake Emotion','NPY / SAMPLE','PARTIAL'],
+    ['第五届湾区杯决赛','耄耋','AIGC / FFT','PARTIAL'],
     ['第五届湾区杯决赛','Blind','ASR → SHELL','FULL']
   ];
 
@@ -30,14 +31,14 @@
   }
 
   function emptyResult(){
-    return `<div class="real-ctf-empty"><span>AI / REAL CORPUS</span><strong>8 个公开真题样本待回归</strong><p>运行后同时显示“是否识别到证据模式”和“当前覆盖程度”。PASS 不代表自动解出原题。</p></div>`;
+    return `<div class="real-ctf-empty"><span>AI / REAL CORPUS</span><strong>${CASES.length} 个公开真题样本待回归</strong><p>运行后同时显示“是否识别到证据模式”和“当前覆盖程度”。PASS 不代表自动解出原题。</p></div>`;
   }
 
   function toolPage(){
     const resultHtml=state.toolError?`<div class="error-box">${esc(state.toolError)}</div>`:state.toolResult?renderResult(TOOL,state.toolResult):emptyResult();
     return `<div class="page-head tool-head real-ctf-head"><div><span class="kicker">AI · REAL CHALLENGE REGRESSION</span><h1>国内 AI CTF 真题回归</h1><p>公开题面 / 官方题解 → 最小复现 → NewCyber 实际分析结果。缺口直接保留，不做虚假全绿。</p></div><button class="button ghost" data-view="ai">返回</button></div>
       <div class="real-ctf-workbench">
-        <article class="panel real-ctf-catalog"><div class="result-title"><div><b>公开真题集</b><small>8 CASES · 国内赛事优先</small></div></div><div class="real-ctf-list">${catalogRows()}</div><div class="real-ctf-source-note">公开来源：USTC Hackergame · CTF-Archives · 公开赛事题解。未公开附件细节不会被补写进 fixture。</div></article>
+        <article class="panel real-ctf-catalog"><div class="result-title"><div><b>公开真题集</b><small>${CASES.length} CASES · 国内赛事优先</small></div></div><div class="real-ctf-list">${catalogRows()}</div><div class="real-ctf-source-note">公开来源：USTC Hackergame · CTF-Archives · 公开赛事题解。未公开附件细节不会被补写进 fixture。</div></article>
         <article class="panel real-ctf-results"><div class="result-title"><b>回归结果</b><button class="button primary" data-action="run-tool">运行全部</button></div><textarea id="tool-input" class="real-ctf-hidden-input" aria-hidden="true"></textarea><div id="tool-result">${resultHtml}</div></article>
       </div>`;
   }
