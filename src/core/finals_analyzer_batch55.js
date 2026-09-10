@@ -8,6 +8,17 @@ const {buildReplayFeedback}=require('./ai_replay_feedback_scheduler');
 
 function list(value){return Array.isArray(value)?value:[];}
 function oneLine(value){return String(value??'').replace(/\s+/g,' ').replace(/`/g,"'").trim();}
+function verifiedRecoverySummary(analysis){
+  const value=analysis?.scaAutopilot?.result?.verifiedRecovery||analysis?.scaAutopilot?.verifiedRecovery||null;
+  if(!value)return null;
+  const finite=(x)=>Number.isFinite(Number(x))?Number(x):null;
+  return {
+    method:oneLine(value.method||'contextual-hidden-oracle'),tokens:Number(value.tokens)||0,
+    threshold:finite(value.threshold),minCosine:finite(value.minCosine),meanCosine:finite(value.meanCosine),
+    shortlistHits:Number(value.shortlistHits)||0,fallbackPositions:Number(value.fallbackPositions)||0,fullScanCandidates:Number(value.fullScanCandidates)||0,
+    privacy:'raw-recovered-text-omitted'
+  };
+}
 
 function attachFlagClosure(analysis,closure,replay,feedback=null){
   analysis.aiFlagClosure=closure;analysis.aiRemoteReplay=replay;
@@ -23,6 +34,7 @@ function attachFlagClosure(analysis,closure,replay,feedback=null){
   const old=session.solverLedger.findIndex((item)=>item.id==='ai-flag-closure-sprint');
   const primary=list(closure.directions).find((item)=>item.id===closure.primaryDirection)||closure.directions?.[0];
   const scaRoute=analysis.scaAutopilot?.result?.qualityRoute||null;
+  const recovery=verifiedRecoverySummary(analysis);
   const feedbackActive=feedback&&feedback.status!=='no-observation';
   const effectiveNext=feedbackActive&&closure.primaryDirection==='prompt-llm-security'?feedback.nextBestAction:closure.nextBestAction;
   const ledger={
@@ -34,7 +46,8 @@ function attachFlagClosure(analysis,closure,replay,feedback=null){
       `closure-stage=${primary?.closureStage||'closed'}`,
       `remote-contracts=${replay.contractCount||0}`,
       ...(feedback?[`replay-feedback=${feedback.status}`,`observed=${feedback.trustedMatched||0}`,`next-wave=${feedback.nextContractCount||0}`]:[]),
-      ...(scaRoute?[`sca-engine=${scaRoute.selectedEngine}`,`sca-quality-intent=${scaRoute.qualityIntent?.strong?'strong':'normal'}`]:[])
+      ...(scaRoute?[`sca-engine=${scaRoute.selectedEngine}`,`sca-quality-intent=${scaRoute.qualityIntent?.strong?'strong':'normal'}`]:[]),
+      ...(recovery?[`verified-recovery=${recovery.tokens} tokens`,`contextual-cos-min=${recovery.minCosine==null?'n/a':recovery.minCosine.toFixed(6)}`]:[])
     ],
     detail:closure.closed?'Verified flag 已存在；停止扩展攻击面。':effectiveNext
   };
@@ -51,7 +64,8 @@ function attachFlagClosure(analysis,closure,replay,feedback=null){
   session.aiHandoff.flagClosure={
     primaryDirection:closure.primaryDirection,minStepsToFlag:closure.minStepsToFlag,nextBestAction:effectiveNext,
     blockers:closure.blockers,replayContracts:replay.contracts?.slice(0,16)||[],
-    adaptiveReplayContracts:feedback?.nextContracts?.slice(0,16)||[],replayFeedback:feedback||null,scaQualityRoute:scaRoute
+    adaptiveReplayContracts:feedback?.nextContracts?.slice(0,16)||[],replayFeedback:feedback||null,scaQualityRoute:scaRoute,
+    verifiedRecovery:recovery
   };
   return analysis;
 }
@@ -74,6 +88,7 @@ function buildFlagClosureSection(analysis){
   const c=analysis.aiFlagClosure||analysis.challengeSession?.aiFlagClosure;if(!c)return'';
   const replay=analysis.aiRemoteReplay||analysis.challengeSession?.aiRemoteReplay||{};
   const feedback=analysis.aiReplayFeedback||analysis.challengeSession?.aiReplayFeedback||null;
+  const recovery=verifiedRecoverySummary(analysis);
   const lines=['## AI-Only Flag Closure Sprint','',`- goal：minimum-steps-to-verified-flag`,`- closed：${c.closed?'yes':'no'}`,`- minimum steps：${c.minStepsToFlag}`,`- primary：${oneLine(c.primaryDirection||'closed')}`,`- next：${oneLine(feedback?.status&&feedback.status!=='no-observation'?feedback.nextBestAction:c.nextBestAction)}`,`- remote replay contracts：${Number(replay.contractCount)||0}`,'','### Closure Ranking',''];
   for(const d of list(c.directions))lines.push(`- **${oneLine(d.title)}** · steps=${d.stepsToFlag} · ${oneLine(d.closureStage)} · priority=${d.priority} · next=${oneLine(d.nextBestAction)}`);
   const route=analysis.scaAutopilot?.result?.qualityRoute;
@@ -86,6 +101,9 @@ function buildFlagClosureSection(analysis){
       const mode=fp.actual?'actual':fp.estimated?'estimated':'unavailable';
       lines.push(`- full probe：${fp.executed?'executed':'not-executed'} · ${mode} · rows=${fp.fullScanSucceededRows??fp.fullScanRows??0}/${fp.targetRows||0} · expanded=${fp.fullProbeExpandedRows||0} · top1-changed=${fp.top1ChangedRows||0} · candidates=${fp.candidateCount||0}`);
     }
+  }
+  if(recovery){
+    lines.push('','### Verified Recovery','',`- method：${oneLine(recovery.method)}`,`- tokens：${recovery.tokens}`,`- contextual cosine：min=${recovery.minCosine==null?'n/a':recovery.minCosine.toFixed(6)} · mean=${recovery.meanCosine==null?'n/a':recovery.meanCosine.toFixed(6)} · threshold=${recovery.threshold==null?'n/a':recovery.threshold.toFixed(6)}`,`- fallback positions：${recovery.fallbackPositions} · full-scan candidates=${recovery.fullScanCandidates}`,'- recovered text：omitted from report by default; inspect the explicit SCA result only when required for challenge submission.');
   }
   if(feedback){
     lines.push('','### Replay Feedback','',`- status：${oneLine(feedback.status)}`,`- trusted observations：${Number(feedback.trustedMatched)||0}/${Number(feedback.matchedObservations)||0}`,`- dominant class：${oneLine(feedback.dominantClass||'none')}`,`- pause for verifier：${feedback.pauseForVerifier?'yes':'no'}`,`- next wave：${Number(feedback.nextContractCount)||0}`,`- global budget：${Number(feedback.globalBudget?.attempted)||0}/${Number(feedback.globalBudget?.max)||32}`,`- next：${oneLine(feedback.nextBestAction)}`);
@@ -109,4 +127,4 @@ function buildMarkdownReport(analysis,notes=''){
   return section?`${report.trim()}\n\n${section}\n`:report;
 }
 
-module.exports={...base,scanWorkspace,buildMarkdownReport,buildFlagClosureSection,attachFlagClosure};
+module.exports={...base,scanWorkspace,buildMarkdownReport,buildFlagClosureSection,attachFlagClosure,verifiedRecoverySummary};
