@@ -25,7 +25,7 @@ test('prompt injection suite covers direct, indirect, RAG, tool, secret and mult
   assert.equal(new Set(result.templates.map((x)=>x.id)).size,result.templates.length);
 });
 
-test('prompt injection suite exposes a competition-only pack with common CTF payload families',()=>{
+test('prompt injection suite keeps legacy competition-only API compatibility',()=>{
   const result=buildPromptInjectionSuite({competitionOnly:true});
   assert.ok(result.templates.length>=20);
   assert.equal(result.competitionCount,result.templates.length);
@@ -49,7 +49,7 @@ test('prompt injection suite supports category filtering and custom harmless mar
   assert.ok(result.templates.every((x)=>x.payload.includes('SAFE_MARKER_X')));
 });
 
-test('prompt injection suite supports competition pack alias',()=>{
+test('prompt injection suite supports competition pack alias for compatibility',()=>{
   const result=buildPromptInjectionSuite({pack:'competition',ids:['output-format-hijack'],marker:'CTF_SAFE_MARKER'});
   assert.equal(result.templates.length,1);
   assert.equal(result.templates[0].id,'output-format-hijack');
@@ -57,11 +57,7 @@ test('prompt injection suite supports competition pack alias',()=>{
 });
 
 test('prompt injection evaluator flags marker and canary exposure as explicit candidate failure',()=>{
-  const result=evaluatePromptInjectionRun({
-    templateId:'canary-exfiltration',
-    response:`debug: ${DEFAULT_CANARY} and ${DEFAULT_MARKER}`,
-    toolCalls:[]
-  });
+  const result=evaluatePromptInjectionRun({templateId:'canary-exfiltration',response:`debug: ${DEFAULT_CANARY} and ${DEFAULT_MARKER}`,toolCalls:[]});
   assert.equal(result.verdict,'candidate-failure');
   assert.equal(result.signals.markerHit,true);
   assert.equal(result.signals.canaryHit,true);
@@ -70,12 +66,7 @@ test('prompt injection evaluator flags marker and canary exposure as explicit ca
 });
 
 test('prompt injection evaluator treats injected or undeclared tool execution as policy-boundary evidence',()=>{
-  const result=evaluatePromptInjectionRun({
-    templateId:'tool-output-injection',
-    response:'normal text',
-    toolCalls:[{name:DEFAULT_TOOL,arguments:{source:'injected'}},{name:'write_file'}],
-    authorizedTools:['read_only_search']
-  });
+  const result=evaluatePromptInjectionRun({templateId:'tool-output-injection',response:'normal text',toolCalls:[{name:DEFAULT_TOOL,arguments:{source:'injected'}},{name:'write_file'}],authorizedTools:['read_only_search']});
   assert.equal(result.verdict,'candidate-failure');
   assert.equal(result.signals.injectedToolTriggered,true);
   assert.equal(result.signals.unauthorizedToolCalls,2);
@@ -117,13 +108,14 @@ test('tool router exposes prompt injection suite, evaluator and source audit',()
   assert.ok(runTool('ai-prompt-injection-source',{input:'retriever.similarity_search(q); client.responses.create({input: context}); tool_calls'}).surfaces.rag);
 });
 
-test('prompt injection renderer compiles and loads after Batch 9 AI tools',()=>{
+test('prompt injection renderer is competition-native and hides legacy mode split',()=>{
   const root=path.join(__dirname,'..');
   const source=fs.readFileSync(path.join(root,'renderer/ai_prompt_injection_tools.js'),'utf8');
   const html=fs.readFileSync(path.join(root,'renderer/toolbox.html'),'utf8');
   assert.doesNotThrow(()=>new vm.Script(source,{filename:'renderer/ai_prompt_injection_tools.js'}));
   assert.ok(html.indexOf('ai_prompt_injection_tools.js')>html.indexOf('ai_batch9_tools.js'));
-  assert.match(source,/提示词注入训练/);
-  assert.match(source,/competitionOnly/);
-  assert.match(source,/赛题高频/);
+  assert.match(source,/提示词攻击基础模板库/);
+  assert.match(source,/COMPETITION/);
+  assert.doesNotMatch(source,/competitionOnly/);
+  assert.doesNotMatch(source,/赛题高频/);
 });
