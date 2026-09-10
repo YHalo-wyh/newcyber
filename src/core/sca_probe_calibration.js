@@ -5,6 +5,8 @@ const {fitLeakageProfile,rankProbeCandidates}=require('./side_channel_probe');
 const MAX_TRAIN_ROWS=4096;
 const MAX_VALIDATE_ROWS=128;
 const MAX_FULL_SAMPLE_ROWS=128;
+const MAX_CALIBRATED_CANDIDATES=200000;
+const MAX_CALIBRATED_SCORE_OPS=60000000;
 
 function list(value){return Array.isArray(value)?value:[];}
 function dot(a,b){let s=0;for(let i=0;i<a.length;i++)s+=Number(a[i])*Number(b[i]);return s;}
@@ -132,20 +134,60 @@ function fitProbeCalibration({hiddenStates,profileTokenSequences,probeMatrix,pro
   return {status:'ok',summary,project:best.model.project};
 }
 
-function rerankCandidateShortlists({hiddenStates,candidates,project,probeMatrix,probeOptions}={}){
+function probeShape(probeMatrix,orientation){
+  if(!Array.isArray(probeMatrix)||!probeMatrix.length||!Array.isArray(probeMatrix[0])||!probeMatrix[0].length)return null;
+  const rows=probeMatrix.length,cols=probeMatrix[0].length;
+  if(probeMatrix.some((row)=>!Array.isArray(row)||row.length!==cols))return null;
+  return orientation==='candidate-rows'?{candidateCount:rows,hiddenDim:cols}:{candidateCount:cols,hiddenDim:rows};
+}
+
+function rankProjectedFullProbe(projected,probeMatrix,probeOptions){
+  const orientation=probeOptions?.orientation;const shape=probeShape(probeMatrix,orientation);const ids=list(probeOptions?.candidateIds).map(Number);
+  if(!shape||!['candidate-rows','candidate-cols'].includes(orientation))return {status:'not-applicable',reason:'probe shape/orientation unavailable'};
+  if(projected.length!==shape.hiddenDim||ids.length!==shape.candidateCount)return {status:'not-applicable',reason:'calibrated probe dimensions/candidate map mismatch'};
+  if(shape.candidateCount>MAX_CALIBRATED_CANDIDATES)return {status:'budget-gap',reason:`candidate count ${shape.candidateCount} exceeds ${MAX_CALIBRATED_CANDIDATES}`};
+  const metric=String(probeOptions?.metric||'dot').toLowerCase();if(!['dot','cosine','negative-l2'].includes(metric))return {status:'not-applicable',reason:`unsupported probe metric ${metric}`};
+  const hnorm=norm(projected)||1;const ranked=[];
+  for(let candidate=0;candidate<shape.candidateCount;candidate++){
+    let score=0,vnorm2=0,l2=0;
+    for(let d=0;d<shape.hiddenDim;d++){
+      const v=Number(orientation==='candidate-rows'?probeMatrix[candidate][d]:probeMatrix[d][candidate]);const h=Number(projected[d]);
+      if(!Number.isFinite(v)||!Number.isFinite(h))return {status:'not-applicable',reason:'probe contains non-finite value'};
+      if(metric==='negative-l2'){const e=h-v;l2+=e*e;}else{score+=h*v;if(metric==='cosine')vnorm2+=v*v;}
+    }
+    if(metric==='negative-l2')score=-l2;else if(metric==='cosine')score/=hnorm*(Math.sqrt(vnorm2)||1);
+    ranked.push({index:candidate,tokenId:ids[candidate],score});
+  }
+  ranked.sort((a,b)=>b.score-a.score||a.index-b.index);
+  const topK=Math.max(1,Math.min(256,Number(probeOptions?.topK)||32));
+  return {status:'ok',top:ranked.slice(0,topK),candidates:shape.candidateCount,hiddenDim:shape.hiddenDim};
+}
+
+function rerankCandidateShortlists({hiddenStates,candidates,project,probeMatrix,probeOptions,options={}}={}){
   const hidden=list(hiddenStates),rows=list(candidates),candidateIds=list(probeOptions?.candidateIds).map(Number);
   if(hidden.length!==rows.length||typeof project!=='function')return {status:'not-applicable',reason:'target hidden/candidate rows unavailable'};
+  const shape=probeShape(probeMatrix,probeOptions?.orientation);if(!shape||shape.hiddenDim!==(hidden[0]?.length||0)||candidateIds.length!==shape.candidateCount)return {status:'not-applicable',reason:'probe/candidate dimensions unavailable'};
+  const workPerRow=shape.candidateCount*shape.hiddenDim;const requestedFullRows=Math.max(0,Math.min(hidden.length,Number(options.fullProbeRows??hidden.length)));
+  const fullScanRows=workPerRow>0?Math.min(requestedFullRows,Math.floor(MAX_CALIBRATED_SCORE_OPS/workPerRow)):0;
   const idToIndex=new Map();candidateIds.forEach((id,index)=>{if(!idToIndex.has(Number(id)))idToIndex.set(Number(id),index);});
-  const reranked=[];
+  const reranked=[];let fullProbeRecovered=0;
   for(let rowIndex=0;rowIndex<rows.length;rowIndex++){
+    const projected=project(hidden[rowIndex]);
+    if(rowIndex<fullScanRows){
+      const full=rankProjectedFullProbe(projected,probeMatrix,probeOptions);
+      if(full.status==='ok'){
+        const prior=new Set(list(rows[rowIndex]).map((item)=>Number(item?.tokenId)));
+        if(full.top.some((item)=>!prior.has(Number(item.tokenId))))fullProbeRecovered+=1;
+        reranked.push(full.top);continue;
+      }
+    }
     const ids=list(rows[rowIndex]).map((item)=>Number(item?.tokenId)).filter((id)=>idToIndex.has(id));
     if(!ids.length){reranked.push(rows[rowIndex]);continue;}
     const vectors=ids.map((id)=>probeVector(probeMatrix,probeOptions.orientation,idToIndex.get(id)));
-    const projected=project(hidden[rowIndex]);
     const ranking=rankProbeCandidates(projected,vectors,{orientation:'candidate-rows',metric:probeOptions.metric,candidateIds:ids,topK:Math.min(ids.length,Number(probeOptions.topK)||ids.length)});
     reranked.push(ranking.status==='ok'?ranking.top:rows[rowIndex]);
   }
-  return {schema:'newcyber.sca-calibrated-shortlist.v1',status:'ok',rows:reranked.length,candidates:reranked};
+  return {schema:'newcyber.sca-calibrated-shortlist.v2',status:'ok',rows:reranked.length,candidates:reranked,fullScanRows,fullProbeRecovered,workBudget:MAX_CALIBRATED_SCORE_OPS};
 }
 
-module.exports={probeVector,applyLinearProfile,fitProbeCalibration,rerankCandidateShortlists};
+module.exports={MAX_CALIBRATED_SCORE_OPS,probeVector,applyLinearProfile,fitProbeCalibration,rankProjectedFullProbe,rerankCandidateShortlists};
