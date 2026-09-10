@@ -34,6 +34,25 @@ test('Batch55 closure scheduler prioritizes an active SCA chain near oracle over
   assert.match(privacy.nextBestAction,/calibrated|full-probe|oracle/i);
 });
 
+test('Batch55 verified SCA prompt recovery is one answer-extraction step from closure but is not a solved flag',()=>{
+  const analysis=baseAnalysis({
+    files:[{path:'profiling_power.npy',metadata:{description:'power side channel'}}],
+    scaAutopilot:{result:{
+      status:'verified-recovery',flag:null,recoveredText:'private challenge recovery',
+      verifiedRecovery:{method:'contextual-hidden-oracle',tokens:236,threshold:.99,minCosine:.9991,meanCosine:.9998}
+    }}
+  });
+  const autopilot=buildFiveDirectionAutopilot(analysis);
+  const closure=buildFlagClosureScheduler(analysis,autopilot);
+  const privacy=closure.directions.find((d)=>d.id==='privacy-leakage');
+  assert.equal(closure.closed,false);
+  assert.equal(closure.primaryDirection,'privacy-leakage');
+  assert.equal(privacy.stepsToFlag,1);
+  assert.equal(privacy.closureStage,'verified-recovery-needs-answer-extraction');
+  assert.ok(privacy.blockers.includes('CHALLENGE_ANSWER_EXTRACTION'));
+  assert.match(privacy.nextBestAction,/不要重跑恢复|提交格式|checker/);
+});
+
 test('Batch55 plain prompt evidence plus a top-level candidates field never fabricates a Prompt candidate',()=>{
   const analysis=baseAnalysis({files:[{path:'prompt_notes.txt',metadata:{description:'prompt agent rag tool'}}],candidates:{flags:[],other:[]}});
   const autopilot=buildFiveDirectionAutopilot(analysis);
@@ -107,14 +126,34 @@ test('Batch55 workspace attachment publishes flag distance, replay contracts and
   assert.match(report,/Authorized Replay Contracts|remote replay contracts/);
 });
 
-test('Batch55 UI is a de-carded AI closure strip with no network execution code',()=>{
+test('Batch55 verified recovery handoff/report exposes metrics but omits recovered sensitive text',()=>{
+  const secret='SENSITIVE_RECOVERED_TEXT_MUST_NOT_RENDER';
+  const analysis=baseAnalysis({
+    scaAutopilot:{result:{status:'verified-recovery',recoveredText:secret,verifiedRecovery:{method:'contextual-hidden-oracle',tokens:236,threshold:.99,minCosine:.9991,meanCosine:.9998,shortlistHits:230,fallbackPositions:6,fullScanCandidates:42}}}
+  });
+  analysis.aiCompetitionAutopilot=buildFiveDirectionAutopilot(analysis);
+  const closure=buildFlagClosureScheduler(analysis,analysis.aiCompetitionAutopilot);
+  const replay=buildRemoteReplayPlan(analysis.aiCompetitionAutopilot,closure,{});
+  batch55.attachFlagClosure(analysis,closure,replay);
+  const handoff=analysis.challengeSession.aiHandoff.flagClosure.verifiedRecovery;
+  assert.equal(handoff.tokens,236);
+  assert.equal(Object.prototype.hasOwnProperty.call(handoff,'recoveredText'),false);
+  const report=batch55.buildFlagClosureSection(analysis);
+  assert.match(report,/### Verified Recovery/);
+  assert.match(report,/tokens：236/);
+  assert.match(report,/recovered text：omitted/i);
+  assert.doesNotMatch(report,new RegExp(secret));
+});
+
+test('Batch55 UI is a de-carded AI closure strip with no network execution code or recovered text access',()=>{
   const source=read('renderer/challenge_session_batch55.js');
   const css=read('renderer/styles/challenge_session_batch55.css');
   const html=read('renderer/toolbox.html');
   assert.doesNotThrow(()=>new vm.Script(source,{filename:'challenge_session_batch55.js'}));
-  for(const token of ['AI FLAG CLOSURE','SCA QUALITY ROUTE','AUTHORIZED REPLAY','steps to flag'])assert.ok(source.includes(token),token);
+  for(const token of ['AI FLAG CLOSURE','SCA QUALITY ROUTE','VERIFIED RECOVERY','ANSWER EXTRACTION ONLY','AUTHORIZED REPLAY','steps to flag'])assert.ok(source.includes(token),token);
   assert.ok(html.indexOf('challenge_session_batch55.js')>html.indexOf('challenge_session_batch54.js'));
   assert.ok(html.includes('styles/challenge_session_batch55.css'));
+  assert.doesNotMatch(source,/recoveredText/);
   assert.doesNotMatch(source,/fetch\s*\(|XMLHttpRequest|require\(['"]https?['"]\)|https?\.request/i);
   assert.doesNotMatch(css,/grid-template-columns:\s*repeat\(/i);
 });
