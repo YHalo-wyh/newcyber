@@ -1,6 +1,6 @@
 'use strict';
 
-const {fitLeakageProfile}=require('./side_channel_probe');
+const {fitLeakageProfile,rankProbeCandidates}=require('./side_channel_probe');
 
 const MAX_TRAIN_ROWS=4096;
 const MAX_VALIDATE_ROWS=128;
@@ -132,4 +132,20 @@ function fitProbeCalibration({hiddenStates,profileTokenSequences,probeMatrix,pro
   return {status:'ok',summary,project:best.model.project};
 }
 
-module.exports={probeVector,applyLinearProfile,fitProbeCalibration};
+function rerankCandidateShortlists({hiddenStates,candidates,project,probeMatrix,probeOptions}={}){
+  const hidden=list(hiddenStates),rows=list(candidates),candidateIds=list(probeOptions?.candidateIds).map(Number);
+  if(hidden.length!==rows.length||typeof project!=='function')return {status:'not-applicable',reason:'target hidden/candidate rows unavailable'};
+  const idToIndex=new Map();candidateIds.forEach((id,index)=>{if(!idToIndex.has(Number(id)))idToIndex.set(Number(id),index);});
+  const reranked=[];
+  for(let rowIndex=0;rowIndex<rows.length;rowIndex++){
+    const ids=list(rows[rowIndex]).map((item)=>Number(item?.tokenId)).filter((id)=>idToIndex.has(id));
+    if(!ids.length){reranked.push(rows[rowIndex]);continue;}
+    const vectors=ids.map((id)=>probeVector(probeMatrix,probeOptions.orientation,idToIndex.get(id)));
+    const projected=project(hidden[rowIndex]);
+    const ranking=rankProbeCandidates(projected,vectors,{orientation:'candidate-rows',metric:probeOptions.metric,candidateIds:ids,topK:Math.min(ids.length,Number(probeOptions.topK)||ids.length)});
+    reranked.push(ranking.status==='ok'?ranking.top:rows[rowIndex]);
+  }
+  return {schema:'newcyber.sca-calibrated-shortlist.v1',status:'ok',rows:reranked.length,candidates:reranked};
+}
+
+module.exports={probeVector,applyLinearProfile,fitProbeCalibration,rerankCandidateShortlists};
