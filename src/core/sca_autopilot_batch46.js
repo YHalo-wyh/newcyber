@@ -3,7 +3,7 @@
 const fs=require('fs/promises');
 const os=require('os');
 const path=require('path');
-const batch42=require('./sca_autopilot_batch42');
+const batch42=require('./sca_autopilot_grouped_core');
 const {readNpyHeaderPath}=require('./power_side_channel');
 const {openNpyRowSource}=require('./npy_row_source');
 const {resolveGroupedLayout}=require('./sca_grouped_leakage');
