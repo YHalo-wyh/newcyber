@@ -88,7 +88,7 @@ test('Batch46 accepts only strongly named source label lists as profiling proven
   const result=await resolveProfileTokenSequences(discovery,{expectedTokens:3});
   assert.equal(result.status,'ok');
   assert.deepEqual(result.sequences,[[7],[9],[11]]);
-  assert.match(result.source,/PROFILE_TOKEN_IDS/);
+  assert.match(result.source,/profile_token_ids/i);
   const negative=await resolveProfileTokenSequences({...discovery,sourceText:'noise=[7,9,11]\n'},{expectedTokens:3});
   assert.equal(negative.code,'PROFILE_LABEL_SOURCE_GAP');
 });
@@ -101,7 +101,7 @@ test('Batch46 replays provenance-backed labels through the existing Batch42 grou
   assert.equal(result.status,'flag-candidate',diagnostic);
   assert.equal(result.flagCandidate,bundle.target,diagnostic);
   assert.equal(result.profileLabelSource.count,bundle.profileIds.length,diagnostic);
-  assert.match(result.profileLabelSource.source,/PROFILE_TOKEN_IDS/,diagnostic);
+  assert.match(result.profileLabelSource.source,/profile_token_ids/i,diagnostic);
   assert.equal(result.layout.groupsPerToken,2,diagnostic);
   assert.equal(result.layout.hiddenPerGroup,2,diagnostic);
   assert.ok(result.stages.some((item)=>item.id==='profile-label'&&item.status==='ok'),diagnostic);
