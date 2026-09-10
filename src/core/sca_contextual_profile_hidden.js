@@ -55,8 +55,13 @@ function extractDelimitedBody(text,openIndex,openChar,closeChar){
 }
 function extractBoundaryList(text,start){
   let cursor=start;while(cursor<text.length&&/\s/.test(text[cursor]))cursor+=1;
+  if(text[cursor]==='[')return extractDelimitedBody(text,cursor,'[',']');
   if(text[cursor]==='(')return extractDelimitedBody(text,cursor,'(',')');
-  const open=text.indexOf('[',start);if(open<0)return null;
+  const prefix=text.slice(cursor,cursor+96);
+  const wrapper=prefix.match(/^(?:(?:np|numpy)\.(?:array|asarray)|torch\.tensor)\s*\(/i);
+  if(!wrapper)return null;
+  const open=text.indexOf('[',cursor+wrapper[0].length);
+  if(open<0||open-cursor>512)return null;
   return extractDelimitedBody(text,open,'[',']');
 }
 function parseStaticIntegerList(body){
