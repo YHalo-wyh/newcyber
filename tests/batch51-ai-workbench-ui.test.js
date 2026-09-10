@@ -1,5 +1,4 @@
 'use strict';
-
 const test=require('node:test');
 const assert=require('node:assert/strict');
 const fs=require('node:fs');
@@ -26,9 +25,9 @@ test('Batch51 workbench is loaded after candidate/runtime surfaces and before sa
   assert.ok(html.indexOf(name)<html.indexOf('ai_sample_forensics_tools.js'));
 });
 
-test('Batch51 Tool Router exposes real-corpus, pressure and two new analyzers',()=>{
+test('Batch51 Tool Router keeps its analyzers while allowing Batch51-or-newer real-corpus wrapper',()=>{
   const router=read('src/core/tool_router.js');
-  assert.match(router,/ai_real_ctf_regression_batch51/);
+  assert.match(router,/ai_real_ctf_regression_batch(?:51|5[2-9]|[6-9]\d)/);
   assert.match(router,/ai-transform-exfiltration/);
   assert.match(router,/ai-torchscript-side-effect/);
   assert.match(router,/ai-batch51-pressure-regression/);
