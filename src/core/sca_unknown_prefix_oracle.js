@@ -2,7 +2,9 @@
 
 const {runTransformerDecode}=require('./transformer_oracle');
 
-const MAX_SEEDS=4;
+const MAX_SEEDS=16;
+const MAX_SCREEN_TOKENS=12;
+const MAX_FINALISTS=2;
 const MAX_TARGET_TOKENS=256;
 const MAX_REPLAY_STEPS=2048;
 
@@ -39,35 +41,76 @@ function replayScore(item){
   return item.agreement.hitRate*4+item.agreement.meanReciprocalRank*2+item.agreement.top1Rate;
 }
 
-async function runUnknownPrefixOracle(model,{targetCandidates,tokenizer,topK=8,seedBeam=2,maxTokens=null}={},options={}){
+function bestDistinctSeeds(attempts,count){
+  const seen=new Set();const out=[];
+  for(const item of [...attempts].sort((a,b)=>replayScore(b)-replayScore(a))){
+    if(seen.has(item.seed))continue;
+    seen.add(item.seed);out.push(item.seed);
+    if(out.length>=count)break;
+  }
+  return out;
+}
+
+async function replay(decodeRunner,model,{mode,seed,tokenizer,maxNewTokens,topK,candidateTokenIdsByStep,rows},options){
+  const oracle=await decodeRunner(model,{promptTokenIds:[seed],tokenizer,maxNewTokens,topK,...(candidateTokenIdsByStep?{candidateTokenIdsByStep}: {})},options);
+  return summarize(mode,seed,oracle,rows,tokenizer);
+}
+
+async function runUnknownPrefixOracle(model,{targetCandidates,tokenizer,topK=8,seedBeam=16,maxTokens=null,screenTokens=8,finalistCount=2}={},options={}){
   const rows=list(targetCandidates);
   if(rows.length<2)return {schema:'newcyber.sca-unknown-prefix-oracle.v1',status:'not-applicable',reason:'need at least two recovered token positions'};
   if(rows.length>MAX_TARGET_TOKENS)return {schema:'newcyber.sca-unknown-prefix-oracle.v1',status:'gap',code:'UNKNOWN_PREFIX_TOKEN_BUDGET_GAP',detail:`target tokens=${rows.length} exceeds ${MAX_TARGET_TOKENS}`};
   const first=candidateIds(rows)[0];
   if(!first.length)return {schema:'newcyber.sca-unknown-prefix-oracle.v1',status:'not-applicable',reason:'first position has no token candidates'};
-  const seeds=first.slice(0,Math.max(1,Math.min(MAX_SEEDS,Number(seedBeam)||2)));
+
+  const seeds=first.slice(0,Math.max(1,Math.min(MAX_SEEDS,Number(seedBeam)||16)));
   const newTokens=Math.max(1,Math.min(rows.length-1,Number(maxTokens)||rows.length-1));
-  const plannedSteps=seeds.length*newTokens*2;
+  const screenNewTokens=Math.max(1,Math.min(newTokens,MAX_SCREEN_TOKENS,Number(screenTokens)||8));
+  const finalists=Math.max(1,Math.min(MAX_FINALISTS,Number(finalistCount)||2,seeds.length));
+  const plannedSteps=seeds.length*screenNewTokens+finalists*newTokens*2;
   if(plannedSteps>MAX_REPLAY_STEPS)return {schema:'newcyber.sca-unknown-prefix-oracle.v1',status:'gap',code:'UNKNOWN_PREFIX_REPLAY_BUDGET_GAP',detail:`planned oracle steps=${plannedSteps} exceeds ${MAX_REPLAY_STEPS}`};
+
   const decodeRunner=typeof options.decodeRunner==='function'?options.decodeRunner:runTransformerDecode;
   const replayOptions={...options};delete replayOptions.decodeRunner;
   const attempts=[];
   const guidedByStep=candidateIds(rows.slice(1));
+  const oracleTopK=Math.max(1,Math.min(64,Number(topK)||8));
 
+  // Phase 1: cheaply screen a wider first-token beam. This fixes the old failure mode
+  // where the correct first token was present in the leakage shortlist but outside top-2.
   for(const seed of seeds){
-    const oracle=await decodeRunner(model,{promptTokenIds:[seed],tokenizer,maxNewTokens:newTokens,topK:Math.max(1,Math.min(64,Number(topK)||8)),candidateTokenIdsByStep:guidedByStep},replayOptions);
-    const item=summarize('candidate-guided',seed,oracle,rows,tokenizer);attempts.push(item);
-    if(item.flag)return {schema:'newcyber.sca-unknown-prefix-oracle.v1',status:'flag-recovered',mode:item.mode,flag:item.flag,recoveredTokenIds:item.sequence,recoveredText:item.text,agreement:item.agreement,attempts,seedCount:seeds.length};
+    const item=await replay(decodeRunner,model,{
+      mode:'candidate-guided-screen',seed,tokenizer,maxNewTokens:screenNewTokens,topK:oracleTopK,
+      candidateTokenIdsByStep:guidedByStep.slice(0,screenNewTokens),rows
+    },replayOptions);
+    attempts.push(item);
+    if(item.flag)return {schema:'newcyber.sca-unknown-prefix-oracle.v1',status:'flag-recovered',mode:item.mode,flag:item.flag,recoveredTokenIds:item.sequence,recoveredText:item.text,agreement:item.agreement,attempts,seedCount:seeds.length,screenTokens:screenNewTokens};
   }
 
-  for(const seed of seeds){
-    const oracle=await decodeRunner(model,{promptTokenIds:[seed],tokenizer,maxNewTokens:newTokens,topK:Math.max(1,Math.min(64,Number(topK)||8))},replayOptions);
-    const item=summarize('full-vocab-fallback',seed,oracle,rows,tokenizer);attempts.push(item);
-    if(item.flag)return {schema:'newcyber.sca-unknown-prefix-oracle.v1',status:'flag-recovered',mode:item.mode,flag:item.flag,recoveredTokenIds:item.sequence,recoveredText:item.text,agreement:item.agreement,attempts,seedCount:seeds.length};
+  const finalistSeeds=bestDistinctSeeds(attempts,finalists);
+
+  // Phase 2: replay only the strongest leakage-consistent seeds for the whole target.
+  for(const seed of finalistSeeds){
+    const item=await replay(decodeRunner,model,{
+      mode:'candidate-guided',seed,tokenizer,maxNewTokens:newTokens,topK:oracleTopK,
+      candidateTokenIdsByStep:guidedByStep,rows
+    },replayOptions);
+    attempts.push(item);
+    if(item.flag)return {schema:'newcyber.sca-unknown-prefix-oracle.v1',status:'flag-recovered',mode:item.mode,flag:item.flag,recoveredTokenIds:item.sequence,recoveredText:item.text,agreement:item.agreement,attempts,seedCount:seeds.length,screenTokens:screenNewTokens,finalistSeeds};
+  }
+
+  // Phase 3: keep the selected seed but remove per-step leakage restrictions.
+  // “full-vocab” here means unrestricted generation after the bounded seed selection.
+  for(const seed of finalistSeeds){
+    const item=await replay(decodeRunner,model,{
+      mode:'full-vocab-fallback',seed,tokenizer,maxNewTokens:newTokens,topK:oracleTopK,rows
+    },replayOptions);
+    attempts.push(item);
+    if(item.flag)return {schema:'newcyber.sca-unknown-prefix-oracle.v1',status:'flag-recovered',mode:item.mode,flag:item.flag,recoveredTokenIds:item.sequence,recoveredText:item.text,agreement:item.agreement,attempts,seedCount:seeds.length,screenTokens:screenNewTokens,finalistSeeds};
   }
 
   attempts.sort((a,b)=>replayScore(b)-replayScore(a));const best=attempts[0]||null;
-  return {schema:'newcyber.sca-unknown-prefix-oracle.v1',status:'decoded-no-flag',mode:best?.mode||null,flag:null,recoveredTokenIds:best?.sequence||[],recoveredText:best?.text||null,agreement:best?.agreement||null,attempts,seedCount:seeds.length};
+  return {schema:'newcyber.sca-unknown-prefix-oracle.v1',status:'decoded-no-flag',mode:best?.mode||null,flag:null,recoveredTokenIds:best?.sequence||[],recoveredText:best?.text||null,agreement:best?.agreement||null,attempts,seedCount:seeds.length,screenTokens:screenNewTokens,finalistSeeds};
 }
 
 module.exports={candidateIds,agreement,runUnknownPrefixOracle};
