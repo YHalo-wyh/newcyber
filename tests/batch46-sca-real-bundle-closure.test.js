@@ -89,13 +89,14 @@ test('Batch46 accepts only strongly named source label lists as profiling proven
 test('Batch46 replays provenance-backed labels through the existing Batch42 grouped solver',async(t)=>{
   const bundle=await makeBundle({withSourceLabels:true});t.after(()=>fsp.rm(bundle.root,{recursive:true,force:true}));
   const result=await runScaAutopilotPaths(await paths(bundle.root),{ort:fakeOrt(),provider:'cpu',version:'fixture'});
-  assert.equal(result.schema,'newcyber.sca-autopilot.v3');
-  assert.equal(result.status,'flag-candidate');
-  assert.equal(result.flagCandidate,bundle.target);
-  assert.equal(result.profileLabelSource.count,bundle.profileIds.length);
-  assert.match(result.profileLabelSource.source,/PROFILE_TOKEN_IDS/);
-  assert.equal(result.layout.groupsPerToken,2);
-  assert.equal(result.layout.hiddenPerGroup,2);
-  assert.ok(result.stages.some((item)=>item.id==='profile-label'&&item.status==='ok'));
-  assert.ok(result.stages.some((item)=>item.id==='free-probe'&&item.status==='ok'));
+  const diagnostic=JSON.stringify({status:result.status,gap:result.gap,stages:result.stages,layout:result.layout,shape:result.shape},null,2);
+  assert.equal(result.schema,'newcyber.sca-autopilot.v3',diagnostic);
+  assert.equal(result.status,'flag-candidate',diagnostic);
+  assert.equal(result.flagCandidate,bundle.target,diagnostic);
+  assert.equal(result.profileLabelSource.count,bundle.profileIds.length,diagnostic);
+  assert.match(result.profileLabelSource.source,/PROFILE_TOKEN_IDS/,diagnostic);
+  assert.equal(result.layout.groupsPerToken,2,diagnostic);
+  assert.equal(result.layout.hiddenPerGroup,2,diagnostic);
+  assert.ok(result.stages.some((item)=>item.id==='profile-label'&&item.status==='ok'),diagnostic);
+  assert.ok(result.stages.some((item)=>item.id==='free-probe'&&item.status==='ok'),diagnostic);
 });
