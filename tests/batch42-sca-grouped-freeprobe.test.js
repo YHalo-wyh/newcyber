@@ -10,6 +10,7 @@ const {bytesToUnicodeMaps}=require('../src/core/gpt2_bpe');
 const {openNpyRowSource}=require('../src/core/npy_row_source');
 const {resolveGroupedLayout}=require('../src/core/sca_grouped_leakage');
 const {runScaAutopilotPaths}=require('../src/core/sca_autopilot_batch42');
+const groupedCore=require('../src/core/sca_autopilot_grouped_core');
 const {promoteWorkspaceScaResult}=require('../src/core/finals_analyzer_batch35');
 
 function npy(values,shape,descr='<f4'){
@@ -172,23 +173,41 @@ test('Batch42 object-array reader rejects an untrusted pickle global before any 
   await assert.rejects(()=>openNpyRowSource(file),/os\.system.*allowlist/i);
 });
 
-test('Batch42 grouped SCA recovers an unknown-prefix flag as candidate without promoting it to verified',async(t)=>{
+test('Batch42 frozen grouped core keeps unknown-prefix free-probe flag at candidate confidence',async(t)=>{
+  const bundle=await makeGroupedBundle();
+  t.after(()=>fsp.rm(bundle.root,{recursive:true,force:true}));
+  const paths=(await fsp.readdir(bundle.root)).map((name)=>path.join(bundle.root,name));
+  const result=await groupedCore.runGroupedScaAutopilotPaths(paths,{ort:fakeOrt(),provider:'cpu',version:'fixture'});
+  assert.equal(result.status,'flag-candidate');
+  assert.equal(result.flag,null);
+  assert.equal(result.flagCandidate,bundle.target);
+  assert.equal(result.freeProbe.text,bundle.target);
+  assert.ok(result.stages.some((item)=>item.id==='free-probe'&&item.status==='ok'));
+  assert.ok(result.stages.some((item)=>item.id==='flag-candidate'&&item.status==='ok'));
+});
+
+test('Batch42 modern compatibility may promote only after complete contextual hidden verification',async(t)=>{
   const bundle=await makeGroupedBundle();
   t.after(()=>fsp.rm(bundle.root,{recursive:true,force:true}));
   const paths=(await fsp.readdir(bundle.root)).map((name)=>path.join(bundle.root,name));
   const result=await runScaAutopilotPaths(paths,{ort:fakeOrt(),provider:'cpu',version:'fixture'});
-  assert.equal(result.status,'flag-candidate');
-  assert.equal(result.flag,null);
-  assert.equal(result.flagCandidate,bundle.target);
+  const diagnostic=JSON.stringify({status:result.status,flag:result.flag,contextual:result.contextualHiddenOracle,verifiedRecovery:result.verifiedRecovery},null,2);
+  assert.equal(result.status,'flag-recovered',diagnostic);
+  assert.equal(result.flag,bundle.target,diagnostic);
   assert.equal(result.layout.groupsPerToken,2);
   assert.equal(result.layout.hiddenPerGroup,2);
   assert.equal(result.profile.hiddenDim,4);
   assert.equal(result.profile.groupsPerToken,2);
   assert.ok(result.profile.r2>.999999);
   assert.equal(result.freeProbe.text,bundle.target);
+  assert.equal(result.contextualHiddenOracle.status,'decoded',diagnostic);
+  assert.equal(result.contextualHiddenOracle.recoveredText,bundle.target,diagnostic);
+  assert.equal(result.contextualHiddenOracle.recoveredTokenIds.length,Buffer.byteLength(bundle.target),diagnostic);
+  assert.ok(result.contextualHiddenOracle.positions.every((item)=>item.status==='matched'&&item.cosine>=result.contextualHiddenOracle.threshold),diagnostic);
+  assert.equal(result.verifiedRecovery.method,'contextual-hidden-oracle',diagnostic);
   assert.ok(result.stages.some((item)=>item.id==='group-layout'&&item.status==='ok'));
   assert.ok(result.stages.some((item)=>item.id==='free-probe'&&item.status==='ok'));
-  assert.ok(result.stages.some((item)=>item.id==='flag-candidate'&&item.status==='ok'));
+  assert.ok(result.stages.some((item)=>item.id==='flag'&&item.status==='ok'));
 });
 
 test('Batch42 Workspace promotion keeps free-probe flags as candidate confidence',()=>{
