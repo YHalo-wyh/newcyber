@@ -72,8 +72,8 @@
 
       <section class="home-lower-grid">
         <article class="home-real-corpus">
-          <div class="home-section-head"><div><span>REAL CORPUS</span><strong>国内 AI CTF 真题成熟度</strong></div><span class="home-count-badge">11 CASES</span></div>
-          <div class="home-corpus-line"><span>Hackergame</span><span>SUCTF</span><span>CISCN / 长城杯</span><span>蓝桥杯</span><span>软件系统安全赛</span><span>湾区杯</span></div>
+          <div class="home-section-head"><div><span>REAL CORPUS</span><strong>国内 AI CTF 真题成熟度</strong></div><span class="home-count-badge">13 CASES</span></div>
+          <div class="home-corpus-line"><span>Hackergame</span><span>SUCTF</span><span>CISCN / 长城杯</span><span>蓝桥杯</span><span>软件系统安全赛</span><span>湾区杯</span><span>用户真题包</span></div>
           <p>Recognized → Candidate → Verified 分层统计；识别到证据不再等同于自动做出原题。</p>
           <button class="home-inline-action" data-tool="ai-real-ctf-regression"><span>运行成熟度回归</span><em>AI →</em></button>
         </article>
