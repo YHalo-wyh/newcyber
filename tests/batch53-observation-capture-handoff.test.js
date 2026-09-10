@@ -173,7 +173,11 @@ test('Batch53 UI is a line-based observation handoff timeline loaded after Batch
   const css=read('renderer/styles/challenge_session_batch53.css');
   const html=read('renderer/toolbox.html');
   assert.doesNotThrow(()=>new vm.Script(source,{filename:'challenge_session_batch53.js'}));
-  for(const token of ['OBSERVATION HANDOFF','WAITING','SIDECAR-ONLY / NO MODEL EXEC / NO REMOTE','cs53-observation-row'])assert.ok(source.includes(token),token);
+  for(const token of ['OBSERVATION HANDOFF','SIDECAR-ONLY / NO MODEL EXEC / NO REMOTE','cs53-observation-row','toUpperCase()'])assert.ok(source.includes(token),token);
+  assert.match(source,/waiting/);
+  assert.match(source,/captured/);
+  assert.match(source,/verified/);
+  assert.match(source,/rejected/);
   assert.ok(html.indexOf('challenge_session_batch53.js')>html.indexOf('challenge_session_batch41.js'));
   assert.ok(html.includes('styles/challenge_session_batch53.css'));
   assert.doesNotMatch(source,/fetch\s*\(|XMLHttpRequest|https?:\/\//i);
