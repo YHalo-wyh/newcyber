@@ -11,11 +11,13 @@ const { buildPromptInjectionSuite, evaluatePromptInjectionRun, auditPromptInject
 const { analyzeTransformExfiltration } = require('./ai_transform_exfiltration');
 const { auditTorchScriptSideEffects } = require('./ai_torchscript_side_effect');
 const { runBatch51PressureRegression } = require('./ai_batch51_pressure_corpus');
+const { verifyTransformReplayObservation, verifyTorchScriptSideEffectObservation } = require('./ai_candidate_replay_verification');
+const { runBatch52ReplayRegression } = require('./ai_batch52_replay_corpus');
 const { analyzeModelExtractionTranscript, buildModelExtractionHarness } = require('./ai_model_extraction');
 const { analyzeOcrExtractionTranscript, buildOcrExtractionHarness } = require('./ai_ocr_extraction');
 const { analyzeModelInversion } = require('./ai_model_inversion');
 const { diagnoseAiSkillMatrix } = require('./ai_skill_matrix');
-const { runAiRealCtfRegression, getAiRealCtfCorpus } = require('./ai_real_ctf_regression_batch51');
+const { runAiRealCtfRegression, getAiRealCtfCorpus } = require('./ai_real_ctf_regression_batch52');
 const { verifyLlmAesCandidates, buildBackdoorPatchCandidate, verifyBackdoorPatchCandidate } = require('./ai_candidate_verifier');
 const { runBackdoorPatchRuntimeVerification } = require('./ai_runtime_candidate_verification');
 const { runAiStage1TrainingRegression, PUBLIC_TRAINING_SEEDS } = require('./ai_stage1_training_corpus');
@@ -77,6 +79,7 @@ function runTool(tool, payload = {}) {
   if (tool === 'ai-stage1-training-regression') return runAiStage1TrainingRegression(payload.options || payload.input || {});
   if (tool === 'ai-stage1-training-corpus') return {schema:'newcyber.ai-stage1-training-corpus.v1',cases:PUBLIC_TRAINING_SEEDS};
   if (tool === 'ai-batch51-pressure-regression') return runBatch51PressureRegression();
+  if (tool === 'ai-batch52-replay-regression') return runBatch52ReplayRegression();
   if (tool === 'ai-real-ctf-regression') return runAiRealCtfRegression();
   if (tool === 'ai-real-ctf-corpus') return { schema:'newcyber.ai-real-ctf-corpus.v1', cases:getAiRealCtfCorpus() };
   if (tool === 'ai-llm-aes-candidate-verify') return verifyLlmAesCandidates(payload.input || payload);
@@ -105,7 +108,9 @@ function runTool(tool, payload = {}) {
   if (tool === 'ai-prompt-injection-evaluate') return evaluatePromptInjectionRun(payload.input || payload);
   if (tool === 'ai-prompt-injection-source') return auditPromptInjectionSource(payload.input);
   if (tool === 'ai-transform-exfiltration') return analyzeTransformExfiltration(payload.input || payload);
+  if (tool === 'ai-transform-replay-verify') return verifyTransformReplayObservation(payload.input || payload);
   if (tool === 'ai-torchscript-side-effect') return auditTorchScriptSideEffects(payload.input ?? payload.source ?? '');
+  if (tool === 'ai-torchscript-side-effect-verify') return verifyTorchScriptSideEffectObservation(payload.input || payload);
   if (tool === 'ai-model-extraction') return analyzeModelExtractionTranscript(payload.input);
   if (tool === 'ai-model-extraction-harness') return buildModelExtractionHarness(payload.input || payload);
   if (tool === 'ai-ocr-extraction') return analyzeOcrExtractionTranscript(payload.input, payload.options || {});
