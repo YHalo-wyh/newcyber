@@ -3,6 +3,8 @@
 const {sourceRecipe,resolveGroupedFeatureRecipe,transformRow}=require('./sca_streaming_feature_source');
 
 const MAX_RAW_VALUES_PER_READ=2_000_000;
+const DERIVED_CALL_ALLOWLIST=new Set(['np.sum','numpy.sum','sum','np.asarray','numpy.asarray','np.array','numpy.array']);
+const DOT_CALL_PATTERN=/(?:np|numpy)\.(?:dot|inner|vdot)|torch\.(?:dot|inner)/i;
 
 function list(value){return Array.isArray(value)?value:[];}
 function assignmentLines(sourceText){
@@ -13,6 +15,15 @@ function assignmentLines(sourceText){
     if(match&&match[2].length<=512)out.push({name:match[1],rhs:match[2]});
   }
   return out;
+}
+function callAllowed(name,tainted){
+  const lower=String(name||'').toLowerCase();
+  if(DERIVED_CALL_ALLOWLIST.has(lower))return true;
+  const method=String(name||'').match(/^([A-Za-z_]\w*)\.(sum|astype)$/i);
+  return Boolean(method&&tainted.has(method[1]));
+}
+function expressionMentionsTainted(expr,tainted){
+  return [...tainted].some((name)=>new RegExp(`\\b${name}\\b`).test(expr));
 }
 function indirectHannDotEvidence(sourceText){
   const text=String(sourceText||'');const assignments=assignmentLines(text);const tainted=new Set();const evidence=[];
@@ -27,20 +38,25 @@ function indirectHannDotEvidence(sourceText){
       if(tainted.has(item.name))continue;
       const parent=[...tainted].find((name)=>new RegExp(`\\b${name}\\b`).test(item.rhs));
       if(!parent)continue;
-      // Only propagate through simple numeric alias/normalization expressions.
-      // Calls outside a tiny NumPy reduction allowlist are rejected so unrelated
-      // dataflow cannot accidentally become a Hann recipe proof.
-      const calls=[...item.rhs.matchAll(/\b([A-Za-z_]\w*(?:\.\w+)*)\s*\(/g)].map((m)=>m[1].toLowerCase());
-      if(calls.some((name)=>!['np.sum','numpy.sum','sum','np.asarray','numpy.asarray'].includes(name)))continue;
-      if(!/^[A-Za-z0-9_\.\s+\-*/(),\[\]]+$/.test(item.rhs))continue;
+      const calls=[...item.rhs.matchAll(/\b([A-Za-z_]\w*(?:\.\w+)*)\s*\(/g)].map((m)=>m[1]);
+      if(calls.some((name)=>!callAllowed(name,tainted)))continue;
+      if(!/^[A-Za-z0-9_\.\s+\-*/(),\[\]@]+$/.test(item.rhs))continue;
       tainted.add(item.name);evidence.push(`hann-derived:${item.name}<-${parent}`);changed=true;
     }
     if(!changed)break;
   }
-  for(const match of text.matchAll(/(?:np\.)?dot\s*\(([^,\n]{1,240}),\s*([^\)\n]{1,240})\)/gi)){
-    const args=`${match[1]} ${match[2]}`;
+  const callRegex=/\b((?:np|numpy)\.(?:dot|inner|vdot)|torch\.(?:dot|inner))\s*\(([^,\n]{1,240}),\s*([^\)\n]{1,240})\)/gi;
+  for(const match of text.matchAll(callRegex)){
+    const args=`${match[2]} ${match[3]}`;
     const kernel=[...tainted].find((name)=>new RegExp(`\\b${name}\\b`).test(args));
-    if(kernel)return {status:'ok',kernel,evidence:[...evidence,`dot-kernel:${kernel}`]};
+    if(kernel)return {status:'ok',kernel,sink:match[1],evidence:[...evidence,`dot-kernel:${kernel}`,`linear-sink:${match[1].toLowerCase()}`]};
+  }
+  for(const item of assignments){
+    if(!item.rhs.includes('@'))continue;
+    const parts=item.rhs.split('@');if(parts.length!==2)continue;
+    if(!expressionMentionsTainted(item.rhs,tainted))continue;
+    const kernel=[...tainted].find((name)=>new RegExp(`\\b${name}\\b`).test(item.rhs));
+    if(kernel&&parts.every((part)=>part.trim().length>0))return {status:'ok',kernel,sink:'@',evidence:[...evidence,`dot-kernel:${kernel}`,'linear-sink:@']};
   }
   return {status:'missing',kernel:null,evidence};
 }
@@ -81,4 +97,4 @@ function wrapBudgetedStreamingFeatureSource(rowSource,recipe,options={}){
   };
 }
 
-module.exports={MAX_RAW_VALUES_PER_READ,indirectHannDotEvidence,resolveRealBundleFeatureRecipe,wrapBudgetedStreamingFeatureSource};
+module.exports={MAX_RAW_VALUES_PER_READ,DERIVED_CALL_ALLOWLIST,DOT_CALL_PATTERN,indirectHannDotEvidence,resolveRealBundleFeatureRecipe,wrapBudgetedStreamingFeatureSource};
