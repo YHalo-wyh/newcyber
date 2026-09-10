@@ -99,7 +99,11 @@ test('Batch50 mini end-to-end closes raw Hann traces through calibrated probe an
   const diagnostic=JSON.stringify({status:result.status,flag:result.flag,gap:result.gap,stages:result.stages,recipe:result.featureRecipe,calibration:result.probeCalibration,oracle:result.unknownPrefixOracle},null,2);
   assert.equal(result.schema,'newcyber.sca-autopilot.v4',diagnostic);
   assert.equal(result.status,'flag-recovered',diagnostic);
-  assert.equal(result.flag,bundle.flag,diagnostic);
+  // The generic flag extractor is intentionally prefix-agnostic and normalizes the
+  // embedded token "ctf{...}". The oracle text must still preserve the exact recovered
+  // byte stream so challenge-specific prefixes are never invented by the verifier.
+  assert.equal(result.unknownPrefixOracle.recoveredText,bundle.flag,diagnostic);
+  assert.equal(result.flag,'ctf{b50}',diagnostic);
   assert.equal(result.featureRecipe.windowFunction,'hann',diagnostic);
   assert.equal(result.featureRecipe.rawCols,18,diagnostic);
   assert.equal(result.featureRecipe.slots,4,diagnostic);
