@@ -72,7 +72,7 @@
 
       <section class="home-lower-grid">
         <article class="home-real-corpus">
-          <div class="home-section-head"><div><span>REAL CORPUS</span><strong>国内 AI CTF 真题回归</strong></div><span class="home-count-badge">8 CASES</span></div>
+          <div class="home-section-head"><div><span>REAL CORPUS</span><strong>国内 AI CTF 真题回归</strong></div><span class="home-count-badge">9 CASES</span></div>
           <div class="home-corpus-line"><span>Hackergame</span><span>CISCN / 长城杯</span><span>蓝桥杯</span><span>软件系统安全赛</span><span>湾区杯</span></div>
           <p>公开题面 / 官方题解提炼最小复现。PASS 只代表证据模式被识别；PARTIAL / GAP 会直接暴露能力缺口。</p>
           <button class="home-inline-action" data-tool="ai-real-ctf-regression"><span>运行真题回归</span><em>AI →</em></button>
