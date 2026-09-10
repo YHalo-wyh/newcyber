@@ -37,12 +37,30 @@ async function promptTokensOptional(discovery){
   const read=await tokenSequences(role.file,'promptTokenIds');if(read.status!=='ok')return read;if(read.sequences.length!==1)return {status:'gap',code:'PROMPT_TOKEN_GAP',detail:'promptTokenIds 文件必须只描述一个 prompt sequence'};return {status:'ok',ids:read.sequences[0],source:role.file.fileName};
 }
 
+function explicitCandidateIdFile(discovery){
+  const files=list(discovery?.files).filter((file)=>String(file?.extension||'').toLowerCase()==='.npy');
+  const explicit=files.filter((file)=>{
+    const stem=String(file?.fileName||path.basename(file?.filePath||'')).toLowerCase().replace(/\.[^.]+$/,'');
+    if(/(?:profil|train|known|reference|prompt|prefix|seed)/.test(stem))return false;
+    return /(?:candidate|vocab)/.test(stem)&&/(?:token|input|id)/.test(stem);
+  });
+  if(explicit.length===1)return {status:'ok',file:explicit[0],source:'explicit candidate/vocab filename'};
+  if(explicit.length>1)return {status:'ambiguous',files:explicit.map((file)=>file.fileName)};
+  return {status:'missing',file:null};
+}
+
 async function resolveCandidateIds(discovery,candidateCount){
   const manifest=discovery.manifest||{};
   if(manifest.candidateIdsIdentity===true)return {status:'ok',ids:Array.from({length:candidateCount},(_,i)=>i),source:'manifest identity'};
   if(Array.isArray(manifest.candidateIds)){const ids=manifest.candidateIds.map(Number);if(ids.length!==candidateCount||ids.some((id)=>!Number.isSafeInteger(id)||id<0))return {status:'gap',code:'TOKEN_ID_MAP_GAP',detail:'manifest candidateIds 与 probe candidate 数量不一致'};return {status:'ok',ids,source:'manifest'};}
-  const role=roleFile(discovery,'candidateIds',false);if(role.gap)return {status:'gap',code:'TOKEN_ID_MAP_GAP',detail:role.gap};
-  if(role.file){const npy=await base.readNumericNpyPath(role.file.filePath,{maxValues:candidateCount+1});if(npy.status==='ok'&&npy.shape.length===1&&npy.values.length===candidateCount&&npy.values.every((id)=>Number.isSafeInteger(id)&&id>=0))return {status:'ok',ids:npy.values,source:role.file.fileName};return {status:'gap',code:'TOKEN_ID_MAP_GAP',detail:'candidateIds NPY 必须是一维整数且长度等于 probe candidates'};}
+  let selected=roleFile(discovery,'candidateIds',false);let source=null;
+  if(selected.gap&&discovery?.roles?.candidateIds?.status==='ambiguous'){
+    const explicit=explicitCandidateIdFile(discovery);
+    if(explicit.status==='ok'){selected={file:explicit.file};source=explicit.source;}
+    else if(explicit.status==='ambiguous')return {status:'gap',code:'TOKEN_ID_MAP_GAP',detail:`candidateIds 强证据仍不唯一：${explicit.files.join(', ')}`};
+    else return {status:'gap',code:'TOKEN_ID_MAP_GAP',detail:selected.gap};
+  }else if(selected.gap)return {status:'gap',code:'TOKEN_ID_MAP_GAP',detail:selected.gap};
+  if(selected.file){const npy=await base.readNumericNpyPath(selected.file.filePath,{maxValues:candidateCount+1});if(npy.status==='ok'&&npy.shape.length===1&&npy.values.length===candidateCount&&npy.values.every((id)=>Number.isSafeInteger(id)&&id>=0))return {status:'ok',ids:npy.values,source:source||selected.file.fileName};return {status:'gap',code:'TOKEN_ID_MAP_GAP',detail:'candidateIds NPY 必须是一维整数且长度等于 probe candidates'};}
   return {status:'gap',code:'TOKEN_ID_MAP_GAP',detail:'缺少 probe row/column → token id 映射证据；不会默认把 probe index 当 token id'};
 }
 
@@ -92,6 +110,7 @@ async function runGroupedScaAutopilotPaths(filePaths,options={}){
     const probe=await base.readNumericNpyPath(required.probe.file.filePath);if(probe.status!=='ok'||probe.shape.length!==2)return {schema:'newcyber.sca-autopilot.v2',status:'gap',gap:{code:'PROBE_LAYOUT_GAP',detail:'probe 必须是预算内二维数值 NPY',stage:'probe'},stages,discovery,profile,layout};
     const probeOptions=base.resolveProbeOptions(discovery,probe.shape,profile.hiddenDim);if(probeOptions.status!=='ok')return {schema:'newcyber.sca-autopilot.v2',status:'gap',gap:{code:probeOptions.code,detail:probeOptions.detail,stage:'probe'},stages,discovery,profile,layout};
     const candidateCount=probeOptions.orientation==='candidate-rows'?probe.shape[0]:probe.shape[1];const candidateIds=await resolveCandidateIds(discovery,candidateCount);if(candidateIds.status!=='ok')return {schema:'newcyber.sca-autopilot.v2',status:'gap',gap:{code:candidateIds.code,detail:candidateIds.detail,stage:'probe'},stages,discovery,profile,layout};
+    if(candidateIds.source==='explicit candidate/vocab filename')stages.push(stage('candidate-map','ok','candidateIds role ambiguity resolved by unique explicit candidate/vocab filename'));
     const target=await recoverGroupedTargets(profile,targetRows,probe.data,{probe:{orientation:probeOptions.orientation,metric:probeOptions.metric,candidateIds:candidateIds.ids,topK:probeOptions.topK}});if(target.status!=='ok')return {schema:'newcyber.sca-autopilot.v2',status:'gap',gap:{code:'GROUP_TARGET_RECOVERY_GAP',detail:`${target.status}${target.token!=null?` token=${target.token}`:''}${target.group!=null?` group=${target.group}`:''}`,stage:'probe'},stages,discovery,profile,layout,target};
     stages.push(stage('probe','ok',`${target.tokens} target tokens · grouped hidden reassembly · top-${probeOptions.topK}`));
     const sibling=await tokenizerSibling(modelRole.file.filePath);if(!sibling)return {schema:'newcyber.sca-autopilot.v2',status:'gap',gap:{code:'TOKENIZER_GAP',detail:'已恢复 grouped token candidates，但模型同目录缺少 vocab.json',stage:'oracle'},stages,discovery,profile,layout,target};
@@ -122,4 +141,4 @@ async function runScaAutopilotPaths(filePaths,options={}){
   return baseline;
 }
 
-module.exports={...base,runScaAutopilotPaths,runGroupedScaAutopilotPaths,freeProbeDecode};
+module.exports={...base,runScaAutopilotPaths,runGroupedScaAutopilotPaths,freeProbeDecode,resolveCandidateIds,explicitCandidateIdFile};
