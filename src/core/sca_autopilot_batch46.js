@@ -96,7 +96,10 @@ async function diagnoseProfileLabelGap(filePaths,options={}){
 async function replayResolvedLabels(filePaths,diagnostic,options={}){
   const labels=diagnostic?.profileLabels;if(labels?.status!=='ok')return diagnostic;
   if(diagnostic.discovery?.manifest)return {...diagnostic,status:'gap',gap:{code:'PROFILE_LABEL_REPLAY_GAP',detail:'profiling labels 已有来源证明，但现有 recipe manifest 不引用独立 label file；Batch46 不会改写/复制大型赛题工件。',stage:'profile-label-replay'},stages:[...diagnostic.stages,stage('profile-label-replay','gap','manifest-bound bundle requires explicit label field')]};
-  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'newcyber-sca-b46-'));const labelPath=path.join(dir,'profiling_token_ids.npy');
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'newcyber-sca-b46-'));
+  // `profiling_input_ids.npy` is intentionally role-specific: profileTokenIds accepts
+  // input IDs while candidateIds should remain bound to candidate/vocab/probe mapping files.
+  const labelPath=path.join(dir,'profiling_input_ids.npy');
   try{
     await writeInt32Npy(labelPath,labels.sequences);
     const result=await batch42.runGroupedScaAutopilotPaths([...filePaths,labelPath],options);
