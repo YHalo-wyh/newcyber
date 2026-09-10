@@ -6,6 +6,20 @@ const MAX_LLM_CANDIDATES = 512;
 const MAX_LLM_CANDIDATE_CHARS = 512;
 const MAX_CIPHERTEXT_BYTES = 1024 * 1024;
 
+function objectInput(input, label = 'input') {
+  if (typeof input === 'string') {
+    const text = input.trim();
+    if (!text) return {};
+    let parsed;
+    try { parsed = JSON.parse(text); }
+    catch { throw new Error(`${label} 需要 JSON 对象`); }
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error(`${label} 需要 JSON 对象`);
+    return parsed;
+  }
+  if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error(`${label} 需要对象`);
+  return input;
+}
+
 function sha256Hex(value) {
   return crypto.createHash('sha256').update(value).digest('hex');
 }
@@ -24,7 +38,9 @@ function strictBase64(value, label, maxBytes = MAX_CIPHERTEXT_BYTES) {
 }
 
 function normalizeLlmAesChallenge(input = {}) {
+  input = objectInput(input, 'LLM-AES verifier input');
   const challenge = input.challenge || input;
+  if (!challenge || typeof challenge !== 'object' || Array.isArray(challenge)) throw new Error('challenge 需要对象');
   const algo = String(challenge.algo || challenge.algorithm || '').trim().toUpperCase();
   if (!['AES-128-CBC', 'AES128-CBC'].includes(algo)) {
     throw new Error('当前 verifier 只接受题面明确声明的 AES-128-CBC');
@@ -94,6 +110,7 @@ function decryptLlmCandidate(challenge, candidate) {
 }
 
 function verifyLlmAesCandidates(input = {}) {
+  input = objectInput(input, 'LLM-AES verifier input');
   const challenge = normalizeLlmAesChallenge(input);
   const raw = input.candidates || input.outputs || input.llmOutputs || [];
   if (!Array.isArray(raw)) throw new Error('candidates 必须是 LLM 输出字符串数组');
@@ -173,6 +190,7 @@ function patchCandidateId(candidate) {
 }
 
 function buildBackdoorPatchCandidate(input = {}) {
+  input = objectInput(input, 'backdoor patch candidate input');
   const raster = input.raster || input.image;
   const behaviorInput = input.behavior || input.observations;
   if (!raster) throw new Error('需要 raster/image 作为 patch 候选来源');
@@ -246,6 +264,7 @@ function buildBackdoorPatchCandidate(input = {}) {
 }
 
 function verifyBackdoorPatchCandidate(input = {}) {
+  input = objectInput(input, 'backdoor patch verifier input');
   const candidate = input.candidate || input.candidateObject;
   const observations = input.observations || input.behavior;
   if (!candidate || candidate.kind !== 'localized-backdoor-trigger') throw new Error('需要 localized-backdoor-trigger candidate');
