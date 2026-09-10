@@ -6,7 +6,9 @@ const fsp=require('fs/promises');
 const os=require('os');
 const path=require('path');
 const {bytesToUnicodeMaps}=require('../src/core/gpt2_bpe');
-const {runScaAutopilotPaths,inferGroupedProfileShape}=require('../src/core/sca_autopilot_batch46');
+const batch46=require('../src/core/sca_autopilot_batch46');
+const compatBatch42=require('../src/core/sca_autopilot_batch42');
+const {runScaAutopilotPaths,inferGroupedProfileShape}=batch46;
 const {resolveProfileTokenSequences}=require('../src/core/sca_profile_label_source');
 
 function npy(values,shape,descr='<f4'){
@@ -53,6 +55,11 @@ async function makeBundle({withSourceLabels=false,target='flag{batch46_profile_l
 }
 
 async function paths(root){return (await fsp.readdir(root)).map((name)=>path.join(root,name));}
+
+test('Batch42 compatibility import routes production callers to Batch46 dispatch',()=>{
+  assert.equal(compatBatch42.runScaAutopilotPaths,batch46.runScaAutopilotPaths);
+  assert.equal(typeof compatBatch42.runGroupedScaAutopilotPaths,'function');
+});
 
 test('Batch46 infers the real 287424-row grouped shape without materializing a 3072-D vector',()=>{
   const discovery={manifest:{},sourceInspection:{constants:{GROUP_SIZE:16,TRACE_DIM:64}},sourceText:'GROUP_SIZE = 16\nTRACE_DIM = 64\n'};
