@@ -166,6 +166,23 @@ function rankProjectedFullProbe(projected,probeMatrix,probeOptions){
   return {status:'ok',top:ranked.slice(0,topK),candidates:shape.candidateCount,hiddenDim:shape.hiddenDim};
 }
 
+function shortlistConfidence(row,index){
+  const values=list(row);const first=Number(values[0]?.score),second=Number(values[1]?.score);
+  if(!Number.isFinite(first)||!Number.isFinite(second))return {index,scored:false,relativeMargin:null};
+  const denominator=Math.max(1e-12,Math.abs(first)+Math.abs(second));
+  return {index,scored:true,relativeMargin:Math.max(0,(first-second)/denominator)};
+}
+
+function selectFullProbeRowIndices(rows,limit){
+  const count=Math.max(0,Math.min(list(rows).length,Number(limit)||0));
+  if(!count)return [];
+  return list(rows).map((row,index)=>shortlistConfidence(row,index)).sort((a,b)=>{
+    if(a.scored!==b.scored)return a.scored?1:-1;
+    if(a.scored&&b.scored&&a.relativeMargin!==b.relativeMargin)return a.relativeMargin-b.relativeMargin;
+    return a.index-b.index;
+  }).slice(0,count).map((item)=>item.index);
+}
+
 function publishRerankTelemetry(project,value){
   const telemetry={schema:'newcyber.sca-calibrated-rerank-telemetry.v1',...value};
   if(project?.rerankTelemetry&&typeof project.rerankTelemetry==='object')Object.assign(project.rerankTelemetry,telemetry);
@@ -184,13 +201,15 @@ function rerankCandidateShortlists({hiddenStates,candidates,project,probeMatrix,
   const workPerRow=shape.candidateCount*shape.hiddenDim;
   const requestedFullRows=Math.max(0,Math.min(hidden.length,Number(options.fullProbeRows??hidden.length)));
   const fullScanRows=workPerRow>0?Math.min(requestedFullRows,Math.floor(MAX_CALIBRATED_SCORE_OPS/workPerRow)):0;
+  const fullScanIndices=selectFullProbeRowIndices(rows,fullScanRows),fullScanSet=new Set(fullScanIndices);
+  const unscoredPriorityRows=fullScanIndices.filter((index)=>!shortlistConfidence(rows[index],index).scored).length;
   const idToIndex=new Map();candidateIds.forEach((id,index)=>{if(!idToIndex.has(Number(id)))idToIndex.set(Number(id),index);});
   const reranked=[];
   let fullScanAttemptedRows=0,fullScanSucceededRows=0,fullProbeExpandedRows=0,top1ChangedRows=0;
   for(let rowIndex=0;rowIndex<rows.length;rowIndex++){
     const projected=project(hidden[rowIndex]);
     let finalRow=null;
-    if(rowIndex<fullScanRows){
+    if(fullScanSet.has(rowIndex)){
       fullScanAttemptedRows+=1;
       const full=rankProjectedFullProbe(projected,probeMatrix,probeOptions);
       if(full.status==='ok'){
@@ -214,8 +233,8 @@ function rerankCandidateShortlists({hiddenStates,candidates,project,probeMatrix,
     reranked.push(finalRow);
   }
   const telemetry=publishRerankTelemetry(project,{
-    status:'ok',rows:reranked.length,requestedFullRows,fullScanRows,fullScanAttemptedRows,fullScanSucceededRows,
-    fullScanFailedRows:Math.max(0,fullScanAttemptedRows-fullScanSucceededRows),fallbackRows:Math.max(0,reranked.length-fullScanSucceededRows),
+    status:'ok',rows:reranked.length,selectionMode:'uncertainty-margin',requestedFullRows,fullScanRows,fullScanAttemptedRows,fullScanSucceededRows,
+    fullScanFailedRows:Math.max(0,fullScanAttemptedRows-fullScanSucceededRows),fallbackRows:Math.max(0,reranked.length-fullScanSucceededRows),unscoredPriorityRows,
     fullProbeExpandedRows,fullProbeRecovered:fullProbeExpandedRows,top1ChangedRows,top1StableRows:Math.max(0,reranked.length-top1ChangedRows),
     candidateCount:shape.candidateCount,hiddenDim:shape.hiddenDim,workPerRow,workBudget:MAX_CALIBRATED_SCORE_OPS,
     estimatedFullScanOps:fullScanAttemptedRows*workPerRow,budgetLimited:fullScanRows<requestedFullRows
@@ -223,4 +242,4 @@ function rerankCandidateShortlists({hiddenStates,candidates,project,probeMatrix,
   return {schema:'newcyber.sca-calibrated-shortlist.v2',status:'ok',rows:reranked.length,candidates:reranked,...telemetry};
 }
 
-module.exports={MAX_CALIBRATED_SCORE_OPS,probeVector,applyLinearProfile,fitProbeCalibration,rankProjectedFullProbe,rerankCandidateShortlists,publishRerankTelemetry};
+module.exports={MAX_CALIBRATED_SCORE_OPS,probeVector,applyLinearProfile,fitProbeCalibration,rankProjectedFullProbe,shortlistConfidence,selectFullProbeRowIndices,rerankCandidateShortlists,publishRerankTelemetry};
