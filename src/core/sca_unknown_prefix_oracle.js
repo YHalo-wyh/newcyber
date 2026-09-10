@@ -57,6 +57,10 @@ async function replay(decodeRunner,model,{mode,seed,tokenizer,maxNewTokens,topK,
   return summarize(mode,seed,oracle,rows,tokenizer);
 }
 
+function success(item,attempts,seeds,screenNewTokens,extra={}){
+  return {schema:'newcyber.sca-unknown-prefix-oracle.v1',status:'flag-recovered',mode:item.mode,flag:item.flag,recoveredTokenIds:item.sequence,recoveredText:item.text,agreement:item.agreement,attempts,seedCount:seeds.length,screenTokens:screenNewTokens,...extra};
+}
+
 async function runUnknownPrefixOracle(model,{targetCandidates,tokenizer,topK=8,seedBeam=2,maxTokens=null,screenTokens=8,finalistCount=2}={},options={}){
   const rows=list(targetCandidates);
   if(rows.length<2)return {schema:'newcyber.sca-unknown-prefix-oracle.v1',status:'not-applicable',reason:'need at least two recovered token positions'};
@@ -65,13 +69,14 @@ async function runUnknownPrefixOracle(model,{targetCandidates,tokenizer,topK=8,s
   if(!first.length)return {schema:'newcyber.sca-unknown-prefix-oracle.v1',status:'not-applicable',reason:'first position has no token candidates'};
 
   const requestedBeam=Math.max(1,Math.min(MAX_SEEDS,Number(seedBeam)||2));
-  const screenBeam=rows.length>=WIDE_SCREEN_MIN_TARGET?Math.max(requestedBeam,Math.min(MAX_SEEDS,first.length)):requestedBeam;
+  const wideScreen=rows.length>=WIDE_SCREEN_MIN_TARGET;
+  const screenBeam=wideScreen?Math.max(requestedBeam,Math.min(MAX_SEEDS,first.length)):requestedBeam;
   const seeds=first.slice(0,screenBeam);
   const newTokens=Math.max(1,Math.min(rows.length-1,Number(maxTokens)||rows.length-1));
   const screenNewTokens=Math.max(1,Math.min(newTokens,MAX_SCREEN_TOKENS,Number(screenTokens)||8));
   const finalists=Math.max(1,Math.min(MAX_FINALISTS,Number(finalistCount)||2,seeds.length));
   const screeningCoversFullTarget=screenNewTokens>=newTokens;
-  const plannedSteps=seeds.length*screenNewTokens+(screeningCoversFullTarget?0:finalists*newTokens)+finalists*newTokens;
+  const plannedSteps=seeds.length*screenNewTokens+(wideScreen?finalists*newTokens:screeningCoversFullTarget?0:finalists*newTokens)+finalists*newTokens;
   if(plannedSteps>MAX_REPLAY_STEPS)return {schema:'newcyber.sca-unknown-prefix-oracle.v1',status:'gap',code:'UNKNOWN_PREFIX_REPLAY_BUDGET_GAP',detail:`planned oracle steps=${plannedSteps} exceeds ${MAX_REPLAY_STEPS}`};
 
   const decodeRunner=typeof options.decodeRunner==='function'?options.decodeRunner:runTransformerDecode;
@@ -80,39 +85,42 @@ async function runUnknownPrefixOracle(model,{targetCandidates,tokenizer,topK=8,s
   const guidedByStep=candidateIds(rows.slice(1));
   const oracleTopK=Math.max(1,Math.min(64,Number(topK)||8));
 
-  // Phase 1: for long targets cheaply screen a wider first-token beam. Short targets
-  // preserve the caller's exact seedBeam so bounded unit/specialized callers stay deterministic.
+  // Long unknown-prefix targets need an oracle-driven seed screen. Do NOT constrain the
+  // continuation with leakage candidates here: that makes every wrong seed look good by
+  // construction. The unrestricted short continuation is scored against leakage only after
+  // generation. Short specialized callers keep their original bounded guided semantics.
   for(const seed of seeds){
     const item=await replay(decodeRunner,model,{
-      mode:screeningCoversFullTarget?'candidate-guided':'candidate-guided-screen',seed,tokenizer,maxNewTokens:screenNewTokens,topK:oracleTopK,
-      candidateTokenIdsByStep:guidedByStep.slice(0,screenNewTokens),rows
+      mode:wideScreen?'oracle-seed-screen':'candidate-guided',seed,tokenizer,maxNewTokens:screenNewTokens,topK:oracleTopK,
+      candidateTokenIdsByStep:wideScreen?null:guidedByStep.slice(0,screenNewTokens),rows
     },replayOptions);
     attempts.push(item);
-    if(item.flag)return {schema:'newcyber.sca-unknown-prefix-oracle.v1',status:'flag-recovered',mode:screeningCoversFullTarget?'candidate-guided':item.mode,flag:item.flag,recoveredTokenIds:item.sequence,recoveredText:item.text,agreement:item.agreement,attempts,seedCount:seeds.length,screenTokens:screenNewTokens};
+    if(item.flag)return success(item,attempts,seeds,screenNewTokens);
   }
 
   const finalistSeeds=bestDistinctSeeds(attempts,finalists);
 
-  // Phase 2: if screening was only a prefix, replay the strongest leakage-consistent seeds
-  // across the whole target under per-step candidate guidance.
-  if(!screeningCoversFullTarget){
+  // Replay the strongest oracle/leakage-consistent seeds across the whole target under
+  // per-step candidate guidance. For long targets this is the closure phase after screening.
+  if(wideScreen||!screeningCoversFullTarget){
     for(const seed of finalistSeeds){
       const item=await replay(decodeRunner,model,{
         mode:'candidate-guided',seed,tokenizer,maxNewTokens:newTokens,topK:oracleTopK,
         candidateTokenIdsByStep:guidedByStep,rows
       },replayOptions);
       attempts.push(item);
-      if(item.flag)return {schema:'newcyber.sca-unknown-prefix-oracle.v1',status:'flag-recovered',mode:item.mode,flag:item.flag,recoveredTokenIds:item.sequence,recoveredText:item.text,agreement:item.agreement,attempts,seedCount:seeds.length,screenTokens:screenNewTokens,finalistSeeds};
+      if(item.flag)return success(item,attempts,seeds,screenNewTokens,{finalistSeeds});
     }
   }
 
-  // Phase 3: keep the selected first-token seed but remove per-step leakage restrictions.
+  // Final bounded fallback: retain the selected first-token seeds, but remove all later
+  // leakage restrictions and let the model oracle generate from its full vocabulary.
   for(const seed of finalistSeeds){
     const item=await replay(decodeRunner,model,{
       mode:'full-vocab-fallback',seed,tokenizer,maxNewTokens:newTokens,topK:oracleTopK,rows
     },replayOptions);
     attempts.push(item);
-    if(item.flag)return {schema:'newcyber.sca-unknown-prefix-oracle.v1',status:'flag-recovered',mode:item.mode,flag:item.flag,recoveredTokenIds:item.sequence,recoveredText:item.text,agreement:item.agreement,attempts,seedCount:seeds.length,screenTokens:screenNewTokens,finalistSeeds};
+    if(item.flag)return success(item,attempts,seeds,screenNewTokens,{finalistSeeds});
   }
 
   attempts.sort((a,b)=>replayScore(b)-replayScore(a));const best=attempts[0]||null;
