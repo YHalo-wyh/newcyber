@@ -59,3 +59,14 @@ test('Batch46 candidate map does not reinterpret profile, training, prompt, or k
   const result=explicitCandidateIdFile({files});
   assert.equal(result.status,'missing');
 });
+
+test('Batch46 candidate filename evidence uses semantic tokens instead of id substrings',()=>{
+  const falsePositives=['candidate_grid.npy','candidate_identity.npy','vocab_hidden.npy','vocabulary_embedding.npy'].map((name)=>({fileName:name,filePath:`/tmp/${name}`,extension:'.npy'}));
+  assert.equal(explicitCandidateIdFile({files:falsePositives}).status,'missing');
+  for(const name of ['candidate_ids.npy','candidate-token-ids.npy','vocab_token_ids.npy','vocabulary-input-ids.npy']){
+    const only={fileName:name,filePath:`/tmp/${name}`,extension:'.npy'};
+    const result=explicitCandidateIdFile({files:[only]});
+    assert.equal(result.status,'ok',name);
+    assert.equal(result.file.fileName,name);
+  }
+});
