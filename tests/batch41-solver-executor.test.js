@@ -120,13 +120,14 @@ test('Batch41 executor blocks workspace path escape instead of reading outside r
   }finally{await fsp.rm(parent,{recursive:true,force:true});}
 });
 
-test('Batch41 report and compatibility entry expose executor transactions',()=>{
+test('Batch41 report and compatibility entry preserve executor transactions through newer wrappers',()=>{
   const section=batch41.buildSolverExecutionSection({solverExecution:{enabled:true,summary:{planned:1,done:1,blocked:0,bytesRead:64},attempts:[{adapter:'elf-static',file:'a.elf',transitions:['ready','running','done']}]}});
   assert.match(section,/Solver Executor/);
   assert.match(section,/READY → RUNNING → DONE/);
   const entry=read('src/core/finals_analyzer_batch15.js');
   assert.match(entry,/finals_analyzer_batch40/);
-  assert.match(entry,/require\('\.\/finals_analyzer_batch41'\)/);
+  assert.match(entry,/finals_analyzer_batch41/);
+  assert.match(entry,/require\('\.\/finals_analyzer_batch(?:41|4[2-9]|[5-9]\d)'\)/);
 });
 
 test('Batch41 executor UI stays line-based and loads after Batch40',()=>{
