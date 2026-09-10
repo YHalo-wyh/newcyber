@@ -2,6 +2,7 @@
 
 const {withSession,tensorFromSpec}=require('./local_ml_runtime');
 const {classifyTransformerSession}=require('./transformer_oracle');
+const {resolveNamedIntegerEvidence}=require('./sca_static_integer_evidence');
 
 const MAX_PROFILE_PROMPTS=1024;
 const MAX_PROFILE_TOKENS=262144;
@@ -11,6 +12,7 @@ const MAX_BOUNDARY_RAW_COUNT=MAX_TOKEN_SEQUENCE*MAX_ROWS_PER_TOKEN;
 const ROW_COUNT_NAMES=['PROFILING_ROW_COUNTS','PROFILE_ROW_COUNTS','TRAINING_ROW_COUNTS','TRAIN_ROW_COUNTS'];
 const HIDDEN_SIZE_NAMES=['HIDDEN_SIZE','HIDDEN_DIM','D_MODEL','N_EMBD'];
 const GROUP_SIZE_NAMES=['GROUP_SIZE','HIDDEN_GROUP_SIZE','HIDDEN_GROUP_WIDTH','HIDDEN_CHUNK_SIZE','HIDDEN_SLICE_SIZE'];
+const ROWS_PER_TOKEN_NAMES=['ROWS_PER_TOKEN','GROUPS_PER_TOKEN','LEAKAGE_GROUPS','HIDDEN_GROUPS','CHUNKS_PER_TOKEN'];
 
 function list(value){return Array.isArray(value)?value:[];}
 function tensorType(metadata,fallback='int64'){
@@ -37,20 +39,25 @@ function emptyCacheSpec(item){
 }
 
 function stripComments(text){return String(text||'').split(/\r?\n/).map((line)=>line.replace(/#.*$/,'')).join('\n');}
-function extractBracketList(text,start){
-  const open=text.indexOf('[',start);if(open<0)return null;
+function extractDelimitedBody(text,openIndex,openChar,closeChar){
   let depth=0;
-  for(let index=open;index<text.length;index++){
+  for(let index=openIndex;index<text.length;index++){
     const ch=text[index];
-    if(ch==='[')depth+=1;
-    else if(ch===']'){
+    if(ch===openChar)depth+=1;
+    else if(ch===closeChar){
       depth-=1;
-      if(depth===0)return text.slice(open+1,index);
+      if(depth===0)return text.slice(openIndex+1,index);
       if(depth<0)return null;
     }
-    if(index-open>65536)return null;
+    if(index-openIndex>65536)return null;
   }
   return null;
+}
+function extractBoundaryList(text,start){
+  let cursor=start;while(cursor<text.length&&/\s/.test(text[cursor]))cursor+=1;
+  if(text[cursor]==='(')return extractDelimitedBody(text,cursor,'(',')');
+  const open=text.indexOf('[',start);if(open<0)return null;
+  return extractDelimitedBody(text,open,'[',']');
 }
 function parseStaticIntegerList(body){
   const cleaned=stripComments(body).trim();
@@ -61,47 +68,48 @@ function parseStaticIntegerList(body){
   return values;
 }
 function staticIntegerConstants(sourceText,names){
-  const text=stripComments(sourceText);const matches=[];
-  for(const name of names){
-    const re=new RegExp(`\\b${name}\\s*=\\s*(\\d+)\\b`,'gi');let match;
-    while((match=re.exec(text))){
-      const value=Number(match[1]);
-      if(Number.isSafeInteger(value)&&value>0)matches.push({name:name.toUpperCase(),value,text:match[0]});
-    }
-  }
-  const values=[...new Set(matches.map((item)=>item.value))];
-  return {matches,values};
+  return resolveNamedIntegerEvidence(sourceText,names);
 }
 function staticRowsPerTokenEvidence(sourceText){
+  const explicit=staticIntegerConstants(sourceText,ROWS_PER_TOKEN_NAMES);
   const hidden=staticIntegerConstants(sourceText,HIDDEN_SIZE_NAMES);
   const group=staticIntegerConstants(sourceText,GROUP_SIZE_NAMES);
-  if(hidden.values.length!==1||group.values.length!==1){
+  const ambiguous=explicit.values.length>1||hidden.values.length>1||group.values.length>1;
+  if(ambiguous){
     return {
-      status:hidden.values.length>1||group.values.length>1?'gap':'missing',
-      code:hidden.values.length>1||group.values.length>1?'PROFILE_BOUNDARY_UNIT_AMBIGUITY_GAP':'PROFILE_BOUNDARY_UNIT_EVIDENCE_GAP',
-      detail:`rows/token conversion needs one static hidden size and one static group size; hidden=${hidden.values.join('/')||'missing'} group=${group.values.join('/')||'missing'}`,
-      hidden,group
+      status:'gap',code:'PROFILE_BOUNDARY_UNIT_AMBIGUITY_GAP',
+      detail:`rows/token evidence is ambiguous; explicit=${explicit.values.join('/')||'missing'} hidden=${hidden.values.join('/')||'missing'} group=${group.values.join('/')||'missing'}`,
+      explicit,hidden,group
     };
   }
-  const hiddenSize=hidden.values[0],groupSize=group.values[0];
-  if(hiddenSize%groupSize!==0){
-    return {status:'gap',code:'PROFILE_BOUNDARY_UNIT_RATIO_GAP',detail:`hidden size ${hiddenSize} is not divisible by group size ${groupSize}`,hidden,group,hiddenSize,groupSize};
+  const explicitRows=explicit.values.length===1?explicit.values[0]:null;
+  let derivedRows=null,hiddenSize=null,groupSize=null;
+  if(hidden.values.length===1&&group.values.length===1){
+    hiddenSize=hidden.values[0];groupSize=group.values[0];
+    if(hiddenSize%groupSize!==0){
+      return {status:'gap',code:'PROFILE_BOUNDARY_UNIT_RATIO_GAP',detail:`hidden size ${hiddenSize} is not divisible by group size ${groupSize}`,explicit,hidden,group,hiddenSize,groupSize};
+    }
+    derivedRows=hiddenSize/groupSize;
   }
-  const rowsPerToken=hiddenSize/groupSize;
+  if(explicitRows!=null&&derivedRows!=null&&explicitRows!==derivedRows){
+    return {status:'gap',code:'PROFILE_BOUNDARY_UNIT_CONFLICT_GAP',detail:`explicit rowsPerToken=${explicitRows} conflicts with hidden/group derived rowsPerToken=${derivedRows}`,explicit,hidden,group,hiddenSize,groupSize,rowsPerToken:explicitRows,derivedRowsPerToken:derivedRows};
+  }
+  const rowsPerToken=explicitRows??derivedRows;
+  if(rowsPerToken==null){
+    return {status:'missing',code:'PROFILE_BOUNDARY_UNIT_EVIDENCE_GAP',detail:`rows/token conversion needs explicit rows-per-token evidence or one static hidden size plus one static group size; explicit=${explicit.values.join('/')||'missing'} hidden=${hidden.values.join('/')||'missing'} group=${group.values.join('/')||'missing'}`,explicit,hidden,group};
+  }
   if(!Number.isSafeInteger(rowsPerToken)||rowsPerToken<=1||rowsPerToken>MAX_ROWS_PER_TOKEN){
-    return {status:'gap',code:'PROFILE_BOUNDARY_UNIT_RATIO_GAP',detail:`derived rowsPerToken=${rowsPerToken} is outside 2..${MAX_ROWS_PER_TOKEN}`,hidden,group,hiddenSize,groupSize,rowsPerToken};
+    return {status:'gap',code:'PROFILE_BOUNDARY_UNIT_RATIO_GAP',detail:`derived rowsPerToken=${rowsPerToken} is outside 2..${MAX_ROWS_PER_TOKEN}`,explicit,hidden,group,hiddenSize,groupSize,rowsPerToken};
   }
-  return {
-    status:'ok',hiddenSize,groupSize,rowsPerToken,
-    evidence:[...hidden.matches,...group.matches].map((item)=>({kind:'static-source-constant',name:item.name,value:item.value,text:item.text}))
-  };
+  const evidence=[...explicit.matches,...hidden.matches,...group.matches].map((item)=>({kind:'static-source-constant',name:item.name,value:item.value,text:item.text}));
+  return {status:'ok',hiddenSize,groupSize,rowsPerToken,source:explicitRows!=null?'explicit-rows-per-token':'hidden-div-group',evidence,explicit,hidden,group};
 }
 function staticProfilingRowCounts(sourceText,totalTokens=null){
   const text=String(sourceText||'');const candidates=[];
   for(const name of ROW_COUNT_NAMES){
     const re=new RegExp(`\\b${name}\\s*=`,`gi`);let match;
     while((match=re.exec(text))){
-      const body=extractBracketList(text,re.lastIndex);const counts=body==null?null:parseStaticIntegerList(body);
+      const body=extractBoundaryList(text,re.lastIndex);const counts=body==null?null:parseStaticIntegerList(body);
       if(counts)candidates.push({name,counts});
     }
   }
@@ -129,7 +137,7 @@ function staticProfilingRowCounts(sourceText,totalTokens=null){
   return {
     status:'ok',source:selected.name,counts,rawCounts:selected.counts,total,rawTotal,prompts:counts.length,
     unit:'trace-rows',rowsPerToken,boundaryNormalization:'trace-rows-to-token-counts',
-    evidence:'static-source-row-counts-with-hidden-group-ratio',unitEvidence
+    evidence:'static-source-row-counts-with-proven-row-ratio',unitEvidence
   };
 }
 function flattenSingletonTokenIds(sequences){
@@ -190,4 +198,4 @@ async function captureContextualProfileHiddenStates(model,sequences,options={}){
   });
 }
 
-module.exports={MAX_PROFILE_PROMPTS,MAX_PROFILE_TOKENS,MAX_ROWS_PER_TOKEN,ROW_COUNT_NAMES,HIDDEN_SIZE_NAMES,GROUP_SIZE_NAMES,parseStaticIntegerList,staticIntegerConstants,staticRowsPerTokenEvidence,staticProfilingRowCounts,reconstructProfilingSequences,extractSequenceHidden,captureContextualProfileHiddenStates};
+module.exports={MAX_PROFILE_PROMPTS,MAX_PROFILE_TOKENS,MAX_ROWS_PER_TOKEN,ROW_COUNT_NAMES,HIDDEN_SIZE_NAMES,GROUP_SIZE_NAMES,ROWS_PER_TOKEN_NAMES,parseStaticIntegerList,staticIntegerConstants,staticRowsPerTokenEvidence,staticProfilingRowCounts,reconstructProfilingSequences,extractSequenceHidden,captureContextualProfileHiddenStates};
