@@ -61,7 +61,8 @@ function buildFlagClosureScheduler(analysis={},autopilot=analysis.aiCompetitionA
   const rows=list(autopilot.directions).map((direction)=>{
     const closure=directionClosure(direction,analysis,context);
     const evidenceScore=Number(direction.score)||0;
-    const priority=(6-closure.stepsToFlag)*30+Math.min(29,evidenceScore)+(closure.readiness==='verifier-ready'?15:closure.readiness==='remote-replay-ready'?8:0);
+    // One fewer step to Verified must always dominate keyword/evidence tie-breakers.
+    const priority=(6-closure.stepsToFlag)*100+Math.min(29,evidenceScore)+(closure.readiness==='verifier-ready'?15:closure.readiness==='remote-replay-ready'?8:0);
     return {...direction,...closure,priority};
   }).sort((a,b)=>b.priority-a.priority||a.stepsToFlag-b.stepsToFlag||b.score-a.score||a.id.localeCompare(b.id));
   const closed=globalVerified(analysis);
