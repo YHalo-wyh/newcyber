@@ -56,9 +56,10 @@ async function makeBundle({withSourceLabels=false,target='flag{batch46_profile_l
 
 async function paths(root){return (await fsp.readdir(root)).map((name)=>path.join(root,name));}
 
-test('Batch42 compatibility import routes production callers to Batch46 dispatch',()=>{
-  assert.equal(compatBatch42.runScaAutopilotPaths,batch46.runScaAutopilotPaths);
+test('Batch42 compatibility import preserves Batch46 helpers while allowing newer SCA dispatch',()=>{
+  assert.equal(typeof compatBatch42.runScaAutopilotPaths,'function');
   assert.equal(typeof compatBatch42.runGroupedScaAutopilotPaths,'function');
+  assert.equal(compatBatch42.inferGroupedProfileShape,batch46.inferGroupedProfileShape);
 });
 
 test('Batch46 infers the real 287424-row grouped shape without materializing a 3072-D vector',()=>{
