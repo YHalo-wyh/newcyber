@@ -52,9 +52,13 @@ function directionClosure(direction,analysis,context){
 
   if(id==='privacy-leakage'){
     const sca=scaState(analysis);const status=String(sca?.status||'');const gap=String(sca?.gap?.code||'');
-    if(status==='flag-recovered')return {stepsToFlag:0,closureStage:'flag-verified',readiness:'closed',blockers:[],nextBestAction:'SCA 已由 oracle 恢复 flag；复核提交格式。',readyTools:[]};
-    if(status==='flag-candidate'){steps=1;stage='candidate-needs-verifier';readiness='verifier-ready';next='把 SCA flag candidate 送 Transformer/oracle 或 candidate-bound replay 完成最后验证。';}
-    else if(status==='decoded-no-flag'){steps=2;stage='recovered-sequence-no-flag';readiness='solver-active';next='优先检查 calibrated/full-probe 与 unknown-prefix oracle，重新恢复 token sequence 并搜索 flag。';}
+    if(status==='flag-recovered')return {stepsToFlag:0,closureStage:'flag-verified',readiness:'closed',blockers:[],nextBestAction:'SCA 已由逐位/Oracle 证据恢复 flag；复核提交格式。',readyTools:[]};
+    if(status==='verified-recovery'){
+      steps=1;stage='verified-recovery-needs-answer-extraction';readiness='verifier-ready';blockers.push('CHALLENGE_ANSWER_EXTRACTION');
+      next='SCA 恢复文本已逐 token contextual hidden 验证；不要重跑恢复。按题目提交格式从 Verified Recovery 提取答案，必要时只做 checker/格式确认。';
+    }
+    else if(status==='flag-candidate'){steps=1;stage='candidate-needs-verifier';readiness='verifier-ready';next='把 SCA flag candidate 送 Transformer/oracle 或 candidate-bound replay 完成最后验证。';}
+    else if(status==='decoded-no-flag'){steps=2;stage='recovered-sequence-no-flag';readiness='solver-active';next='优先检查 calibrated/full-probe 与 contextual/unknown-prefix oracle，重新恢复 token sequence 并搜索 flag。';}
     else if(status==='gap'){
       steps=2;stage='solver-gap';readiness='blocked';blockers.push(gap||'SCA_GAP');next=`先关闭 SCA ${gap||'solver gap'}，不要切换到低质量 raw 猜测。`;
     }else if(has(/membership|model[_ -]?extraction|inversion|side[_ -]?channel|sca|power trace/i,context)){steps=3;stage='evidence-ready';readiness='analyzer-ready';next='运行隐私/SCA 本地恢复器，优先产出可绑定 verifier 的 candidate。';}
