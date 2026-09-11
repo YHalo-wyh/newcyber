@@ -1,6 +1,6 @@
 # NewCyber AI Drop-to-Result Pipeline
 
-> 目标：把 AI 安全赛题附件或压缩包直接丢进 NewCyber，尽可能自动完成安全展开、证据识别、题型路由、模型/数据分析、候选生成与 verifier 闭环；当证据不足时明确输出 GAP，而不是猜答案。
+> 目标：把 AI 安全赛题附件或压缩包直接丢进 NewCyber，尽可能自动完成安全展开、证据识别、题型路由、模型/数据分析、候选生成与 verifier/scorer 闭环；当证据不足时明确输出 GAP，而不是猜答案。
 
 ## 1. 当前主链
 
@@ -16,25 +16,28 @@ Challenge archive / files
         v
 [3] Recovered Artifact Fixed Point
         |
-        +-------------------------------+
-        |                               |
-        v                               v
-[4] AI Preprocessing Evidence     [5] Training Family Match
-        |                               |
-        v                               v
-[6] Local ONNX / Prepared Tensor  [7] Strategy Reuse
-        |                               |
-        +---------------+---------------+
-                        |
-                        v
-[8] Contest Bundle Correlation
-                        |
-                        v
-[9] Verifier / Scorer Closure
-                        |
-              +---------+---------+
-              |         |         |
-            SOLVED   CANDIDATE    GAP
+        +-----------------------------------+
+        |                                   |
+        v                                   v
+[4] AI Preprocessing Evidence         [5] Training Family Match
+        |                                   |
+        v                                   v
+[6] Local ONNX / Prepared Tensor      [7] Strategy Reuse
+        |                                   |
+        +----------------+------------------+
+                         |
+                         v
+[8] Structured Detection Scorer / Table Correlation
+                         |
+                         v
+[9] Contest Bundle Correlation
+                         |
+                         v
+[10] Verifier / Scorer Closure
+                         |
+               +---------+---------+
+               |         |         |
+             SOLVED   CANDIDATE    GAP
 ```
 
 ### 1.1 Safe Archive Ingest
@@ -104,13 +107,30 @@ Base64、嵌套容器、递归解码等模块恢复出的完整工件会落盘�
 
 不会自动反序列化 `.pt/.pth/.pkl`，也不会执行题目自带 Python 来“方便加载模型”。
 
-### 1.7 Contest Bundle Correlation
+### 1.7 Structured Detection Scorer
+
+`ai_detection_bundle_autopilot.js` 会自动扫描受限的 CSV、TSV、JSON、JSONL、NDJSON 检测结果表，并尝试识别：
+
+- `truth + prediction`
+- `truth + score + 显式 threshold`
+- loss-history 序列
+- 显式 `threshold_ratio`
+
+只要字段证据完整，就会独立重算 confusion matrix、Accuracy、Precision、Recall、Specificity、F1、Balanced Accuracy 等指标，而不是盲信赛题脚本打印出来的结果。
+
+这里有两个硬边界：第一，只有 score 没有 threshold 时不会偷偷默认 `0.5`；第二，loss-history 没有明确 `threshold_ratio` 时只输出异常排名，不猜“前多少个就是投毒样本”。
+
+Batch77 又补上了分离结果表关联：当 `ground_truth.csv / labels.csv` 与 `result.csv / predictions.csv` 分开存在时，`ai_detection_table_correlation.js` 会按稳定样本 ID 关联两张表并复算指标。它不按行号直接拼接，要求双方没有重复 ID、至少 4 个样本重合、较小表覆盖率至少 80%，并要求文件名本身能提供足够强的 truth/prediction 角色证据；不满足就 GAP。
+
+投毒场景也额外收紧：普通分类 `label=1` 不再被当成“该样本已投毒”的真值。只有 `is_poisoned`、`poison_truth`、`poison_label` 等 poison-specific 字段才可以用于投毒检测验证。
+
+### 1.8 Contest Bundle Correlation
 
 `ai_contest_bundle_autopilot.js` 会把分散在不同文件里的 hints、logits、score table、candidate rows 与 verifier 信息关联起来。
 
 支持 JSON、JSONL、CSV/TSV 以及部分 Python-like 静态 hint 结构。对于对抗样本型赛题，可进一步进入 target/origin、Top1/Top2、margin、runner-up 等 ranking 逻辑。
 
-### 1.8 Verifier / Scorer Closure
+### 1.9 Verifier / Scorer Closure
 
 NewCyber 区分“找到候选”和“题目已经验证”。
 
@@ -118,11 +138,11 @@ NewCyber 区分“找到候选”和“题目已经验证”。
 - `CANDIDATE`：确定性分析给出候选，但尚无题目级验证。
 - `GAP`：缺少必要输入、模型运行条件、preprocessing 证据、ground truth、远程交互信息等。
 
-没有 verifier 时，不会因为 heuristic 分数很高就自动升级成 solved。
+没有 verifier/scorer 闭环时，不会因为 heuristic 分数很高就自动升级成 solved。
 
-## 2. Batch75：国内 AI 检测型赛题能力
+## 2. 国内 AI 检测型赛题能力
 
-Batch75 引入三类公开赛题衍生能力：
+Batch75 引入三类公开赛题衍生能力，Batch76/77 再把这些 evaluator 真正接回 Drop-to-Result 主链。
 
 ### 对抗图像检测
 
@@ -137,13 +157,15 @@ family：`image-adversarial-detection-scoring`
 - F1
 - Balanced Accuracy
 
-目的是不盲信题目脚本打印出的最终 accuracy，而是让 NewCyber 自己复算结果。
+如果 truth 和 prediction 被拆在两张表里，Batch77 会在满足高置信关联条件时自动按样本 ID 合并并复算。
 
 ### 投毒样本检测
 
 family：`loss-history-poison-ranking`
 
 针对“按每个样本的 loss 历史变化进行异常排序”的赛式结构，提供透明可复算的 synthetic evaluator。当前训练指标使用相邻 loss 的 mean absolute change / RMS change / net change 进行候选排序。
+
+有显式 `threshold_ratio` 时可以自动形成候选投毒集合；没有时只保持 ranking。只有 poison-specific 真值字段才能用于验证该集合。
 
 这只是从公开题面抽象出的训练策略，不声称复刻原题隐藏实现；真实附件仍必须重新从当前数据取证和调参。
 
@@ -164,7 +186,10 @@ Drop-to-Result 的自动化不是“拿到附件什么都执行”。以下边�
 5. 不把 heuristic/candidate 当 verifier-backed solved。
 6. 不把历史赛题答案迁移到当前题目。
 7. 不因为训练 family 相似就认为两题答案结构相同。
-8. 默认不擅自访问附件中出现的远程服务；需要远程上下文时由 Challenge Session 明确列出缺失信息。
+8. 不默认二分类 score threshold 为 0.5。
+9. 不按行号强行关联两张 truth/prediction 表。
+10. 不把普通分类 label 当作 poison ground truth。
+11. 默认不擅自访问附件中出现的远程服务；需要远程上下文时由 Challenge Session 明确列出缺失信息。
 
 ## 4. 自动化产物
 
@@ -174,20 +199,21 @@ Challenge Session 在适用时会产生或暴露以下结果：
 newcyber_ingest_manifest.json
 newcyber_recovered_manifest.json
 newcyber_onnx_autopilot.json
+newcyber_detection_autopilot.json
 newcyber_training_family_match.json
 ```
 
-UI 的 `DROP-TO-RESULT PIPELINE` 会展示 Archive、Recover、Preprocess、ONNX、Verify 等阶段的 DONE / PARTIAL / GAP / IDLE / SKIP 状态。
+UI 的 `DROP-TO-RESULT PIPELINE` 当前展示 Archive、Recover、Preprocess、ONNX、Detect、Verify 六个阶段的 DONE / PARTIAL / GAP / IDLE / SKIP 状态。
 
 ## 5. 下一阶段
 
-接下来的重点不是继续无脑增加 corpus 数量，而是提高“训练资产 -> 当前附件自动动作”的转化率：
+Batch75-77 已经把“检测型训练资产 -> 当前附件自动动作”打通了一段，下一步继续攻真正影响自动解题率的环节：
 
-- 自动识别检测题 CSV/JSON/JSONL 的 truth/prediction/score 列，并直接运行 scorer。
-- 自动识别 loss-history 表和序列，直接生成投毒候选排名。
-- 把 training family match 转换成有输入契约的 strategy plan；满足契约的步骤自动运行，不满足的步骤输出缺失证据。
-- 继续增强图像 preprocessing 的确定性执行覆盖。
-- 对多模型/多数据集 Bundle 增加基于源码引用关系的配对，而不是按文件名猜。
-- 把最终输出统一收敛成 `solved / candidate / needs-input / gap`，并给出具体证据链。
+- 把 training family match 进一步转换成带输入契约的 strategy plan；满足契约就自动运行，不满足就明确列出缺失证据。
+- 对多模型/多数据集 Bundle 增加基于源码引用关系、配置关系和 shape 的配对，而不是按文件名猜。
+- 继续增强图像 preprocessing 的确定性执行覆盖和多阶段 preprocessing 顺序恢复。
+- 把 scorer/checker 源码静态解析成更通用的 verifier contract，进一步扩大 `CANDIDATE -> SOLVED` 的自动闭环率。
+- 对远程题保留默认不主动联网的原则，但把“缺什么交互信息、应该采集什么证据”自动生成成最小 handoff。
+- 把最终输出统一收敛成 `solved / candidate / needs-input / gap`，并给出完整证据链。
 
 最终目标保持不变：**用户只负责把题目附件丢进来；NewCyber 尽可能自己把能确定的步骤全部做完，并对做不了的部分明确说明缺什么。**
