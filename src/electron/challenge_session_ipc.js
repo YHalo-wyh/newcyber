@@ -8,6 +8,7 @@ const {buildChallengeSession}=require('../core/challenge_session_batch51');
 const {expandChallengeArchive}=require('../core/challenge_archive_ingest');
 const {materializeRecoveredArtifacts}=require('../core/challenge_artifact_materialize');
 const {runChallengeOnnxAutopilot}=require('../core/challenge_onnx_autopilot');
+const {decodeImageWithElectron}=require('./challenge_image_decoder');
 
 const MAX_INPUT_FILES=64;
 const MAX_TOTAL_BYTES=2*1024*1024*1024;
@@ -167,7 +168,7 @@ async function scanSession(root,session){
   }
 
   let onnxAuto;
-  try{onnxAuto=await runChallengeOnnxAutopilot(root,analysis);}
+  try{onnxAuto=await runChallengeOnnxAutopilot(root,analysis,{decodeImage:decodeImageWithElectron});}
   catch(error){onnxAuto={schema:'newcyber.challenge-onnx-autopilot.v1',status:'gap',mode:null,runs:0,errors:[],contest:null,gap:{code:'AUTOPILOT_EXCEPTION',detail:String(error?.message||error).slice(0,500)}};}
   session.onnxAutopilot=onnxAuto;analysis.onnxContestAutopilot=onnxAuto;await writeOnnxAutopilotManifest(root,onnxAuto);
   if(onnxAuto?.contest&&(onnxAuto.status==='verified'||onnxAuto.status==='ranked')){
