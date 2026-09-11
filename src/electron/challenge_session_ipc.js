@@ -8,6 +8,7 @@ const {buildChallengeSession}=require('../core/challenge_session_batch51');
 const {expandChallengeArchive}=require('../core/challenge_archive_ingest');
 const {materializeRecoveredArtifacts}=require('../core/challenge_artifact_materialize');
 const {runChallengeOnnxAutopilot}=require('../core/challenge_onnx_autopilot');
+const {runAiDetectionBundleAutopilot}=require('../core/ai_detection_bundle_autopilot');
 const {matchTrainingFamilies}=require('../core/ai_training_family_matcher');
 const {decodeImageWithElectron}=require('./challenge_image_decoder');
 
@@ -104,6 +105,15 @@ async function writeOnnxAutopilotManifest(root,result){
   await fs.writeFile(path.join(root,'newcyber_onnx_autopilot.json'),`${JSON.stringify(safe,null,2)}\n`,'utf8');
 }
 
+async function writeDetectionAutopilotManifest(root,result){
+  if(!result||result.status==='not-applicable')return;
+  const safe={
+    schema:'newcyber.challenge-detection-autopilot-report.v1',generatedAt:new Date().toISOString(),status:result.status,summary:result.summary||null,
+    evaluations:(result.evaluations||[]).slice(0,64),gaps:(result.gaps||[]).slice(0,64),next:result.next||null,notes:result.notes||[]
+  };
+  await fs.writeFile(path.join(root,'newcyber_detection_autopilot.json'),`${JSON.stringify(safe,null,2)}\n`,'utf8');
+}
+
 async function writeTrainingFamilyManifest(root,result){
   if(!result||result.status==='not-detected')return;
   const safe={
@@ -131,7 +141,7 @@ async function stageFiles(inputFiles,root,session){
 
 function descriptor(root,session){
   const names=session.sources.map((x)=>path.basename(x));
-  const ingest=ingestSummary(session);const recovery=recoverySummary(session);const onnx=session.onnxAutopilot||null;
+  const ingest=ingestSummary(session);const recovery=recoverySummary(session);const onnx=session.onnxAutopilot||null;const detection=session.detectionAutopilot||null;
   return {
     kind:'file-session',
     stagedRoot:root,
@@ -149,13 +159,15 @@ function descriptor(root,session){
     recoveredFileCount:recovery.files,
     recoveredBytes:recovery.bytes,
     onnxAutopilotStatus:onnx?.status||null,
-    onnxAutopilotRuns:Number(onnx?.runs)||0
+    onnxAutopilotRuns:Number(onnx?.runs)||0,
+    detectionAutopilotStatus:detection?.status||null,
+    detectionAutopilotEvaluations:Number(detection?.summary?.evaluations)||0
   };
 }
 
 function preserveChallengeRuntime(previous,next){
   if(!previous)return next;
-  for(const key of ['solverPipeline','pipelineSummary','solverExecution','executorSummary','aiPreprocessingManifest','aiContestAutopilot','onnxContestAutopilot','trainingFamilyMatch'])if(previous[key]!==undefined)next[key]=previous[key];
+  for(const key of ['solverPipeline','pipelineSummary','solverExecution','executorSummary','aiPreprocessingManifest','aiContestAutopilot','onnxContestAutopilot','aiDetectionAutopilot','trainingFamilyMatch'])if(previous[key]!==undefined)next[key]=previous[key];
   return next;
 }
 function upsertCheck(analysis,check){
@@ -185,6 +197,11 @@ async function scanSession(root,session){
     analysis.aiContestAutopilot=onnxAuto.contest;mergeFindings(analysis,onnxAuto.contest.findings);
   }
 
+  let detectionAuto;
+  try{detectionAuto=await runAiDetectionBundleAutopilot(root,analysis);}
+  catch(error){detectionAuto={schema:'newcyber.ai-detection-bundle-autopilot.v1',status:'gap',summary:{structuredFiles:0,evaluations:0,binaryRuns:0,lossHistoryRuns:0,effectiveCandidates:0,gaps:1},evaluations:[],gaps:[{reason:'AUTOPILOT_EXCEPTION',detail:String(error?.message||error).slice(0,500)}],findings:[],next:'检测结果自动复算阶段异常，已降级为 GAP。',notes:[]};}
+  session.detectionAutopilot=detectionAuto;analysis.aiDetectionAutopilot=detectionAuto;await writeDetectionAutopilotManifest(root,detectionAuto);mergeFindings(analysis,detectionAuto.findings);
+
   const familyMatch=matchTrainingFamilies(analysis,{limit:10});
   analysis.trainingFamilyMatch=familyMatch;await writeTrainingFamilyManifest(root,familyMatch);
 
@@ -195,12 +212,14 @@ async function scanSession(root,session){
   if(ingest.archives>0)upsertCheck(analysis,{id:'archive-ingest',title:'压缩包安全展开 / 递归入库',hits:ingest.expandedFiles});
   if(recovery.files>0)upsertCheck(analysis,{id:'recovered-artifact-materialize',title:'恢复产物落盘 / 固定点复扫',hits:recovery.files});
   if(onnxAuto?.status&&onnxAuto.status!=='not-applicable')upsertCheck(analysis,{id:'challenge-onnx-autopilot',title:'本地 ONNX 候选批量推理 / 赛式排名',hits:Number(onnxAuto.runs)||0});
+  if(detectionAuto?.status&&detectionAuto.status!=='not-applicable')upsertCheck(analysis,{id:'ai-detection-bundle-autopilot',title:'检测结果表自动复算 / loss-history 排名',hits:Number(detectionAuto.summary?.evaluations)||0,detail:detectionAuto.next});
   if(familyMatch.status!=='not-detected')upsertCheck(analysis,{id:'training-family-match',title:'历史赛题家族匹配 / 策略路由',hits:familyMatch.matches.length,detail:familyMatch.next});
   const previous=analysis.challengeSession;
   analysis.challengeSession=preserveChallengeRuntime(previous,buildChallengeSession(analysis));
   analysis.challengeSession.archiveIngest=analysis.archiveIngest;
   analysis.challengeSession.recoveredArtifacts=analysis.recoveredArtifacts;
   analysis.challengeSession.onnxContestAutopilot={status:onnxAuto?.status||'not-applicable',mode:onnxAuto?.mode||null,runs:Number(onnxAuto?.runs)||0,gap:onnxAuto?.gap||null};
+  analysis.challengeSession.aiDetectionAutopilot={status:detectionAuto?.status||'not-applicable',summary:detectionAuto?.summary||null,next:detectionAuto?.next||null,gaps:(detectionAuto?.gaps||[]).slice(0,8)};
   analysis.challengeSession.trainingFamilyMatch={status:familyMatch.status,directionRanking:familyMatch.directionRanking.slice(0,5),matches:familyMatch.matches.slice(0,5),next:familyMatch.next};
   if(analysis.aiPreprocessingManifest)analysis.challengeSession.aiPreprocessingManifest=analysis.aiPreprocessingManifest;
   if(analysis.aiContestAutopilot)analysis.challengeSession.aiContestAutopilot={status:analysis.aiContestAutopilot.status,next:analysis.aiContestAutopilot.next,result:analysis.aiContestAutopilot.result||null};
@@ -209,7 +228,7 @@ async function scanSession(root,session){
 
 async function createFromPaths(paths){
   const inputs=await validateInputPaths(paths);const root=await newSessionRoot();
-  const session={sources:[],stagedNames:[],archiveIngest:[],materializations:[],materializationState:{materializedHashes:new Set(),materializationPass:0},onnxAutopilot:null,createdAt:new Date().toISOString()};sessions.set(root,session);
+  const session={sources:[],stagedNames:[],archiveIngest:[],materializations:[],materializationState:{materializedHashes:new Set(),materializationPass:0},onnxAutopilot:null,detectionAutopilot:null,createdAt:new Date().toISOString()};sessions.set(root,session);
   try{await stageFiles(inputs,root,session);return await scanSession(root,session);}catch(error){sessions.delete(root);await fs.rm(root,{recursive:true,force:true}).catch(()=>{});throw error;}
 }
 
