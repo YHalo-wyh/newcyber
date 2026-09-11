@@ -27,7 +27,7 @@ test('Batch82 black-box transcript computes vector distance and enforces query b
   const result=analyzeBlackboxAdversarialTranscript({norm:'linf',epsilon:0.05,queryBudget:5,targetLabel:'target',rows:[
     {query:6,original:'[0.1,0.2]',candidate:'[0.12,0.18]',predicted_label:'target'}
   ]});
-  assert.equal(result.shortlist[0].distance,0.020000000000000018);
+  assert.ok(Math.abs(result.shortlist[0].distance-0.02)<1e-12,result.shortlist[0].distance);
   assert.equal(result.queryBudgetExceeded,true);
   assert.equal(result.status,'partial');
   assert.ok(result.findings.some((x)=>x.id==='blackbox-query-budget-exceeded'));
