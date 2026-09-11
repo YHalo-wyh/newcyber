@@ -6,6 +6,7 @@ const {getOldDriverTrainingCorpus,runOldDriverTrainingRegression}=require('./ai_
 const {getAiRealCtfCorpus,runAiRealCtfRegression}=require('./ai_real_ctf_regression');
 const {getPublicChallengeTrainingCorpus,runPublicChallengeTrainingRegression}=require('./ai_public_challenge_training');
 const {getOdysseyTrainingCorpus,runOdysseyTrainingRegression}=require('./ai_odyssey_training');
+const {getSgAiCtfTrainingCorpus,runSgAiCtfTrainingRegression}=require('./ai_sg_aictf_training');
 
 const TARGET_DIRECTIONS=Object.freeze([
   'prompt-llm-security','adversarial-example','model-extraction','privacy-leakage',
@@ -18,7 +19,8 @@ const CORPORA=Object.freeze([
   {id:'old-driver',title:'Old Driver adversarial replay',kind:'ctf-derived',get:getOldDriverTrainingCorpus},
   {id:'real-ctf',title:'Real/public CTF regression catalog',kind:'ctf-derived',get:getAiRealCtfCorpus},
   {id:'public-challenge',title:'Public challenge training',kind:'ctf-derived',get:getPublicChallengeTrainingCorpus},
-  {id:'ai-odyssey-2026',title:'TryHackMe 2026 AI Odyssey',kind:'ctf-derived',get:getOdysseyTrainingCorpus}
+  {id:'ai-odyssey-2026',title:'TryHackMe 2026 AI Odyssey',kind:'ctf-derived',get:getOdysseyTrainingCorpus},
+  {id:'sg-aictf-2025',title:'AICTF 2025 Pre-U challenge replay',kind:'ctf-derived',get:getSgAiCtfTrainingCorpus}
 ]);
 
 function text(value){return value==null?'':String(value).trim();}
@@ -99,7 +101,8 @@ const SUITES=Object.freeze([
   {id:'old-driver',run:()=>runOldDriverTrainingRegression()},
   {id:'real-ctf',run:()=>runAiRealCtfRegression()},
   {id:'public-challenge',run:(options)=>runPublicChallengeTrainingRegression(options)},
-  {id:'ai-odyssey-2026',run:(options)=>runOdysseyTrainingRegression(options)}
+  {id:'ai-odyssey-2026',run:(options)=>runOdysseyTrainingRegression(options)},
+  {id:'sg-aictf-2025',run:(options)=>runSgAiCtfTrainingRegression(options)}
 ]);
 function summarizeSuite(result){
   const summary=result&&typeof result.summary==='object'?result.summary:null;
