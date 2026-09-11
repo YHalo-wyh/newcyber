@@ -13,6 +13,11 @@ function staticDim(value){const n=Number(value);return Number.isInteger(n)&&n>0?
 function modelFiles(analysis){return list(analysis?.files).filter((file)=>String(file.extension||path.extname(file.path||'')).toLowerCase()==='.onnx');}
 function compatibleDims(actual,expected){if(!Array.isArray(actual)||!Array.isArray(expected)||actual.length!==expected.length)return false;return actual.every((value,index)=>{const a=staticDim(value),e=staticDim(expected[index]);return a===null||e===null||a===e;});}
 function fixedMismatch(actual,expected){if(!Array.isArray(actual)||!Array.isArray(expected)||actual.length!==expected.length)return true;return actual.some((value,index)=>{const a=staticDim(value),e=staticDim(expected[index]);return a!==null&&e!==null&&a!==e;});}
+function compatibleWithOptionalBatch(actual,expected){
+  if(compatibleDims(actual,expected))return{compatible:true,adaptation:'exact'};
+  if(Array.isArray(actual)&&Array.isArray(expected)&&expected.length===actual.length+1){const first=staticDim(expected[0]),expanded=[1,...actual];if((first===null||first===1)&&compatibleDims(expanded,expected))return{compatible:true,adaptation:'prepend-batch-1'};}
+  return{compatible:false,adaptation:null};
+}
 
 function expectedImageDims(manifest){
   const p=manifest?.pipeline||{};const spatial=p.crop&&p.crop.type==='center'?p.crop:p.size;if(!spatial)return null;
@@ -33,13 +38,17 @@ function scoreExplicit(model,bundle){
   const candidate=bundle?.candidates?.[0];if(!candidate?.feeds)return{score:0,reasons:[]};const names=Object.keys(candidate.feeds),inputs=list(model.inputs);if(inputs.some((item)=>!names.includes(item.name)))return{score:-100,reasons:['explicit feed names mismatch']};
   let score=6;const reasons=['explicit feed names match'];for(const input of inputs){const spec=candidate.feeds[input.name],dims=input.metadata?.dimensions;if(Array.isArray(spec?.dims)&&Array.isArray(dims)){if(fixedMismatch(spec.dims,dims))return{score:-100,reasons:[`feed ${input.name} shape mismatch`]};score+=2;reasons.push(`feed ${input.name} shape compatible`);}}return{score,reasons};
 }
-function scoreSingleInput(model,expectedDims,label){
+function scoreSingleInput(model,expectedDims,label,allowOptionalBatch=false){
   const inputs=list(model.inputs);if(inputs.length!==1)return{score:-100,reasons:[`${label} requires one input`]};let score=2;const reasons=['single input'];const dims=inputs[0]?.metadata?.dimensions;
-  if(expectedDims&&Array.isArray(dims)){if(fixedMismatch(expectedDims,dims))return{score:-100,reasons:[`${label} shape mismatch`]};score+=compatibleDims(expectedDims,dims)?5:1;reasons.push(`${label} shape compatible`);}return{score,reasons};
+  if(expectedDims&&Array.isArray(dims)){
+    const relation=allowOptionalBatch?compatibleWithOptionalBatch(expectedDims,dims):{compatible:compatibleDims(expectedDims,dims),adaptation:'exact'};
+    if(!relation.compatible)return{score:-100,reasons:[`${label} shape mismatch`]};score+=5;reasons.push(`${label} shape compatible${relation.adaptation==='prepend-batch-1'?' via batch=1':''}`);
+  }
+  return{score,reasons};
 }
 function weakNameScore(file){const name=String(file?.path||'').toLowerCase();let score=0;const reasons=[];if(/classif|model|network|net\b/.test(name)){score+=1;reasons.push('classifier/model filename signal');}if(/backup|old|debug|feature|embed/.test(name)){score-=1;reasons.push('weak auxiliary filename penalty');}return{score,reasons};}
 function scoreModel(file,model,context={}){
-  let part;if(context.mode==='explicit-feeds')part=scoreExplicit(model,context.explicitBundle);else if(context.mode==='npy')part=scoreSingleInput(model,context.npyDims||null,'NPY');else if(context.mode==='image')part=scoreSingleInput(model,expectedImageDims(context.manifest),'image');else part={score:list(model.inputs).length===1?1:0,reasons:[]};
+  let part;if(context.mode==='explicit-feeds')part=scoreExplicit(model,context.explicitBundle);else if(context.mode==='npy')part=scoreSingleInput(model,context.npyDims||null,'NPY',true);else if(context.mode==='image')part=scoreSingleInput(model,expectedImageDims(context.manifest),'image');else part={score:list(model.inputs).length===1?1:0,reasons:[]};
   if(part.score<=-100)return{file,model,score:part.score,reasons:part.reasons};const output=vectorOutputScore(model),weak=weakNameScore(file);return{file,model,score:part.score+output+weak.score,reasons:[...part.reasons,...(output?['classification-vector output']:[]),...weak.reasons]};
 }
 
@@ -62,4 +71,4 @@ async function selectOnnxModel(rootPath,analysis,context={},options={}){
   return{ok:true,...best,selection:{method:'compatibility-score',score:best.score,margin,reasons:best.reasons,alternatives:usable.slice(1,5).map((x)=>({path:x.file.path,score:x.score,reasons:x.reasons}))},errors};
 }
 
-module.exports={MAX_MODELS,expectedImageDims,vectorOutputScore,scoreModel,selectOnnxModel};
+module.exports={MAX_MODELS,expectedImageDims,compatibleWithOptionalBatch,vectorOutputScore,scoreModel,selectOnnxModel};
