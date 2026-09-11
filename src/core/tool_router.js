@@ -4,6 +4,7 @@ const { auditAiChallengeSource } = require('./ai_source_batch9');
 const { analyzeTabularDataset, evaluateTabularCandidate } = require('./ai_tabular');
 const { analyzeAdversarialPair, analyzeAdversarialBatch, buildAdversarialHarness } = require('./ai_adversarial');
 const { rankAdversarialContestCandidates, runOldDriverTrainingRegression, getOldDriverTrainingCorpus } = require('./ai_adversarial_ctf');
+const { adaptOnnxRunsToContestBundle, rankAdversarialContestFromOnnxRuns } = require('./ai_adversarial_onnx_bridge');
 const { analyzePrivacyTranscript, buildPrivacyHarness } = require('./ai_privacy');
 const { analyzeDatasetSecurity, buildDatasetHarness } = require('./ai_dataset_security');
 const { analyzePoisoningImpact, analyzeBackdoorBehavior } = require('./ai_poison_backdoor_validation');
@@ -79,6 +80,8 @@ function runTool(tool, payload = {}) {
   if (tool === 'ai-old-driver-training-regression') return runOldDriverTrainingRegression();
   if (tool === 'ai-old-driver-training-corpus') return { schema:'newcyber.ai-old-driver-corpus.v1', cases:getOldDriverTrainingCorpus() };
   if (tool === 'ai-adversarial-contest-rank') return rankAdversarialContestCandidates(payload.input || payload);
+  if (tool === 'ai-adversarial-onnx-adapt') return adaptOnnxRunsToContestBundle(payload.input || payload);
+  if (tool === 'ai-adversarial-onnx-rank') return rankAdversarialContestFromOnnxRuns(payload.input || payload);
   if (tool === 'ai-real-ctf-regression') return runAiRealCtfRegression();
   if (tool === 'ai-real-ctf-corpus') return { schema:'newcyber.ai-real-ctf-corpus.v1', cases:getAiRealCtfCorpus() };
   if (tool === 'ai-model-arithmetic-auto') return analyzeModelArithmeticBundle(payload.input || payload, payload.options || {});
