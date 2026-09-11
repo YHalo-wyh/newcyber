@@ -49,6 +49,15 @@ test('Batch91 raw string conjunction supports length/prefix/suffix but requires 
   assert.equal(bad.summary.predicateVerified,0);
 });
 
+test('Batch91 keeps structured membership candidates eligible for exact verifier closure',async(t)=>{
+  const root=await tempRoot(t);
+  await fs.writeFile(path.join(root,'checker.py'),"def verify(answer):\n    return answer == 'member-42'\n");
+  const result=await v4.runVerifierContractAutopilot(root,{aiMembershipAutopilot:{result:{memberIds:['member-7','member-42'],value:'2 members'}}});
+  assert.equal(result.status,'verified');
+  assert.equal(result.result.value,'member-42');
+  assert.match(result.result.source,/exact-candidate-match/);
+});
+
 test('Batch91 materializes compact result proof without duplicating large payload',async(t)=>{
   const root=await tempRoot(t);const payload='id,pred\n1,1\n';
   const verifier={status:'verified',result:{value:payload,payload,kind:'answer',source:'bounded predicate @ checker.py:2'},proof:{method:'bounded-predicate-return',candidateSource:'submission-autopilot:payload',contract:{type:'predicate-return',file:'checker.py',line:2,expression:'len(submission) == 12'},checks:[{type:'raw-length',expected:12,actual:12,ok:true}]}};
@@ -56,6 +65,11 @@ test('Batch91 materializes compact result proof without duplicating large payloa
   assert.equal(out.status,'verified');assert.equal(out.proof.artifact.matchesResult,true);
   const body=await fs.readFile(path.join(root,out.artifact.path),'utf8');
   assert.match(body,/newcyber\.result-proof-manifest\.v1/);assert.doesNotMatch(body,/id,pred\\n1,1/);
+});
+
+test('Batch91 compatibility verifier exports are complete without partial circular exports',()=>{
+  const mod=require('../src/core/challenge_verifier_contract');
+  for(const key of ['flagLike','walkSources','candidateValues','evaluateContracts','extraCandidateValues','runVerifierContractAutopilot'])assert.equal(typeof mod[key],'function',key);
 });
 
 test('Batch91 compatibility entrypoints route to v4 and analyzer batch91',async()=>{
