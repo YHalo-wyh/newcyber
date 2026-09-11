@@ -49,7 +49,7 @@ function buildChallengeSession(analysis={}){
   }
 
   // Compatibility pass-through: Electron file sessions historically rebuild through Batch51.
-  // Preserve newer deterministic candidates even when the specialized wrappers are not called here.
+  // Preserve newer deterministic candidates even when specialized wrappers are not called here.
   const membership=analysis.aiMembershipAutopilot;
   if(membership&&membership.status!=='not-detected'){
     session.aiMembershipAutopilot={status:membership.status,summary:membership.summary||null,selection:membership.selection||null,result:membership.result||null,next:membership.next||membership.reason||null};
@@ -62,6 +62,13 @@ function buildChallengeSession(analysis={}){
     session.aiUniversalTriggerAutopilot={status:trigger.status,summary:trigger.summary||null,result:trigger.result||null,next:trigger.next||null};
     if(trigger.status==='candidate'&&trigger.result){
       promoteCandidate(session,{value:trigger.result.value,payload:trigger.result.payload||trigger.result.value,displayValue:trigger.result.displayValue||trigger.result.value,source:trigger.result.source||'universal-trigger-ranker',kind:'universal-trigger'},'已得到 Universal Trigger 候选，等待 reward/checker 闭环');
+    }
+  }
+  const fingerprint=analysis.aiModelFingerprintAutopilot;
+  if(fingerprint&&fingerprint.status!=='not-detected'){
+    session.aiModelFingerprintAutopilot={status:fingerprint.status,summary:fingerprint.summary||null,result:fingerprint.result||null,bestCandidate:fingerprint.bestCandidate||null,next:fingerprint.next||null};
+    if(fingerprint.status==='candidate'&&fingerprint.result){
+      promoteCandidate(session,{value:fingerprint.result.value,payload:fingerprint.result.payload||fingerprint.result.value,displayValue:fingerprint.result.displayValue||fingerprint.result.value,source:fingerprint.result.source||'model-fingerprint-ranker',kind:'model-fingerprint'},'已得到目标模型 Fingerprint 候选，等待 checker/holdout 闭环');
     }
   }
   const submission=analysis.submissionAutopilot;
