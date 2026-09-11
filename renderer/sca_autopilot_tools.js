@@ -13,10 +13,13 @@
   const previousToolView=toolView;
 
   const stageNames={
-    discover:'DISCOVER',trace:'TRACE / FEATURES','trace-source':'TRACE SOURCE','object-flatten':'OBJECT FLATTEN','model-runtime':'MODEL RUNTIME','profile-hidden':'PROFILE HIDDEN','profile-input':'PROFILE INPUT','group-layout':'GROUP LAYOUT','leakage-fit':'LEAKAGE FIT',probe:'PROBE RANKING','free-probe':'FREE PROBE',oracle:'TRANSFORMER ORACLE','flag-candidate':'FLAG CANDIDATE',flag:'FLAG VERIFIED'
+    discover:'DISCOVER',trace:'TRACE / FEATURES','trace-source':'TRACE SOURCE','object-flatten':'OBJECT FLATTEN','feature-recipe':'FEATURE RECIPE','engine-dispatch':'ENGINE DISPATCH','model-runtime':'MODEL RUNTIME','profile-hidden':'PROFILE HIDDEN','profile-input':'PROFILE INPUT','group-layout':'GROUP LAYOUT','leakage-fit':'LEAKAGE FIT','leakage-quality':'LEAKAGE QUALITY','candidate-map':'CANDIDATE MAP','probe-calibration':'PROBE CALIBRATION',probe:'PROBE RANKING','contextual-hidden-oracle':'CONTEXTUAL HIDDEN','unknown-prefix-oracle':'UNKNOWN PREFIX ORACLE','free-probe':'FREE PROBE',oracle:'TRANSFORMER ORACLE','flag-candidate':'FLAG CANDIDATE',flag:'FLAG VERIFIED'
   };
   function active(){return result?.result||result;}
-  function pill(status){const cls=status==='ok'?'ok':status==='gap'?'gap':'wait';return `<span class="sca-auto-pill ${cls}">${esc(String(status||'wait').toUpperCase())}</span>`;}
+  function quality(){return active()?.diagnostics?.scaQuality||null;}
+  function finite(value){const n=Number(value);return Number.isFinite(n)?n:null;}
+  function fmt(value,digits=4){const n=finite(value);return n==null?'—':n.toFixed(digits);}
+  function pill(status){const cls=status==='ok'?'ok':status==='gap'||status==='failed'?'gap':'wait';return `<span class="sca-auto-pill ${cls}">${esc(String(status||'wait').toUpperCase())}</span>`;}
   function artifactRole(label,role){
     if(!role)return `<div><span>${label}</span><b>—</b><small>not resolved</small></div>`;
     if(role.status==='ok')return `<div><span>${label}</span><b>${esc(role.file?.fileName||'resolved')}</b><small>resolved</small></div>`;
@@ -39,7 +42,7 @@
   function stagesPanel(){
     const current=active();
     const stages=current?.stages||[];
-    const canonical=['discover','trace','trace-source','object-flatten','model-runtime','profile-input','profile-hidden','group-layout','leakage-fit','probe','free-probe','oracle','flag-candidate','flag'];
+    const canonical=['engine-dispatch','discover','trace','trace-source','object-flatten','feature-recipe','model-runtime','profile-input','profile-hidden','group-layout','leakage-fit','leakage-quality','candidate-map','probe-calibration','probe','contextual-hidden-oracle','unknown-prefix-oracle','free-probe','oracle','flag-candidate','flag'];
     const map=new Map(stages.map((item)=>[item.id,item]));
     const present=new Set(stages.map((item)=>item.id));
     const known=canonical.filter((id)=>present.has(id)||['discover','model-runtime','profile-hidden','leakage-fit','probe','oracle','flag'].includes(id));
@@ -56,6 +59,27 @@
     return `<section class="sca-auto-panel"><header><div><b>PROFILE / PROBE</b><span>${esc(p.method||p.status||'—')}</span></div>${pill(p.status==='ok'?'ok':'gap')}</header>
       <div class="sca-auto-metrics"><div><span>TOKENS</span><b>${p.rows||0}</b></div><div><span>HIDDEN</span><b>${p.hiddenDim||0}</b></div><div><span>LEAKAGE</span><b>${p.leakageDim||0}</b></div><div><span>SOLVE DIM</span><b>${p.solveDim||0}</b></div><div><span>GROUPS/TOKEN</span><b>${layout?.groupsPerToken||p.groupsPerToken||'—'}</b></div><div><span>HIDDEN/GROUP</span><b>${layout?.hiddenPerGroup||p.hiddenPerGroup||'—'}</b></div><div><span>R²</span><b>${p.r2==null?'—':Number(p.r2).toFixed(6)}</b></div><div><span>RMSE</span><b>${p.rmse==null?'—':Number(p.rmse).toExponential(2)}</b></div></div>
       ${candidates.length?`<div class="sca-auto-candidates"><header><span>STEP</span><span>TOP TOKEN CANDIDATES</span></header>${candidates.slice(0,256).map((row,index)=>`<div><i>${index}</i><code>${(row||[]).slice(0,8).map((x)=>`${x.tokenId}:${Number(x.score).toFixed(3)}`).join(' · ')}</code></div>`).join('')}</div>`:''}
+    </section>`;
+  }
+  function qualityPanel(){
+    const q=quality();
+    if(!q)return `<section class="sca-auto-panel sca-auto-empty"><b>QUALITY DIAGNOSTICS</b><p>Batch92+ 质量诊断出现后，这里会显示 guard baseline、逐 group R²、probe 校准和 contextual hidden 失败位置。</p></section>`;
+    const guard=q.guardBaseline||{};const groups=q.leakageGroups||{};const calibration=q.probeCalibration||{};const contextual=q.contextual||{};
+    const anomalies=(groups.anomalousGroups||[]).slice(0,24);const failures=(contextual.positions||[]).filter((item)=>item?.passes===false).slice(0,64);
+    const unhealthy=anomalies.length>0||Number(contextual.failed)>0;
+    const calGain=finite(calibration.cosineGain);
+    return `<section class="sca-auto-panel sca-quality-panel"><header><div><b>QUALITY DIAGNOSTICS</b><span>OBSERVATIONAL ONLY · NEVER PROMOTES RESULT</span></div>${pill(unhealthy?'gap':'ok')}</header>
+      <div class="sca-quality-policy"><span>POLICY</span><b>R² ≥ ${fmt(q.policy?.leakageR2Threshold,3)} · COS ≥ ${fmt(q.policy?.contextualCosineThreshold,3)}</b><small>mayUpgradeResult=${String(Boolean(q.policy?.mayUpgradeResult))}</small></div>
+      <div class="sca-quality-metrics">
+        <div class="${guard.enabled?'ok':'warn'}"><span>GUARD BASELINE</span><b>${guard.enabled?'PROVEN':'NOT PROVEN'}</b><small>${guard.enabled?`${esc(guard.mode||'unknown')} · ${guard.leading??'?'} + ${guard.trailing??'?'} samples`:'不会猜 baseline'}</small></div>
+        <div class="${anomalies.length?'warn':'ok'}"><span>GROUP R² MIN / MEAN</span><b>${fmt(groups.minR2,6)} / ${fmt(groups.meanR2,6)}</b><small>${groups.count||0}/${groups.totalGroups||0} finite · anomalies ${anomalies.length}</small></div>
+        <div class="${calibration.accepted?'ok':''}"><span>PROBE CALIBRATION</span><b>${esc(String(calibration.status||'UNAVAILABLE').toUpperCase())}</b><small>${calibration.mode?esc(calibration.mode):'raw probe'}${calGain==null?'':` · gain ${fmt(calGain,6)}`}</small></div>
+        <div class="${Number(contextual.failed)>0?'warn':contextual.count?'ok':''}"><span>CONTEXTUAL COS MIN</span><b>${fmt(contextual.minCosine,6)}</b><small>passed ${contextual.passed||0} · failed ${contextual.failed||0} · drift ${fmt(contextual.thresholdDrift,6)}</small></div>
+      </div>
+      ${calibration.evaluation?`<div class="sca-quality-calibration"><span>HOLDOUT</span><code>cos ${fmt(calibration.evaluation.rawCosine,6)} → ${fmt(calibration.evaluation.calibratedCosine,6)} · mse ${fmt(calibration.evaluation.rawMse,6)} → ${fmt(calibration.evaluation.calibratedMse,6)} · train/val ${calibration.trainingRows??'—'}/${calibration.validationRows??'—'}</code></div>`:''}
+      ${anomalies.length?`<div class="sca-quality-table"><header><span>LOW R² GROUPS</span><span>R²</span><span>GAP TO 0.99</span></header>${anomalies.map((item)=>`<div><i>g${item.group}</i><code>${fmt(item.r2,6)}</code><code>${fmt(item.gapToThreshold,6)}</code></div>`).join('')}</div>`:''}
+      ${failures.length?`<div class="sca-quality-table contextual"><header><span>CONTEXTUAL FAILURES</span><span>COSINE</span><span>GAP TO 0.99</span></header>${failures.map((item)=>`<div><i>#${item.index} · token ${item.tokenId??'—'}</i><code>${fmt(item.cosine,6)}</code><code>${fmt(item.gapToThreshold,6)}</code></div>`).join('')}</div>`:''}
+      ${!anomalies.length&&!failures.length?`<div class="sca-quality-ok"><b>NO QUALITY HOTSPOT</b><span>当前已观测 group / contextual position 没有跌破 Batch92 诊断基准；最终是否 verified 仍看原有 verifier。</span></div>`:''}
     </section>`;
   }
   function conversionGate(){
@@ -76,6 +100,12 @@
     const ok=c.status==='converted';
     return `<div class="sca-auto-conversion-evidence"><div><span>CONVERSION</span><b>${esc(String(c.status||'unknown').toUpperCase())}</b></div><div><span>PROCESS</span><b>${esc(c.process?.status||'—')}</b></div><div><span>ONNX</span><b>${esc(c.selected?.fileName||'—')}</b></div><div><span>PROVENANCE</span><b>${c.manifestPath?'WRITTEN':'—'}</b></div>${ok?'':c.gap?`<p>${esc(c.gap.code)} · ${esc(c.gap.detail)}</p>`:''}</div>`;
   }
+  function candidateExplanation(current){
+    const q=current?.diagnostics?.scaQuality;const contextual=q?.contextual;
+    if(contextual?.status==='observed'&&Number(contextual.failed)>0)return `contextual hidden 已逐 position 复核，但仍有 ${Number(contextual.failed)} 个位置低于 ${fmt(contextual.threshold,3)}；保持 candidate，不提升为 verified。`;
+    if(current?.contextualHiddenOracle?.status==='decoded')return '已完成 contextual hidden 恢复，但尚未满足完整 verified 条件；保持 candidate。';
+    return '已从 grouped leakage → hidden reassembly → probe top-1 恢复，但未知 prompt/context 下缺少完整复核，不提升为 verified。';
+  }
   function resultPanel(){
     const current=active();
     const gap=current?.gap;
@@ -83,7 +113,7 @@
     const candidate=current?.flagCandidate||null;
     return `<section class="sca-auto-panel ${current?.flag?'solved':''}"><header><div><b>RESULT</b><span>${esc(current?.status||'NOT RUN')}</span></div>${pill(current?.flag?'ok':gap?'gap':'wait')}</header>
       ${current?.flag?`<div class="sca-auto-flag"><span>VERIFIED FLAG</span><strong>${esc(current.flag)}</strong><button class="button primary" data-sca-auto-copy>复制</button></div>`:''}
-      ${candidate&&!current?.flag?`<div class="sca-auto-gap"><span>FLAG CANDIDATE · FREE PROBE</span><b>${esc(candidate)}</b><p>已从 grouped leakage → hidden reassembly → probe top-1 恢复，但未知 prompt/context 下没有 Transformer oracle 复核，不提升为 verified。</p><button class="button ghost" data-sca-auto-copy-candidate>复制 Candidate</button></div>`:''}
+      ${candidate&&!current?.flag?`<div class="sca-auto-gap"><span>FLAG CANDIDATE</span><b>${esc(candidate)}</b><p>${esc(candidateExplanation(current))}</p><button class="button ghost" data-sca-auto-copy-candidate>复制 Candidate</button></div>`:''}
       ${current?.freeProbe?.text!=null?`<div class="sca-auto-oracle"><div><span>FREE PROBE TOKENS</span><b>${current.freeProbe.ids?.length||0}</b></div><div><span>TOP-1 MARGIN</span><b>${current.freeProbe.top1Margin?.mean==null?'—':Number(current.freeProbe.top1Margin.mean).toFixed(4)}</b></div></div><pre>${esc(current.freeProbe.text)}</pre>`:''}
       ${gap?`<div class="sca-auto-gap"><span>${esc(gap.stage||'stage')}</span><b>${esc(gap.code)}</b><p>${esc(gap.detail)}</p></div>`:''}
       ${conversionGate()}${conversionEvidence()}
@@ -97,7 +127,7 @@
     return `<div class="page-head tool-head sca-auto-head"><div><span class="kicker">TRACE → GROUPED HIDDEN → PROBE → ORACLE</span><h1>Power SCA Autopilot</h1><p>支持一行/token 与多行/token grouped leakage；未知 prompt 时可 free-probe，但 candidate 与 verified 严格分离。</p></div><button class="button ghost" data-view="ai">返回</button></div>
       <div class="sca-auto-command"><button class="button primary" data-sca-auto-run ${busy?'disabled':''}>${busy?'正在执行…':'选择赛题目录并自动恢复'}</button><div><span>MODE</span><b>OFFLINE / DETERMINISTIC</b></div><div><span>OBJECT NPY</span><b>RESTRICTED / NO EXEC</b></div><div><span>CHALLENGE CODE</span><b>NEVER EXECUTED</b></div></div>
       ${errorText?`<div class="sca-auto-error">${esc(errorText)}</div>`:''}
-      <div class="sca-auto-grid"><div>${discoveryPanel()}${profilePanel()}</div><div>${stagesPanel()}${resultPanel()}</div></div>`;
+      <div class="sca-auto-grid"><div>${discoveryPanel()}${profilePanel()}${qualityPanel()}</div><div>${stagesPanel()}${resultPanel()}</div></div>`;
   };
 
   document.addEventListener('click',async(event)=>{
