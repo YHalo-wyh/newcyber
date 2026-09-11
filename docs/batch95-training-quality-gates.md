@@ -72,11 +72,14 @@ Batch95 不把所有来源视为同等可靠。当前规则采用保守权重：
 
 ## 接入位置
 
-`getTrainingCurriculum()` 升级到 `newcyber.ai-training-curriculum.v2`，新增：
+为避免破坏现有 UI、tool router 和历史测试，Batch95 **保留原有 schema 版本**：
+
+- `newcyber.ai-training-curriculum.v1`
+- `newcyber.ai-training-curriculum-regression.v1`
+
+只做向后兼容的字段扩展：
 
 - `summary.quality`
 - `quality`
 
-`runTrainingCurriculumRegression()` 升级到 `newcyber.ai-training-curriculum-regression.v2`，同样返回完整 quality health。
-
-原有 `coverageDebt` 保留，用于兼容现有 UI/调用方；但后续排序和训练优先级应优先参考 `quality.byDirection`，而不是 raw case 数量。
+原有 `coverageDebt` 继续保留；但后续排序和训练优先级应优先参考 `quality.byDirection`，而不是 raw case 数量。
