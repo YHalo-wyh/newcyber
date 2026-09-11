@@ -12,17 +12,17 @@ function candidateString(value){
 }
 function extraCandidateValues(analysis={}){
   const out=[];const seen=new Set();
-  const add=(value,source)=>{
+  const add=(value,source,artifact=null)=>{
     const s=candidateString(value);
     if(!s||s.length>4*1024*1024)return;
     const key=`${source}\u0000${s}`;
     if(seen.has(key))return;
-    seen.add(key);out.push({value:s,source});
+    seen.add(key);out.push({value:s,source,artifact:artifact||null});
   };
   const addResult=(result,source)=>{
     if(!result)return;
-    add(result.payload,`${source}:payload`);
-    add(result.value,`${source}:value`);
+    add(result.payload,`${source}:payload`,result.artifact||null);
+    add(result.value,`${source}:value`,result.artifact||null);
   };
   addResult(analysis.aiMembershipAutopilot?.result,'ai-membership-autopilot');
   for(const id of list(analysis.aiMembershipAutopilot?.result?.memberIds).slice(0,512))add(id,'ai-membership-member-id');
@@ -42,7 +42,8 @@ async function runVerifierContractAutopilot(root,analysis={},options={}){
   const evaluated=base.evaluateContracts(first.contracts,extras);
   const verifiedMatch=evaluated.verified.find((item)=>item.contract.confidence==='strong')||evaluated.verified[0]||null;
   if(!verifiedMatch)return{...first,schema:'newcyber.challenge-verifier-contract.v3',extraCandidates:extras.length,verifiedMatches:[...(first.verifiedMatches||[]),...evaluated.verified].slice(0,32),summary:{...(first.summary||{}),extraCandidates:extras.length}};
-  const result={value:verifiedMatch.value,payload:verifiedMatch.value,verified:true,confidence:'verified',kind:flagLike(verifiedMatch.value)?'flag':'answer',source:`${verifiedMatch.method} @ ${verifiedMatch.contract.file}:${verifiedMatch.contract.line}`};
+  const matchedExtra=extras.find((item)=>item.source===verifiedMatch.candidateSource&&item.value===verifiedMatch.value)||null;
+  const result={value:verifiedMatch.value,payload:verifiedMatch.value,verified:true,confidence:'verified',kind:flagLike(verifiedMatch.value)?'flag':'answer',source:`${verifiedMatch.method} @ ${verifiedMatch.contract.file}:${verifiedMatch.contract.line}`,artifact:matchedExtra?.artifact||null};
   const findings=[...(first.findings||[]).filter((item)=>item.id!=='static-verifier-contract-discovered'),{
     id:'static-verifier-structured-candidate-satisfied',severity:'high',title:'自动生成的结构化候选命中题目 verifier',file:verifiedMatch.contract.file,line:verifiedMatch.contract.line,
     evidence:`${verifiedMatch.contract.type} <- ${verifiedMatch.candidateSource}`,
