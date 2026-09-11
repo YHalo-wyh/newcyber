@@ -19,6 +19,41 @@ function verifierDisplay(result){
   const value=String(result?.displayValue??result?.value??result?.payload??'');
   return value.length<=512?value:`已验证结构化提交内容 · ${Buffer.byteLength(value,'utf8')} bytes`;
 }
+function activeScaResult(analysis={}){
+  const wrapper=analysis.scaAutopilot;
+  if(wrapper?.result&&typeof wrapper.result==='object')return wrapper.result;
+  if(wrapper&&typeof wrapper==='object'&&wrapper.diagnostics?.scaQuality)return wrapper;
+  return null;
+}
+function finite(value){const n=Number(value);return Number.isFinite(n)?n:null;}
+function fixed(value,digits=4){const n=finite(value);return n===null?'—':n.toFixed(digits);}
+function summarizeScaQuality(result){
+  const quality=result?.diagnostics?.scaQuality;if(!quality)return null;
+  const groups=quality.leakageGroups||{};const contextual=quality.contextual||{};const calibration=quality.probeCalibration||{};const guard=quality.guardBaseline||{};
+  const anomalies=list(groups.anomalousGroups).length;const failures=Number(contextual.failed)||0;
+  const guardLabel=guard.enabled?`${guard.mode||'proven'} ${guard.leading??'?'}+${guard.trailing??'?'} guard`:'baseline 未证明';
+  const calibrationLabel=calibration.accepted?`${calibration.mode||'accepted'} · gain=${fixed(calibration.cosineGain,5)}`:(calibration.status||'not-applied');
+  return {
+    schema:'newcyber.challenge-session-sca-quality.v1',observationalOnly:true,mayUpgradeResult:false,
+    guard:guardLabel,groupMinR2:finite(groups.minR2),groupMeanR2:finite(groups.meanR2),groupMaxR2:finite(groups.maxR2),groupAnomalies:anomalies,
+    calibrationStatus:calibration.status||null,calibrationAccepted:Boolean(calibration.accepted),calibrationGain:finite(calibration.cosineGain),
+    contextualMinCosine:finite(contextual.minCosine),contextualMeanCosine:finite(contextual.meanCosine),contextualFailures:failures,
+    contextualThreshold:finite(contextual.threshold),oracleThreshold:finite(contextual.oracleThreshold),thresholdDrift:finite(contextual.thresholdDrift),
+    detail:`guard=${guardLabel} · group R² min=${fixed(groups.minR2,6)} mean=${fixed(groups.meanR2,6)} anomalies=${anomalies} · calibration=${calibrationLabel} · contextual min=${fixed(contextual.minCosine,6)} failures=${failures}`
+  };
+}
+function attachScaQualitySession(session,analysis={}){
+  const result=activeScaResult(analysis);const summary=summarizeScaQuality(result);if(!summary)return session;
+  session.scaQualityDiagnostics={...result.diagnostics.scaQuality,summary};
+  session.solverLedger=session.solverLedger||[];
+  upsertLedger(session.solverLedger,{
+    id:'sca-quality-diagnostics',title:'Power SCA 质量诊断',status:'ran',confidence:'diagnostic',detail:summary.detail,result:null,source:'newcyber.sca-quality-diagnostics.v1',observationalOnly:true
+  });
+  session.stats=session.stats||{};session.stats.templatesRun=session.solverLedger.length;
+  const fact={label:'SCA 质量诊断',value:`R² min ${fixed(summary.groupMinR2,4)} · cos min ${fixed(summary.contextualMinCosine,4)}`,detail:`异常 groups=${summary.groupAnomalies} · contextual failures=${summary.contextualFailures} · 只读诊断，不改变 candidate/verified 判定`};
+  session.facts=[fact,...list(session.facts).filter((item)=>item.label!==fact.label)].slice(0,6);
+  return session;
+}
 
 function buildChallengeSession(analysis={}){
   const session=base.buildChallengeSession(analysis);
@@ -103,8 +138,9 @@ function buildChallengeSession(analysis={}){
       if(session.aiHandoff)session.aiHandoff.ready=false;
     }
   }
+  attachScaQualitySession(session,analysis);
   session.nextInput=planChallengeNextInput(analysis,session);
   return session;
 }
 
-module.exports={...base,buildChallengeSession};
+module.exports={...base,buildChallengeSession,activeScaResult,summarizeScaQuality,attachScaQualitySession};
