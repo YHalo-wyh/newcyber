@@ -7,6 +7,7 @@ const {scanWorkspace,inspectFile}=require('../core/finals_analyzer_batch15');
 const {buildChallengeSession}=require('../core/challenge_session_batch51');
 const {expandChallengeArchive}=require('../core/challenge_archive_ingest');
 const {materializeRecoveredArtifacts}=require('../core/challenge_artifact_materialize');
+const {runChallengeOnnxAutopilot}=require('../core/challenge_onnx_autopilot');
 
 const MAX_INPUT_FILES=64;
 const MAX_TOTAL_BYTES=2*1024*1024*1024;
@@ -91,6 +92,16 @@ async function writeRecoveryManifest(root,session){
   await fs.writeFile(path.join(root,'newcyber_recovered_manifest.json'),`${JSON.stringify(manifest,null,2)}\n`,'utf8');
 }
 
+async function writeOnnxAutopilotManifest(root,result){
+  if(!result||result.status==='not-applicable')return;
+  const safe={
+    schema:'newcyber.challenge-onnx-autopilot-report.v1',generatedAt:new Date().toISOString(),status:result.status,mode:result.mode||null,model:result.model||null,runs:result.runs||0,
+    runtime:result.runtime||null,gap:result.gap||null,errors:(result.errors||[]).slice(0,64),bridge:result.bridge||null,
+    contest:result.contest?{status:result.contest.status,result:result.contest.result||null,next:result.contest.next,verifierMatches:(result.contest.verifierMatches||[]).slice(0,16),ranking:result.contest.ranking?{hints:result.contest.ranking.hints,candidates:result.contest.ranking.candidates,candidateSets:(result.contest.ranking.candidateSets||[]).slice(0,64)}:null}:null
+  };
+  await fs.writeFile(path.join(root,'newcyber_onnx_autopilot.json'),`${JSON.stringify(safe,null,2)}\n`,'utf8');
+}
+
 async function stageFiles(inputFiles,root,session){
   const used=new Set(session.stagedNames.map((x)=>x.toLowerCase()));
   for(const file of inputFiles){
@@ -109,7 +120,7 @@ async function stageFiles(inputFiles,root,session){
 
 function descriptor(root,session){
   const names=session.sources.map((x)=>path.basename(x));
-  const ingest=ingestSummary(session);const recovery=recoverySummary(session);
+  const ingest=ingestSummary(session);const recovery=recoverySummary(session);const onnx=session.onnxAutopilot||null;
   return {
     kind:'file-session',
     stagedRoot:root,
@@ -125,14 +136,23 @@ function descriptor(root,session){
     archiveErrors:ingest.errors,
     recoveredPasses:recovery.passes,
     recoveredFileCount:recovery.files,
-    recoveredBytes:recovery.bytes
+    recoveredBytes:recovery.bytes,
+    onnxAutopilotStatus:onnx?.status||null,
+    onnxAutopilotRuns:Number(onnx?.runs)||0
   };
 }
 
 function preserveChallengeRuntime(previous,next){
   if(!previous)return next;
-  for(const key of ['solverPipeline','pipelineSummary','solverExecution','executorSummary','aiPreprocessingManifest','aiContestAutopilot'])if(previous[key]!==undefined)next[key]=previous[key];
+  for(const key of ['solverPipeline','pipelineSummary','solverExecution','executorSummary','aiPreprocessingManifest','aiContestAutopilot','onnxContestAutopilot'])if(previous[key]!==undefined)next[key]=previous[key];
   return next;
+}
+function upsertCheck(analysis,check){
+  analysis.autopilot||={};analysis.autopilot.automaticChecks||=[];const existing=analysis.autopilot.automaticChecks.find((item)=>item.id===check.id);if(existing)Object.assign(existing,check);else analysis.autopilot.automaticChecks.push(check);
+}
+function mergeFindings(analysis,findings){
+  analysis.findings||=[];const seen=new Set(analysis.findings.map((item)=>`${item.id||item.title}:${item.file||''}:${item.evidence||''}`));
+  for(const item of findings||[]){const key=`${item.id||item.title}:${item.file||''}:${item.evidence||''}`;if(seen.has(key))continue;seen.add(key);analysis.findings.push(item);}
 }
 
 async function scanSession(root,session){
@@ -146,21 +166,26 @@ async function scanSession(root,session){
     analysis=await scanWorkspace(root,{challengeInput:input});
   }
 
+  let onnxAuto;
+  try{onnxAuto=await runChallengeOnnxAutopilot(root,analysis);}
+  catch(error){onnxAuto={schema:'newcyber.challenge-onnx-autopilot.v1',status:'gap',mode:null,runs:0,errors:[],contest:null,gap:{code:'AUTOPILOT_EXCEPTION',detail:String(error?.message||error).slice(0,500)}};}
+  session.onnxAutopilot=onnxAuto;analysis.onnxContestAutopilot=onnxAuto;await writeOnnxAutopilotManifest(root,onnxAuto);
+  if(onnxAuto?.contest&&(onnxAuto.status==='verified'||onnxAuto.status==='ranked')){
+    analysis.aiContestAutopilot=onnxAuto.contest;mergeFindings(analysis,onnxAuto.contest.findings);
+  }
+
   input=descriptor(root,session);analysis.challengeInput=input;analysis.workspaceName=input.displayName;
   const ingest=ingestSummary(session);const recovery=recoverySummary(session);
   analysis.archiveIngest={schema:'newcyber.challenge-archive-ingest-summary.v1',archives:ingest.archives,expandedFiles:ingest.expandedFiles,expandedBytes:ingest.expandedBytes,skipped:ingest.skipped,unsupported:ingest.unsupported,errors:ingest.errors};
   analysis.recoveredArtifacts={schema:'newcyber.challenge-recovered-artifact-summary.v1',passes:recovery.passes,files:recovery.files,bytes:recovery.bytes,skipped:recovery.skipped};
-  analysis.autopilot||={};analysis.autopilot.automaticChecks||=[];
-  if(ingest.archives>0){
-    const check={id:'archive-ingest',title:'压缩包安全展开 / 递归入库',hits:ingest.expandedFiles};const existing=analysis.autopilot.automaticChecks.find((item)=>item.id===check.id);if(existing)Object.assign(existing,check);else analysis.autopilot.automaticChecks.push(check);
-  }
-  if(recovery.files>0){
-    const check={id:'recovered-artifact-materialize',title:'恢复产物落盘 / 固定点复扫',hits:recovery.files};const existing=analysis.autopilot.automaticChecks.find((item)=>item.id===check.id);if(existing)Object.assign(existing,check);else analysis.autopilot.automaticChecks.push(check);
-  }
+  if(ingest.archives>0)upsertCheck(analysis,{id:'archive-ingest',title:'压缩包安全展开 / 递归入库',hits:ingest.expandedFiles});
+  if(recovery.files>0)upsertCheck(analysis,{id:'recovered-artifact-materialize',title:'恢复产物落盘 / 固定点复扫',hits:recovery.files});
+  if(onnxAuto?.status&&onnxAuto.status!=='not-applicable')upsertCheck(analysis,{id:'challenge-onnx-autopilot',title:'本地 ONNX 候选批量推理 / 赛式排名',hits:Number(onnxAuto.runs)||0});
   const previous=analysis.challengeSession;
   analysis.challengeSession=preserveChallengeRuntime(previous,buildChallengeSession(analysis));
   analysis.challengeSession.archiveIngest=analysis.archiveIngest;
   analysis.challengeSession.recoveredArtifacts=analysis.recoveredArtifacts;
+  analysis.challengeSession.onnxContestAutopilot={status:onnxAuto?.status||'not-applicable',mode:onnxAuto?.mode||null,runs:Number(onnxAuto?.runs)||0,gap:onnxAuto?.gap||null};
   if(analysis.aiPreprocessingManifest)analysis.challengeSession.aiPreprocessingManifest=analysis.aiPreprocessingManifest;
   if(analysis.aiContestAutopilot)analysis.challengeSession.aiContestAutopilot={status:analysis.aiContestAutopilot.status,next:analysis.aiContestAutopilot.next,result:analysis.aiContestAutopilot.result||null};
   return analysis;
@@ -168,7 +193,7 @@ async function scanSession(root,session){
 
 async function createFromPaths(paths){
   const inputs=await validateInputPaths(paths);const root=await newSessionRoot();
-  const session={sources:[],stagedNames:[],archiveIngest:[],materializations:[],materializationState:{materializedHashes:new Set(),materializationPass:0},createdAt:new Date().toISOString()};sessions.set(root,session);
+  const session={sources:[],stagedNames:[],archiveIngest:[],materializations:[],materializationState:{materializedHashes:new Set(),materializationPass:0},onnxAutopilot:null,createdAt:new Date().toISOString()};sessions.set(root,session);
   try{await stageFiles(inputs,root,session);return await scanSession(root,session);}catch(error){sessions.delete(root);await fs.rm(root,{recursive:true,force:true}).catch(()=>{});throw error;}
 }
 
