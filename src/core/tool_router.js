@@ -18,6 +18,7 @@ const { runAiRealCtfRegression, getAiRealCtfCorpus } = require('./ai_real_ctf_re
 const { runAiStage1TrainingRegression, PUBLIC_TRAINING_SEEDS } = require('./ai_stage1_training_corpus');
 const { runPublicChallengeTrainingRegression, getPublicChallengeTrainingCorpus } = require('./ai_public_challenge_training');
 const { runOdysseyTrainingRegression, getOdysseyTrainingCorpus } = require('./ai_odyssey_training');
+const { getTrainingCurriculum, runTrainingCurriculumRegression } = require('./ai_training_curriculum');
 const { runIchunqiuAiTrainingRegression, getIchunqiuAiTrainingCorpus, evaluateFalsePremiseReplay } = require('./ai_ichunqiu_training');
 const { analyzeRasterImage, compareRasterImages, analyzeNpySample, compareNpySamples } = require('./ai_sample_forensics');
 const { analyzeModelArithmeticBundle } = require('./ai_model_arithmetic');
@@ -74,6 +75,8 @@ function runTool(tool, payload = {}) {
   if (tool === 'binary-data-graph') return analyzeBinaryDataListing(payload.input);
   if (tool === 'ai-source-scan') return auditAiChallengeSource(payload.input);
   if (tool === 'ai-skill-matrix') return diagnoseAiSkillMatrixExtended(payload.input ?? payload);
+  if (tool === 'ai-training-curriculum') return getTrainingCurriculum();
+  if (tool === 'ai-training-full-regression') return runTrainingCurriculumRegression(payload.options || payload.input || {});
   if (tool === 'ai-stage1-training-regression') return runAiStage1TrainingRegression(payload.options || payload.input || {});
   if (tool === 'ai-stage1-training-corpus') return {schema:'newcyber.ai-stage1-training-corpus.v1',cases:PUBLIC_TRAINING_SEEDS};
   if (tool === 'ai-public-challenge-training-regression') return runPublicChallengeTrainingRegression(payload.options || payload.input || {});
