@@ -9,4 +9,5 @@
 // finals_analyzer_batch85 adds evidence-driven sample-submission packaging and keeps candidate/verified semantics separate.
 // finals_analyzer_batch86 adds universal trigger/backdoor candidate ranking across prompt holdouts.
 // finals_analyzer_batch87 adds victim↔candidate model fingerprint/extraction ranking on independent query evidence.
-module.exports = require('./finals_analyzer_batch87');
+// finals_analyzer_batch88 re-feeds structured AI/submission candidates into static verifier contracts and only promotes exact verified matches.
+module.exports = require('./finals_analyzer_batch88');
