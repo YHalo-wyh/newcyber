@@ -1,7 +1,7 @@
 'use strict';
 
 const base=require('./finals_analyzer_batch89');
-const {runVerifierContractAutopilot}=require('./challenge_verifier_contract_v4');
+const {runVerifierContractAutopilot}=require('./challenge_verifier_contract_v5');
 const {materializeSubmissionArtifact}=require('./challenge_submission_artifact');
 const {materializeResultProof}=require('./challenge_result_proof');
 const {buildChallengeSession}=require('./challenge_session_batch89');
