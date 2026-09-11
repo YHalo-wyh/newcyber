@@ -9,8 +9,9 @@ function upsertLedger(ledger,item){
   const index=ledger.findIndex((entry)=>entry.id===item.id);if(index>=0)ledger[index]={...ledger[index],...item};else ledger.unshift(item);
 }
 function isVerifiedResult(result){return Boolean(result?.verified===true||text(result?.confidence).toLowerCase()==='verified');}
-function promoteCandidate(session,result,headline){
+function promoteCandidate(session,result,headline,replace=false){
   if(!result||session.status==='solved'||isVerifiedResult(session.result))return;
+  if(session.result&&!replace)return;
   session.result={...result,verified:false,confidence:'candidate'};session.status='candidate';session.headline=headline;
 }
 
@@ -48,7 +49,7 @@ function buildChallengeSession(analysis={}){
   }
 
   // Compatibility pass-through: Electron file sessions historically rebuild through Batch51.
-  // Preserve newer deterministic candidates even when the specialized Batch83/85 wrappers are not called here.
+  // Preserve newer deterministic candidates even when the specialized wrappers are not called here.
   const membership=analysis.aiMembershipAutopilot;
   if(membership&&membership.status!=='not-detected'){
     session.aiMembershipAutopilot={status:membership.status,summary:membership.summary||null,selection:membership.selection||null,result:membership.result||null,next:membership.next||membership.reason||null};
@@ -56,11 +57,18 @@ function buildChallengeSession(analysis={}){
       promoteCandidate(session,{value:membership.result.value,payload:membership.result.payload||membership.result.value,displayValue:membership.result.displayValue||membership.result.value,source:membership.result.source||'ai-membership-autopilot',kind:'membership-id-list',memberIds:membership.result.memberIds||[]},'已生成 Membership 候选，等待 submission/checker 闭环');
     }
   }
+  const trigger=analysis.aiUniversalTriggerAutopilot;
+  if(trigger&&trigger.status!=='not-detected'){
+    session.aiUniversalTriggerAutopilot={status:trigger.status,summary:trigger.summary||null,result:trigger.result||null,next:trigger.next||null};
+    if(trigger.status==='candidate'&&trigger.result){
+      promoteCandidate(session,{value:trigger.result.value,payload:trigger.result.payload||trigger.result.value,displayValue:trigger.result.displayValue||trigger.result.value,source:trigger.result.source||'universal-trigger-ranker',kind:'universal-trigger'},'已得到 Universal Trigger 候选，等待 reward/checker 闭环');
+    }
+  }
   const submission=analysis.submissionAutopilot;
   if(submission&&submission.status!=='not-detected'){
     session.submissionAutopilot={status:submission.status,result:submission.result||null,next:submission.next||null};
     if(submission.status==='formatted'&&submission.result){
-      promoteCandidate(session,{value:submission.result.payload,payload:submission.result.payload,displayValue:submission.result.displayValue||submission.result.payload,source:submission.result.source||'submission-autopilot',kind:submission.result.kind||'submission',format:submission.result.format||null,template:submission.result.template||null},'已按题目 submission 模板生成提交候选，等待 checker/scorer 确认');
+      promoteCandidate(session,{value:submission.result.payload,payload:submission.result.payload,displayValue:submission.result.displayValue||submission.result.payload,source:submission.result.source||'submission-autopilot',kind:submission.result.kind||'submission',format:submission.result.format||null,template:submission.result.template||null},'已按题目 submission 模板生成提交候选，等待 checker/scorer 确认',true);
     }
   }
   return session;
