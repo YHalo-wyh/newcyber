@@ -19,7 +19,7 @@ function storedZip(entries){
     name.copy(local,30);data.copy(local,30+name.length);locals.push(local);
     const central=Buffer.alloc(46+name.length);
     central.writeUInt32LE(0x02014b50,0);central.writeUInt16LE((3<<8)|20,4);central.writeUInt16LE(20,6);central.writeUInt16LE(0x800,8);central.writeUInt16LE(0,10);
-    central.writeUInt32LE(crc,16);central.writeUInt32LE(data.length,20);central.writeUInt32LE(data.length,24);central.writeUInt16LE(name.length,28);central.writeUInt16LE(0,30);central.writeUInt16LE(0,32);central.writeUInt16LE(0,34);central.writeUInt16LE(0,36);central.writeUInt32LE(0o100644<<16,38);central.writeUInt32LE(offset,42);name.copy(central,46);centrals.push(central);
+    central.writeUInt32LE(crc,16);central.writeUInt32LE(data.length,20);central.writeUInt32LE(data.length,24);central.writeUInt16LE(name.length,28);central.writeUInt16LE(0,30);central.writeUInt16LE(0,32);central.writeUInt16LE(0,34);central.writeUInt16LE(0,36);central.writeUInt32LE(0o100644*0x10000,38);central.writeUInt32LE(offset,42);name.copy(central,46);centrals.push(central);
     offset+=local.length;
   }
   const centralOffset=offset;const centralSize=centrals.reduce((sum,item)=>sum+item.length,0);
