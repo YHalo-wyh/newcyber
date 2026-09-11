@@ -4,18 +4,20 @@
 
   function escapeHtml(value){
     if(typeof esc==='function')return esc(String(value??''));
-    return String(value??'').replace(/[&<>"']/g,(ch)=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+    return String(value??'').replace(/[&<>"']/g,(ch)=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot',"'":'&#39;'}[ch]));
   }
   function artifactOf(){
     const workspace=state.workspace||{};const session=workspace.challengeSession||{};
     return session.submissionArtifact||session.result?.artifact||workspace.submissionArtifact?.artifact||workspace.submissionAutopilot?.result?.artifact||null;
   }
+  function isFileSession(){return state.workspace?.challengeInput?.kind==='file-session';}
   function resultPanel(artifact){
     const session=state.workspace?.challengeSession||{};const verified=Boolean(artifact.verified||session.status==='solved');
     const sha=String(artifact.sha256||'');const bytes=Number(artifact.bytes)||0;
+    const save=isFileSession()?`<button class="button ${verified?'primary':'ghost'}" data-session-save-artifact>保存提交文件</button>`:'';
     return `<section class="challenge-result ${verified?'verified':'candidate'} challenge-artifact-result">
       <div class="challenge-artifact-main"><span>${verified?'VERIFIED SUBMISSION':'SUBMISSION CANDIDATE'}</span><code>${escapeHtml(artifact.filename||artifact.path||'submission')}</code><small>${escapeHtml(artifact.path||'')} · ${escapeHtml(artifact.format||'txt')} · ${bytes.toLocaleString()} bytes${sha?` · sha256 ${escapeHtml(sha.slice(0,20))}…`:''}</small></div>
-      <div class="challenge-artifact-actions"><button class="button ${verified?'primary':'ghost'}" data-session-reveal-artifact>在文件夹中显示</button><button class="button ghost" data-session-copy-artifact>复制路径</button><button class="button ghost" data-session-copy-submission>复制提交内容</button></div>
+      <div class="challenge-artifact-actions">${save}<button class="button ghost" data-session-reveal-artifact>在文件夹中显示</button><button class="button ghost" data-session-copy-artifact>复制路径</button><button class="button ghost" data-session-copy-submission>复制提交内容</button></div>
     </section>`;
   }
 
@@ -28,8 +30,14 @@
   };
 
   document.addEventListener('click',async(event)=>{
-    const target=event.target.closest?.('[data-session-reveal-artifact],[data-session-copy-artifact],[data-session-copy-submission]');if(!target)return;
+    const target=event.target.closest?.('[data-session-save-artifact],[data-session-reveal-artifact],[data-session-copy-artifact],[data-session-copy-submission]');if(!target)return;
     const artifact=artifactOf();if(!artifact)return;
+    if(target.hasAttribute('data-session-save-artifact')){
+      const root=state.workspace?.challengeInput?.stagedRoot||'';const relative=artifact.path||'';
+      const result=await window.newcyber.exportSubmissionArtifact?.(root,relative,artifact.filename||'newcyber_submission.txt');
+      if(typeof toast==='function')toast(result?.saved?`已保存提交文件：${result.path}`:result?.canceled?'已取消保存':`保存失败：${result?.reason||'unknown'}`,!result?.saved&&!result?.canceled);
+      return;
+    }
     if(target.hasAttribute('data-session-copy-artifact')){
       await navigator.clipboard.writeText(String(artifact.absolutePath||artifact.path||''));
       if(typeof toast==='function')toast('已复制提交文件路径');return;
