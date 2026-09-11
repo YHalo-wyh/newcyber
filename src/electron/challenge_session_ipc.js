@@ -5,6 +5,7 @@ const fs=require('fs/promises');
 const path=require('path');
 const {scanWorkspace,inspectFile}=require('../core/finals_analyzer_batch15');
 const {buildChallengeSession}=require('../core/challenge_session');
+const {expandChallengeArchive}=require('../core/challenge_archive_ingest');
 
 const MAX_INPUT_FILES=64;
 const MAX_TOTAL_BYTES=2*1024*1024*1024;
@@ -20,7 +21,7 @@ function uniqueName(name,used){
   let out=safe;let index=1;while(used.has(out.toLowerCase()))out=`${stem}-${index++}${ext}`;used.add(out.toLowerCase());return out;
 }
 function requireSession(rootPath){
-  const root=path.resolve(String(rootPath||''));const session=sessions.get(root);if(!session)throw new Error('当前单文件 Challenge Session 已失效，请重新丢入题目文件');return {root,session};
+  const root=path.resolve(String(rootPath||''));const session=sessions.get(root);if(!session)throw new Error('当前 Challenge Session 已失效，请重新丢入题目文件');return {root,session};
 }
 
 async function validateInputPaths(paths){
@@ -40,23 +41,65 @@ async function newSessionRoot(){
   return fs.mkdtemp(path.join(parent,`${process.pid}-`));
 }
 
+function ingestSummary(session){
+  const items=Array.isArray(session.archiveIngest)?session.archiveIngest:[];
+  const applicable=items.filter((item)=>item?.applicable);
+  const expandedFiles=applicable.reduce((sum,item)=>sum+(item.files?.length||0),0);
+  const expandedBytes=applicable.reduce((sum,item)=>sum+(Number(item.totalBytes)||0),0);
+  const skipped=applicable.reduce((sum,item)=>sum+(item.skipped?.length||0),0);
+  const unsupported=applicable.reduce((sum,item)=>sum+(item.unsupported?.length||0),0);
+  const errors=items.filter((item)=>item?.error).length;
+  return {archives:applicable.length,expandedFiles,expandedBytes,skipped,unsupported,errors,items};
+}
+
+async function writeIngestManifest(root,session){
+  const summary=ingestSummary(session);
+  if(!summary.archives&&!summary.errors)return;
+  const manifest={
+    schema:'newcyber.challenge-archive-ingest.v1',
+    generatedAt:new Date().toISOString(),
+    summary:{archives:summary.archives,expandedFiles:summary.expandedFiles,expandedBytes:summary.expandedBytes,skipped:summary.skipped,unsupported:summary.unsupported,errors:summary.errors},
+    archives:summary.items.map((item)=>({
+      source:item.source||null,kind:item.kind||null,applicable:Boolean(item.applicable),outputRoot:item.outputRoot||null,totalBytes:Number(item.totalBytes)||0,
+      files:(item.files||[]).map((file)=>({path:file.path,size:file.size,sha256:file.sha256,archive:file.archive,entry:file.entry,depth:file.depth,kind:file.kind})),
+      archives:item.archives||[],skipped:item.skipped||[],unsupported:item.unsupported||[],error:item.error||null
+    }))
+  };
+  await fs.writeFile(path.join(root,'newcyber_ingest_manifest.json'),`${JSON.stringify(manifest,null,2)}\n`,'utf8');
+}
+
 async function stageFiles(inputFiles,root,session){
   const used=new Set(session.stagedNames.map((x)=>x.toLowerCase()));
   for(const file of inputFiles){
     const name=uniqueName(file.name,used);const target=path.join(root,name);
     await fs.copyFile(file.path,target);
     session.sources.push(file.path);session.stagedNames.push(name);
+    try{
+      const ingest=await expandChallengeArchive(target,root);
+      if(ingest.applicable)session.archiveIngest.push(ingest);
+    }catch(error){
+      session.archiveIngest.push({applicable:true,source:name,kind:null,files:[],archives:[],skipped:[],unsupported:[],totalBytes:0,error:error?.message||String(error)});
+    }
   }
+  await writeIngestManifest(root,session);
 }
 
 function descriptor(root,session){
   const names=session.sources.map((x)=>path.basename(x));
+  const ingest=ingestSummary(session);
   return {
     kind:'file-session',
     stagedRoot:root,
     displayName:names.length===1?names[0]:`${names[0]||'Challenge'} +${Math.max(0,names.length-1)}`,
     originalPaths:[...session.sources],
-    fileCount:session.sources.length
+    fileCount:session.sources.length,
+    archiveExpanded:ingest.archives>0,
+    archiveCount:ingest.archives,
+    expandedFileCount:ingest.expandedFiles,
+    expandedBytes:ingest.expandedBytes,
+    archiveSkipped:ingest.skipped,
+    archiveUnsupported:ingest.unsupported,
+    archiveErrors:ingest.errors
   };
 }
 
@@ -65,18 +108,27 @@ async function scanSession(root,session){
   const analysis=await scanWorkspace(root,{challengeInput:input});
   analysis.challengeInput=input;
   analysis.workspaceName=input.displayName;
+  const ingest=ingestSummary(session);
+  analysis.archiveIngest={schema:'newcyber.challenge-archive-ingest-summary.v1',...ingest,items:undefined};
+  if(ingest.archives>0){
+    analysis.autopilot||={};analysis.autopilot.automaticChecks||=[];
+    const existing=analysis.autopilot.automaticChecks.find((item)=>item.id==='archive-ingest');
+    const check={id:'archive-ingest',title:'压缩包安全展开 / 递归入库',hits:ingest.expandedFiles};
+    if(existing)Object.assign(existing,check);else analysis.autopilot.automaticChecks.push(check);
+  }
   analysis.challengeSession=buildChallengeSession(analysis);
+  analysis.challengeSession.archiveIngest=analysis.archiveIngest;
   return analysis;
 }
 
 async function createFromPaths(paths){
   const inputs=await validateInputPaths(paths);const root=await newSessionRoot();
-  const session={sources:[],stagedNames:[],createdAt:new Date().toISOString()};sessions.set(root,session);
+  const session={sources:[],stagedNames:[],archiveIngest:[],createdAt:new Date().toISOString()};sessions.set(root,session);
   try{await stageFiles(inputs,root,session);return await scanSession(root,session);}catch(error){sessions.delete(root);await fs.rm(root,{recursive:true,force:true}).catch(()=>{});throw error;}
 }
 
-async function chooseFiles(title='选择题目文件'){
-  const result=await dialog.showOpenDialog(activeWindow(),{title,properties:['openFile','multiSelections'],filters:[{name:'Challenge files',extensions:['*']}]});
+async function chooseFiles(title='选择题目文件或压缩包'){
+  const result=await dialog.showOpenDialog(activeWindow(),{title,properties:['openFile','multiSelections'],filters:[{name:'Challenge files / archives',extensions:['*']}]});
   if(result.canceled||!result.filePaths.length)return null;
   return result.filePaths;
 }
@@ -85,7 +137,7 @@ function registerChallengeSessionIpc(){
   ipcMain.handle('challenge:choose-files',async()=>{const paths=await chooseFiles();return paths?createFromPaths(paths):null;});
   ipcMain.handle('challenge:analyze-dropped',async(_event,paths)=>createFromPaths(paths));
   ipcMain.handle('challenge:add-files',async(_event,rootPath)=>{
-    const {root,session}=requireSession(rootPath);const paths=await chooseFiles('补充当前题目的附件');if(!paths)return null;
+    const {root,session}=requireSession(rootPath);const paths=await chooseFiles('补充当前题目的附件或压缩包');if(!paths)return null;
     const inputs=await validateInputPaths(paths);await stageFiles(inputs,root,session);return scanSession(root,session);
   });
   ipcMain.handle('challenge:add-dropped',async(_event,rootPath,paths)=>{
@@ -95,4 +147,4 @@ function registerChallengeSessionIpc(){
   ipcMain.handle('challenge:inspect',async(_event,rootPath,relativePath)=>{const {root}=requireSession(rootPath);return inspectFile(root,relativePath);});
 }
 
-module.exports={registerChallengeSessionIpc,validateInputPaths,descriptor};
+module.exports={registerChallengeSessionIpc,validateInputPaths,descriptor,ingestSummary};
