@@ -20,6 +20,7 @@ const { runPublicChallengeTrainingRegression, getPublicChallengeTrainingCorpus }
 const { runOdysseyTrainingRegression, getOdysseyTrainingCorpus } = require('./ai_odyssey_training');
 const { runSgAiCtfTrainingRegression, getSgAiCtfTrainingCorpus } = require('./ai_sg_aictf_training');
 const { runAiVillageTrainingRegression, getAiVillageTrainingCorpus } = require('./ai_aivillage_training');
+const { runPromptCtfTrainingRegression, getPromptCtfTrainingCorpus } = require('./ai_prompt_ctf_training');
 const { getTrainingCurriculum, runTrainingCurriculumRegression } = require('./ai_training_curriculum');
 const { runIchunqiuAiTrainingRegression, getIchunqiuAiTrainingCorpus, evaluateFalsePremiseReplay } = require('./ai_ichunqiu_training');
 const { analyzeRasterImage, compareRasterImages, analyzeNpySample, compareNpySamples } = require('./ai_sample_forensics');
@@ -89,6 +90,8 @@ function runTool(tool, payload = {}) {
   if (tool === 'ai-sg-aictf-training-corpus') return {schema:'newcyber.ai-sg-aictf-training-corpus.v1',cases:getSgAiCtfTrainingCorpus()};
   if (tool === 'ai-aivillage-training-regression') return runAiVillageTrainingRegression(payload.options || payload.input || {});
   if (tool === 'ai-aivillage-training-corpus') return {schema:'newcyber.ai-aivillage-training-corpus.v1',cases:getAiVillageTrainingCorpus()};
+  if (tool === 'ai-prompt-ctf-training-regression') return runPromptCtfTrainingRegression(payload.options || payload.input || {});
+  if (tool === 'ai-prompt-ctf-training-corpus') return {schema:'newcyber.ai-prompt-ctf-training-corpus.v1',cases:getPromptCtfTrainingCorpus()};
   if (tool === 'ai-ichunqiu-training-regression') return runIchunqiuAiTrainingRegression();
   if (tool === 'ai-ichunqiu-training-corpus') return { schema:'newcyber.ai-ichunqiu-stage1-corpus.v1', cases:getIchunqiuAiTrainingCorpus() };
   if (tool === 'ai-false-premise-replay') return evaluateFalsePremiseReplay(payload.input || payload);
