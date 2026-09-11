@@ -22,6 +22,7 @@ const { runSgAiCtfTrainingRegression, getSgAiCtfTrainingCorpus } = require('./ai
 const { runAiVillageTrainingRegression, getAiVillageTrainingCorpus } = require('./ai_aivillage_training');
 const { runPromptCtfTrainingRegression, getPromptCtfTrainingCorpus } = require('./ai_prompt_ctf_training');
 const { getTrainingCurriculum, runTrainingCurriculumRegression } = require('./ai_training_curriculum');
+const { matchTrainingFamilies } = require('./ai_training_family_matcher');
 const { runIchunqiuAiTrainingRegression, getIchunqiuAiTrainingCorpus, evaluateFalsePremiseReplay } = require('./ai_ichunqiu_training');
 const { analyzeRasterImage, compareRasterImages, analyzeNpySample, compareNpySamples } = require('./ai_sample_forensics');
 const { analyzeModelArithmeticBundle } = require('./ai_model_arithmetic');
@@ -80,6 +81,7 @@ function runTool(tool, payload = {}) {
   if (tool === 'ai-skill-matrix') return diagnoseAiSkillMatrixExtended(payload.input ?? payload);
   if (tool === 'ai-training-curriculum') return getTrainingCurriculum();
   if (tool === 'ai-training-full-regression') return runTrainingCurriculumRegression(payload.options || payload.input || {});
+  if (tool === 'ai-training-family-match') return matchTrainingFamilies(payload.input || payload, payload.options || {});
   if (tool === 'ai-stage1-training-regression') return runAiStage1TrainingRegression(payload.options || payload.input || {});
   if (tool === 'ai-stage1-training-corpus') return {schema:'newcyber.ai-stage1-training-corpus.v1',cases:PUBLIC_TRAINING_SEEDS};
   if (tool === 'ai-public-challenge-training-regression') return runPublicChallengeTrainingRegression(payload.options || payload.input || {});
