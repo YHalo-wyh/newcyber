@@ -42,21 +42,21 @@ function floatingRef(value){
   return false;
 }
 function digestPinned(flat){
-  const digest=text(first(flat,['digest','sha256','checksum','artifact_digest','image_digest']));
+  const digest=text(first(flat,['digest','sha256','checksum','artifact_digest','artifactdigest','image_digest','imagedigest']));
   if(!digest)return{present:false,strong:false,value:null};
   const strong=/^(?:sha256:)?[a-f0-9]{64}$/i.test(digest)||/^sha512:[a-f0-9]{128}$/i.test(digest);
   return{present:true,strong,value:digest};
 }
 function normalizedRecord(input){
   const data=parseInput(input);const flat=flattened(data);
-  const source=text(first(flat,['source','registry','repository','repo','origin','url','download_url','artifact_source']));
+  const source=text(first(flat,['source','registry','repository','repo','origin','url','download_url','downloadurl','artifact_source','artifactsource']));
   const ref=text(first(flat,['revision','ref','reference','tag','version','commit','image','artifact']));
-  const signatureVerified=bool(first(flat,['signature_verified','signatureverified','verified_signature','cosign_verified','signature.valid','signature.verified']));
-  const signed=bool(first(flat,['signed','signature_present','has_signature'])) ?? Boolean(text(first(flat,['signature','sig','cosign_signature'])));
-  const provenanceVerified=bool(first(flat,['provenance_verified','provenanceverified','attestation_verified','slsa_verified','provenance.valid','attestation.valid']));
-  const provenancePresent=bool(first(flat,['provenance_present','has_provenance','attestation_present'])) ?? Boolean(text(first(flat,['provenance','attestation','slsa','builder_id','build_provenance'])));
-  const sourceAllowed=bool(first(flat,['source_allowed','allowlisted','source_allowlisted','registry_allowed','trusted_source','source_trusted']));
-  const name=text(first(flat,['name','server_name','artifact_name','package','model','tool_name','id']));
+  const signatureVerified=bool(first(flat,['signature_verified','signatureverified','verified_signature','verifiedsignature','cosign_verified','cosignverified','signature.valid','signature.verified']));
+  const signed=bool(first(flat,['signed','signature_present','signaturepresent','has_signature','hassignature'])) ?? Boolean(text(first(flat,['signature','sig','cosign_signature','cosignsignature'])));
+  const provenanceVerified=bool(first(flat,['provenance_verified','provenanceverified','attestation_verified','attestationverified','slsa_verified','slsaverified','provenance.valid','attestation.valid']));
+  const provenancePresent=bool(first(flat,['provenance_present','provenancepresent','has_provenance','hasprovenance','attestation_present','attestationpresent'])) ?? Boolean(text(first(flat,['provenance','attestation','slsa','builder_id','builderid','build_provenance','buildprovenance'])));
+  const sourceAllowed=bool(first(flat,['source_allowed','sourceallowed','allowlisted','source_allowlisted','sourceallowlisted','registry_allowed','registryallowed','trusted_source','trustedsource','source_trusted','sourcetrusted']));
+  const name=text(first(flat,['name','server_name','servername','artifact_name','artifactname','package','model','tool_name','toolname','id']));
   const command=text(first(flat,['command','executable','entrypoint','cmd']));
   const digest=digestPinned(flat);
   return{data,flat,name,source,ref,command,digest,signed:Boolean(signed),signatureVerified,provenancePresent:Boolean(provenancePresent),provenanceVerified,sourceAllowed,floating:floatingRef(ref||source)};
