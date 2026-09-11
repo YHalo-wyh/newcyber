@@ -117,7 +117,7 @@ function adaptOnnxRunsToContestBundle(input = {}) {
   const defaults = { outputName: input.outputName, allowFlatten: input.allowFlatten === true, expectedClasses:Number.isInteger(expectedClasses)&&expectedClasses>=2?expectedClasses:null };
   const candidates = runs.map((entry, index) => normalizeRunEntry(entry, index, defaults));
   return {
-    schema: 'newcyber.ai-adversarial-onnx-contest-bundle.v2',
+    schema: 'newcyber.ai-adversarial-onnx-contest-bundle.v1',
     hints,
     candidates,
     shortlistSize: input.shortlistSize,
@@ -144,7 +144,7 @@ function rankAdversarialContestFromOnnxRuns(input = {}) {
     maxSets: bundle.maxSets
   });
   return {
-    schema: 'newcyber.ai-adversarial-onnx-contest-ranking.v2',
+    schema: 'newcyber.ai-adversarial-onnx-contest-ranking.v1',
     bridge: {
       runs: bundle.candidates.length,
       outputNames: bundle.outputNames,
