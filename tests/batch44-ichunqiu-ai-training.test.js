@@ -1,5 +1,8 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const vm = require('node:vm');
 
 const {
   ICHUNQIU_STAGE1_CASES,
@@ -9,6 +12,8 @@ const {
   runIchunqiuAiTrainingRegression
 } = require('../src/core/ai_ichunqiu_training');
 const { runTool } = require('../src/core/tool_router');
+
+const root = path.join(__dirname, '..');
 
 test('i春秋 corpus records public provenance without copying real flags', () => {
   const corpus = getIchunqiuAiTrainingCorpus();
@@ -21,6 +26,7 @@ test('i春秋 corpus records public provenance without copying real flags', () =
     assert.equal(item.direction, 'prompt-llm-security');
     assert.equal(item.provenance, 'public-writeup-derived');
     assert.ok(item.sources.some((source) => source.includes('ichunqiu.com/competition/detail/378')));
+    assert.ok(item.sources.some((source) => source.includes('integritytech.com.cn/html/News/News_836_1.html')));
     assert.ok(item.variantCount >= 3);
   }
   assert.doesNotMatch(JSON.stringify(ICHUNQIU_STAGE1_CASES), /flag\{/i);
@@ -86,4 +92,14 @@ test('2024 i春秋 large-model-security event is kept as event-only signal', () 
   const signal = ICHUNQIU_EVENT_SIGNALS.find((item) => item.event.includes('2024巅峰极客'));
   assert.equal(signal.provenance, 'official-event-only');
   assert.match(signal.note, /不虚构训练样本/);
+});
+
+test('stage-one bench exposes a separate domestic CTF replay without replacing the five-direction corpus', () => {
+  const source = fs.readFileSync(path.join(root, 'renderer/ai_skill_matrix_tools.js'), 'utf8');
+  assert.doesNotThrow(() => new vm.Script(source, { filename: 'renderer/ai_skill_matrix_tools.js' }));
+  assert.match(source, /DOMESTIC CTF REPLAY/);
+  assert.match(source, /i春秋赛题族/);
+  assert.match(source, /ai-ichunqiu-training-regression/);
+  assert.match(source, /越狱的翻译官 \/ 健忘的客服 \/ 窥探内心 \/ 幻觉诱导/);
+  assert.match(source, /ai-stage1-training-regression/);
 });
