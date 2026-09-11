@@ -26,8 +26,10 @@ function scanSource(file,source){
   const push=(kind,value,match,confidence='exact-source',detail='')=>add(rows,evidence(file,source,match.index,kind,value,confidence,detail));
   let match;
 
-  const tupleResize=/(?:transforms\.)?Resize\s*\(\s*\(?\s*(\d{2,4})\s*[,x]\s*(\d{2,4})\s*\)?\s*\)|cv2\.resize\s*\([^\n]{0,240}?\(\s*(\d{2,4})\s*,\s*(\d{2,4})\s*\)/gi;
-  while((match=tupleResize.exec(source))){const a=Number(match[1]||match[3]),b=Number(match[2]||match[4]);if(a&&b)push('size',{height:a,width:b},match,'exact-source','显式 resize 尺寸');}
+  const torchvisionResize=/(?:transforms\.)?Resize\s*\(\s*\(?\s*(\d{2,4})\s*[,x]\s*(\d{2,4})\s*\)?\s*\)/gi;
+  while((match=torchvisionResize.exec(source))){const h=Number(match[1]),w=Number(match[2]);push('size',{height:h,width:w},match,'exact-source','torchvision/PIL Resize 使用 (height,width)');}
+  const cv2Resize=/cv2\.resize\s*\([^\n]{0,240}?\(\s*(\d{2,4})\s*,\s*(\d{2,4})\s*\)/gi;
+  while((match=cv2Resize.exec(source))){const w=Number(match[1]),h=Number(match[2]);push('size',{height:h,width:w},match,'exact-source','cv2.resize dsize 使用 (width,height)');}
   const scalarResize=/(?:transforms\.)?Resize\s*\(\s*(\d{2,4})\s*\)/gi;
   while((match=scalarResize.exec(source)))push('resize-short-edge',Number(match[1]),match,'exact-source','单值 Resize 只约束短边，不能直接当最终 H×W');
   const crop=/(?:CenterCrop|RandomCrop)\s*\(\s*\(?\s*(\d{2,4})(?:\s*,\s*(\d{2,4}))?\s*\)?\s*\)/gi;
