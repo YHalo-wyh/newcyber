@@ -1,6 +1,7 @@
 'use strict';
 
 const ALLOWED_TYPES=new Set(['float32','float64','int8','uint8','int16','uint16','int32','uint32','int64','uint64','bool']);
+const TYPE_BYTES=Object.freeze({float32:4,float64:8,int8:1,uint8:1,int16:2,uint16:2,int32:4,uint32:4,int64:8,uint64:8,bool:1});
 const BINDING_KEYS=['onnxInputs','onnx_inputs','inputFeeds','input_feeds','constantFeeds','constant_feeds'];
 const MAX_BINDINGS=64;
 const MAX_VALUES=1_000_000;
@@ -20,15 +21,23 @@ function compatibleWithOptionalBatch(actual,expected){
   if(Array.isArray(actual)&&Array.isArray(expected)&&expected.length===actual.length+1){const first=staticDim(expected[0]),expanded=[1,...actual];if((first===null||first===1)&&dimsCompatible(expanded,expected))return{compatible:true,adaptation:'prepend-batch-1',dims:expanded};}
   return{compatible:false,adaptation:null};
 }
+function validValueForType(value,type){
+  if(type==='bool')return typeof value==='boolean'||value===0||value===1||value==='0'||value==='1';
+  if(type==='int64'||type==='uint64'){const raw=String(value).trim();if(!/^-?\d+$/.test(raw))return false;if(type==='uint64'&&raw.startsWith('-'))return false;try{BigInt(raw);return true;}catch{return false;}}
+  const number=Number(value);if(!Number.isFinite(number))return false;if(/^u?int/.test(type)&&!Number.isInteger(number))return false;return true;
+}
 function validateFeedSpec(spec,name='input'){
   if(!spec||typeof spec!=='object'||Array.isArray(spec))throw new Error(`${name}: binding 必须是对象`);
   const type=normalizeType(spec.type);if(!ALLOWED_TYPES.has(type))throw new Error(`${name}: 不支持 type=${spec.type}`);
   if(!Array.isArray(spec.dims)||!spec.dims.length)throw new Error(`${name}: dims 缺失`);const dims=spec.dims.map(Number),count=product(dims);
   const hasValues=Array.isArray(spec.values);const hasBase64=typeof spec.base64==='string'&&spec.base64.length>0;
   if(hasValues===hasBase64)throw new Error(`${name}: values/base64 必须且只能提供一种`);
-  if(hasValues){if(spec.values.length!==count)throw new Error(`${name}: values 数量 ${spec.values.length} 与 dims 元素数 ${count} 不一致`);if(spec.values.length>MAX_VALUES)throw new Error(`${name}: values 超限`);if(spec.values.some((value)=>typeof value==='object'||(!['int64','uint64'].includes(type)&&!Number.isFinite(Number(value)))))throw new Error(`${name}: values 含非法值`);}
-  if(hasBase64){if(spec.base64.length>MAX_BASE64_CHARS||!/^[A-Za-z0-9+/]*={0,2}$/.test(spec.base64)||spec.base64.length%4!==0)throw new Error(`${name}: base64 非法或超限`);}
-  return{type,dims, ...(hasValues?{values:spec.values.slice()}:{base64:spec.base64})};
+  if(hasValues){if(spec.values.length!==count)throw new Error(`${name}: values 数量 ${spec.values.length} 与 dims 元素数 ${count} 不一致`);if(spec.values.length>MAX_VALUES)throw new Error(`${name}: values 超限`);if(spec.values.some((value)=>typeof value==='object'||!validValueForType(value,type)))throw new Error(`${name}: values 含非法值`);}
+  if(hasBase64){
+    if(spec.base64.length>MAX_BASE64_CHARS||!/^[A-Za-z0-9+/]*={0,2}$/.test(spec.base64)||spec.base64.length%4!==0)throw new Error(`${name}: base64 非法或超限`);
+    const bytes=Buffer.from(spec.base64,'base64').byteLength,expected=count*TYPE_BYTES[type];if(bytes!==expected)throw new Error(`${name}: base64 解码长度 ${bytes} 与 dims/type 期望 ${expected} 不一致`);
+  }
+  return{type,dims,...(hasValues?{values:spec.values.slice()}:{base64:spec.base64})};
 }
 function bindingObject(value){return value&&typeof value==='object'&&!Array.isArray(value);}
 function discoverConstantInputBindings(sources=[]){
@@ -60,4 +69,4 @@ function resolveModelInputPlan(model,context={}){
 }
 function inputPlanView(plan){if(!plan?.ok)return null;return{primaryInputName:plan.primaryInputName,auxiliaryInputNames:plan.auxiliaryInputNames||[],evidence:plan.evidence||[],reasons:plan.reasons||[]};}
 
-module.exports={ALLOWED_TYPES,BINDING_KEYS,normalizeType,dimsCompatible,compatibleWithOptionalBatch,validateFeedSpec,discoverConstantInputBindings,validateBindingAgainstInput,resolveModelInputPlan,inputPlanView};
+module.exports={ALLOWED_TYPES,TYPE_BYTES,BINDING_KEYS,normalizeType,dimsCompatible,compatibleWithOptionalBatch,validValueForType,validateFeedSpec,discoverConstantInputBindings,validateBindingAgainstInput,resolveModelInputPlan,inputPlanView};
