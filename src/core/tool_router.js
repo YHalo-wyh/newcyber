@@ -12,7 +12,7 @@ const { buildPromptInjectionSuite, evaluatePromptInjectionRun, auditPromptInject
 const { analyzeModelExtractionTranscript, buildModelExtractionHarness } = require('./ai_model_extraction');
 const { analyzeOcrExtractionTranscript, buildOcrExtractionHarness } = require('./ai_ocr_extraction');
 const { analyzeModelInversion } = require('./ai_model_inversion');
-const { diagnoseAiSkillMatrix } = require('./ai_skill_matrix');
+const { diagnoseAiSkillMatrixExtended } = require('./ai_skill_matrix_batch46');
 const { runAiRealCtfRegression, getAiRealCtfCorpus } = require('./ai_real_ctf_regression');
 const { runAiStage1TrainingRegression, PUBLIC_TRAINING_SEEDS } = require('./ai_stage1_training_corpus');
 const { runIchunqiuAiTrainingRegression, getIchunqiuAiTrainingCorpus, evaluateFalsePremiseReplay } = require('./ai_ichunqiu_training');
@@ -70,7 +70,7 @@ function runTool(tool, payload = {}) {
   if (tool === 'firmware-update-audit') return auditFirmwareUpdate(payload.input);
   if (tool === 'binary-data-graph') return analyzeBinaryDataListing(payload.input);
   if (tool === 'ai-source-scan') return auditAiChallengeSource(payload.input);
-  if (tool === 'ai-skill-matrix') return diagnoseAiSkillMatrix(payload.input ?? payload);
+  if (tool === 'ai-skill-matrix') return diagnoseAiSkillMatrixExtended(payload.input ?? payload);
   if (tool === 'ai-stage1-training-regression') return runAiStage1TrainingRegression(payload.options || payload.input || {});
   if (tool === 'ai-stage1-training-corpus') return {schema:'newcyber.ai-stage1-training-corpus.v1',cases:PUBLIC_TRAINING_SEEDS};
   if (tool === 'ai-ichunqiu-training-regression') return runIchunqiuAiTrainingRegression();
