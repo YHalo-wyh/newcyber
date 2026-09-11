@@ -7,6 +7,7 @@ const { createRequire } = require('module');
 
 const MAX_FEED_ELEMENTS = 8_000_000;
 const MAX_OUTPUT_ELEMENTS = 8_000_000;
+const MAX_BATCH_REQUESTS = 2048;
 const PREVIEW_ELEMENTS = 4096;
 const RUNTIME_BUNDLE_SCHEMA = 'newcyber.onnx-runtime-bundle.v1';
 const PINNED_ORT_VERSION = '1.29.0';
@@ -354,25 +355,58 @@ async function inspectOnnxModel(model, options = {}) {
   }));
 }
 
+async function runWithOpenSession(session, ort, request = {}, options = {}) {
+  const feeds = {};
+  const input = request.feeds || {};
+  for (const name of session.inputNames) {
+    if (!Object.prototype.hasOwnProperty.call(input, name)) throw new Error(`缺少 ONNX 输入 ${name}`);
+    feeds[name] = tensorFromSpec(ort, input[name]);
+  }
+  const requested = Array.isArray(request.outputs) && request.outputs.length
+    ? request.outputs.filter((name) => session.outputNames.includes(name)).slice(0, 64)
+    : session.outputNames.slice(0, 64);
+  if (!requested.length) throw new Error('没有有效 ONNX 输出请求');
+  const fetches = Object.fromEntries(requested.map((name) => [name, null]));
+  const output = await session.run(feeds, fetches);
+  return {
+    schema: 'newcyber.onnx-run.v1',
+    provider: normalizeProvider(options.provider || 'cpu'),
+    inputs: session.inputNames.slice(),
+    outputs: Object.fromEntries(requested.map((name) => [name, outputView(output[name])]))
+  };
+}
+
 async function runOnnxModel(model, request = {}, options = {}) {
+  return withSession(model, options, async (session, ort) => runWithOpenSession(session, ort, request, options));
+}
+
+async function runOnnxRequests(model, requests = [], options = {}) {
+  if (!Array.isArray(requests) || !requests.length) throw new Error('ONNX batch requests 不能为空');
+  if (requests.length > MAX_BATCH_REQUESTS) throw new Error(`ONNX batch requests 超过 ${MAX_BATCH_REQUESTS} 上限`);
+  const started = Date.now();
   return withSession(model, options, async (session, ort) => {
-    const feeds = {};
-    const input = request.feeds || {};
-    for (const name of session.inputNames) {
-      if (!Object.prototype.hasOwnProperty.call(input, name)) throw new Error(`缺少 ONNX 输入 ${name}`);
-      feeds[name] = tensorFromSpec(ort, input[name]);
+    const results = [];
+    for (let index = 0; index < requests.length; index += 1) {
+      try {
+        const result = await runWithOpenSession(session, ort, requests[index], options);
+        results.push({ index, ok: true, result });
+      } catch (error) {
+        const failure = { index, ok: false, error: String(error?.message || error).slice(0, 500) };
+        results.push(failure);
+        if (options.failFast === true) break;
+      }
     }
-    const requested = Array.isArray(request.outputs) && request.outputs.length
-      ? request.outputs.filter((name) => session.outputNames.includes(name)).slice(0, 64)
-      : session.outputNames.slice(0, 64);
-    if (!requested.length) throw new Error('没有有效 ONNX 输出请求');
-    const fetches = Object.fromEntries(requested.map((name) => [name, null]));
-    const output = await session.run(feeds, fetches);
+    const succeeded = results.filter((item) => item.ok).length;
     return {
-      schema: 'newcyber.onnx-run.v1',
+      schema: 'newcyber.onnx-request-batch.v1',
       provider: normalizeProvider(options.provider || 'cpu'),
-      inputs: session.inputNames.slice(),
-      outputs: Object.fromEntries(requested.map((name) => [name, outputView(output[name])]))
+      requested: requests.length,
+      completed: results.length,
+      succeeded,
+      failed: results.length - succeeded,
+      sessionCreates: 1,
+      elapsedMs: Date.now() - started,
+      results
     };
   });
 }
@@ -380,6 +414,7 @@ async function runOnnxModel(model, request = {}, options = {}) {
 module.exports = {
   MAX_FEED_ELEMENTS,
   MAX_OUTPUT_ELEMENTS,
+  MAX_BATCH_REQUESTS,
   RUNTIME_BUNDLE_SCHEMA,
   PINNED_ORT_VERSION,
   providerCatalog,
@@ -395,5 +430,7 @@ module.exports = {
   metadataView,
   outputView,
   inspectOnnxModel,
-  runOnnxModel
+  runWithOpenSession,
+  runOnnxModel,
+  runOnnxRequests
 };
