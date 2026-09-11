@@ -34,6 +34,9 @@
   let ichunqiuResult=null;
   let ichunqiuBusy=false;
   let ichunqiuError='';
+  let oldDriverResult=null;
+  let oldDriverBusy=false;
+  let oldDriverError='';
 
   function statusMeta(status) {
     return ({
@@ -120,7 +123,7 @@
     </div>`;
   }
 
-  function domesticRows() {
+  function ichunqiuRows() {
     if (!ichunqiuResult?.results?.length) return [];
     const grouped=new Map();
     for (const item of ichunqiuResult.results) {
@@ -132,22 +135,45 @@
     return [...grouped.values()];
   }
 
+  function promptDomesticReplay() {
+    const cq=ichunqiuResult?.summary;
+    const cqOverall=cq?`${cq.pass}/${cq.total}`:'—';
+    const rows=ichunqiuRows();
+    return `<div class="stage1-pane-title"><div><span>DOMESTIC CTF REPLAY</span><b>i春秋赛题族</b></div><button class="button ghost" data-ichunqiu-regression ${ichunqiuBusy?'disabled':''}>${ichunqiuBusy?'RUNNING':'RUN 12'}</button></div>
+      <div class="stage1-training-overall"><span>2025 春秋杯冬季赛</span><b>${cqOverall}</b><small>${cq?`${cq.challenges} challenges · ${cq.families} families · ${cq.controls} negative controls`:'越狱的翻译官 / 健忘的客服 / 窥探内心 / 幻觉诱导'}</small></div>
+      ${ichunqiuError?`<p class="stage1-training-error">${esc(ichunqiuError)}</p>`:''}
+      <div class="stage1-training-list">${rows.length?rows.map((row)=>`<div><span>${esc(row.challenge)}</span><b>${row.pass}/${row.total}</b><i class="stage1-status-dot ${row.pass===row.total?'good':'gap'}"></i></div>`).join(''):`<div><span>公开 WP → 攻击家族 → 训练 canary/judge</span><b>READY</b><i class="stage1-status-dot quiet"></i></div>`}</div>`;
+  }
+
+  function adversarialDomesticReplay() {
+    const summary=oldDriverResult?.summary;
+    const overall=summary?`${summary.pass}/${summary.total}`:'—';
+    const replay=oldDriverResult?.replay;
+    const groupCount=replay?.groups?.length||0;
+    const setCount=replay?.candidateSets?.length||0;
+    return `<div class="stage1-pane-title"><div><span>DOMESTIC CTF REPLAY</span><b>old_driver 赛式排名</b></div><button class="button ghost" data-old-driver-regression ${oldDriverBusy?'disabled':''}>${oldDriverBusy?'RUNNING':'RUN 8'}</button></div>
+      <div class="stage1-training-overall"><span>2021 春秋杯新年欢乐赛</span><b>${overall}</b><small>${summary?`${groupCount} hint groups · ${setCount} candidate sets`:'Top-2 pair / margin / runner-up / beam / verifier'}</small></div>
+      ${oldDriverError?`<p class="stage1-training-error">${esc(oldDriverError)}</p>`:''}
+      <div class="stage1-training-list">${oldDriverResult?.checks?.length?oldDriverResult.checks.map((row)=>`<div><span>${esc(row.id)}</span><b>${row.status==='pass'?'PASS':'MISS'}</b><i class="stage1-status-dot ${row.status==='pass'?'good':'gap'}"></i></div>`).join(''):`<div><span>公开 WP → 合成 logits → 候选排序 → hash verifier</span><b>READY</b><i class="stage1-status-dot quiet"></i></div>`}</div>`;
+  }
+
+  function domesticReplayPanel() {
+    if (activeDirection==='prompt-llm-security') return promptDomesticReplay();
+    if (activeDirection==='adversarial-example') return adversarialDomesticReplay();
+    return `<div class="stage1-pane-title"><div><span>DOMESTIC CTF REPLAY</span><b>待锁定赛题</b></div><small>${esc(activeDirection)}</small></div>
+      <div class="stage1-training-overall"><span>PROVENANCE FIRST</span><b>—</b><small>没有足够公开附件 / WP / verifier 证据时，不为了数量伪造国内赛题回归。</small></div>`;
+  }
+
   function trainingPanel() {
     const rows=trainingResult?.directions||[];
     const overall=trainingResult?`${trainingResult.pass}/${trainingResult.caseCount}`:'—';
-    const cq=ichunqiuResult?.summary;
-    const cqOverall=cq?`${cq.pass}/${cq.total}`:'—';
-    const cqRows=domesticRows();
     return `<aside class="stage1-training-pane">
       <div class="stage1-pane-title"><div><span>PUBLIC CORPUS</span><b>训练回归</b></div><button class="button ghost" data-stage1-regression ${trainingBusy?'disabled':''}>${trainingBusy?'RUNNING':'RUN 100+'}</button></div>
       <div class="stage1-training-overall"><span>DETERMINISTIC CASES</span><b>${overall}</b><small>${trainingResult?`pass rate ${(trainingResult.passRate*100).toFixed(1)}%`:'HackAPrompt / AgentDojo / RobustBench / MICO / TrojAI / BackdoorBench / ModelScan 等公开样本族'}</small></div>
       ${trainingError?`<p class="stage1-training-error">${esc(trainingError)}</p>`:''}
       <div class="stage1-training-list">${rows.length?rows.map((row)=>`<div><span>${esc(row.title||row.id)}</span><b>${row.pass}/${row.total}</b><i class="stage1-status-dot ${row.passRate>=.9?'good':row.passRate>=.7?'warn':'gap'}"></i></div>`).join(''):DIRECTIONS.map(([,no,title])=>`<div><span>${no} · ${esc(title)}</span><b>READY</b><i class="stage1-status-dot quiet"></i></div>`).join('')}</div>
-      <div class="stage1-pane-title"><div><span>DOMESTIC CTF REPLAY</span><b>i春秋赛题族</b></div><button class="button ghost" data-ichunqiu-regression ${ichunqiuBusy?'disabled':''}>${ichunqiuBusy?'RUNNING':'RUN 12'}</button></div>
-      <div class="stage1-training-overall"><span>2025 春秋杯冬季赛</span><b>${cqOverall}</b><small>${cq?`${cq.challenges} challenges · ${cq.families} families · ${cq.controls} negative controls`:'越狱的翻译官 / 健忘的客服 / 窥探内心 / 幻觉诱导'}</small></div>
-      ${ichunqiuError?`<p class="stage1-training-error">${esc(ichunqiuError)}</p>`:''}
-      <div class="stage1-training-list">${cqRows.length?cqRows.map((row)=>`<div><span>${esc(row.challenge)}</span><b>${row.pass}/${row.total}</b><i class="stage1-status-dot ${row.pass===row.total?'good':'gap'}"></i></div>`).join(''):`<div><span>公开 WP → 攻击家族 → 训练 canary/judge</span><b>READY</b><i class="stage1-status-dot quiet"></i></div>`}</div>
-      <div class="stage1-training-note"><span>TRAINING PRINCIPLE</span><p>公开题面 / benchmark 只提炼结构与 verifier，不复制答案。国内赛题额外保留任务外壳、多轮授权语义与 judge oracle，避免只对 “ignore previous instructions” 过拟合。</p></div>
+      ${domesticReplayPanel()}
+      <div class="stage1-training-note"><span>TRAINING PRINCIPLE</span><p>公开题面 / benchmark 只提炼结构与 verifier，不复制答案。国内赛题保留真实判定结构，但训练样本使用合成 canary、logits、编号和 judge 证据，避免答案库式过拟合。</p></div>
     </aside>`;
   }
 
@@ -194,6 +220,16 @@
       try { ichunqiuResult=await window.newcyber.runTool('ai-ichunqiu-training-regression',{}); }
       catch(error){ ichunqiuResult=null;ichunqiuError=error?.message||String(error); }
       finally { ichunqiuBusy=false;render();state.tool=TOOL;const next=document.querySelector('#tool-input');if(next)next.value=input; }
+      return;
+    }
+
+    const oldDriver=event.target.closest('[data-old-driver-regression]');
+    if (oldDriver && state.tool===TOOL && !oldDriverBusy) {
+      const input=document.querySelector('#tool-input')?.value||'';
+      oldDriverBusy=true;oldDriverError='';render();state.tool=TOOL;
+      try { oldDriverResult=await window.newcyber.runTool('ai-old-driver-training-regression',{}); }
+      catch(error){ oldDriverResult=null;oldDriverError=error?.message||String(error); }
+      finally { oldDriverBusy=false;render();state.tool=TOOL;const next=document.querySelector('#tool-input');if(next)next.value=input; }
       return;
     }
 
