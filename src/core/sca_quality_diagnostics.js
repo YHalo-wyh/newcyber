@@ -3,7 +3,7 @@
 const SCA_QUALITY_THRESHOLD=0.99;
 
 function list(value){return Array.isArray(value)?value:[];}
-function finite(value){const n=Number(value);return Number.isFinite(n)?n:null;}
+function finite(value){if(value===null||value===undefined||value==='')return null;const n=Number(value);return Number.isFinite(n)?n:null;}
 function mean(values){return values.length?values.reduce((sum,value)=>sum+value,0)/values.length:null;}
 function boundedEvidence(value){return list(value).slice(0,32).map((item)=>String(item).slice(0,180));}
 
