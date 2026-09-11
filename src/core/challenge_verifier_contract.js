@@ -13,10 +13,12 @@ const MAX_CONTRACTS=128;
 function text(value){return String(value??'').trim();}
 function list(value){return Array.isArray(value)?value:[];}
 function lineAt(body,index){return body.slice(0,Math.max(0,index)).split(/\r?\n/).length;}
-function context(body,index,radius=260){return body.slice(Math.max(0,index-radius),Math.min(body.length,index+radius)).replace(/\s+/g,' ').trim();}
+function context(body,index,radius=300){return body.slice(Math.max(0,index-radius),Math.min(body.length,index+radius)).replace(/\s+/g,' ').trim();}
 function verifierNamed(file){return /(?:^|[_.-])(verif(?:y|ier)?|check(?:er)?|judge|scor(?:e|er)|validat(?:e|or)|submit)(?:[_.-]|$)/i.test(path.basename(file));}
 function flagLike(value){return /(?:^|[^A-Za-z0-9])(?:flag|ctf|key|answer)?\{[^\r\n{}]{1,220}\}(?:$|[^A-Za-z0-9])/i.test(String(value||''))||/^(?:flag|ctf)[-_A-Za-z0-9]{4,220}$/i.test(String(value||''));}
 function strongContext(file,near){return verifierNamed(file)||/(?:verify|verifier|checker|judge|submit|submission|expected[_ -]?answer|correct[_ -]?answer|flag)/i.test(near);}
+function acceptanceContext(near){return /(?:correct|accepted|success|congrat|passed|valid\b|return\s+true|exit\s*\(\s*0\s*\)|print\s*\([^)]*(?:flag|correct|success)|status\s*[:=]\s*["']?(?:ok|pass|accepted|success))/i.test(String(near||''));}
+function rejectionContext(near){return /(?:incorrect|wrong|invalid|failed|failure|reject|denied|return\s+false|exit\s*\(\s*1\s*\))/i.test(String(near||''));}
 function safeLiteral(value){
   const s=String(value??'');if(s.length<1||s.length>512)return null;
   if(/[\x00-\x08\x0b\x0c\x0e-\x1f]/.test(s))return null;
@@ -40,7 +42,7 @@ async function walkSources(root,options={}){
     let entries;try{entries=await fs.readdir(dir,{withFileTypes:true});}catch{return;}
     for(const entry of entries){
       if(out.length>=maxFiles||total>=MAX_TOTAL_BYTES)break;
-      if(['.git','node_modules','__pycache__','__expanded__'].includes(entry.name))continue;
+      if(['.git','node_modules','__pycache__'].includes(entry.name))continue;
       const full=path.join(dir,entry.name);
       if(entry.isDirectory()){await visit(full);continue;}
       if(!entry.isFile()||/^newcyber_/i.test(entry.name))continue;
@@ -67,7 +69,7 @@ function discoverExactContracts(file,body){
     else value=literalFromMatch(match,1);
     if(!value)continue;const near=context(body,match.index);const strong=strongContext(file,near);
     if(!strong&&!flagLike(value))continue;
-    out.push({type:'exact',file,line:lineAt(body,match.index),variable,expected:value,confidence:(verifierNamed(file)&&strong)||flagLike(value)?'strong':'medium',evidence:near.slice(0,420)});
+    out.push({type:'exact',file,line:lineAt(body,match.index),variable,expected:value,confidence:(verifierNamed(file)&&strong)||flagLike(value)?'strong':'medium',evidence:near.slice(0,500)});
   }}
   return out;
 }
@@ -75,7 +77,7 @@ function discoverExactContracts(file,body){
 function discoverHashContracts(file,body){
   const out=[];const digestRe=/\b([a-f0-9]{32}|[a-f0-9]{40}|[a-f0-9]{64})\b/gi;let match;
   while((match=digestRe.exec(body))&&out.length<MAX_CONTRACTS){
-    const near=context(body,match.index,360);let algorithm=null;
+    const near=context(body,match.index,400);let algorithm=null;
     if(/\bmd5\b/i.test(near)&&match[1].length===32)algorithm='md5';
     else if(/\bsha1\b|sha-1/i.test(near)&&match[1].length===40)algorithm='sha1';
     else if(/\bsha256\b|sha-256/i.test(near)&&match[1].length===64)algorithm='sha256';
@@ -83,14 +85,14 @@ function discoverHashContracts(file,body){
     const inputBound=/(?:flag|answer|submission|submitted|user[_-]?input|candidate|response|stdin|request)/i.test(near);
     const compareBound=/(?:==|===|compare_digest|digest|hexdigest|check|verify)/i.test(near);
     if(!inputBound||!compareBound)continue;
-    out.push({type:'hash',file,line:lineAt(body,match.index),algorithm,digest:match[1].toLowerCase(),confidence:verifierNamed(file)?'strong':'medium',evidence:near.slice(0,500)});
+    out.push({type:'hash',file,line:lineAt(body,match.index),algorithm,digest:match[1].toLowerCase(),confidence:verifierNamed(file)?'strong':'medium',evidence:near.slice(0,540)});
   }
   return out;
 }
 
 function discoverFormatContracts(file,body){
   const out=[];const re=/(?:fullmatch|match|search|regex|regexp|pattern)[^\r\n]{0,220}(["'])([^"'\r\n]{4,300})\1/gi;let match;
-  while((match=re.exec(body))&&out.length<32){const pattern=match[2];if(!/(?:flag|ctf|\{|\\\{|\[A-Za-z)/i.test(pattern))continue;const near=context(body,match.index);if(!strongContext(file,near))continue;out.push({type:'format',file,line:lineAt(body,match.index),pattern,confidence:'medium',evidence:near.slice(0,420)});}
+  while((match=re.exec(body))&&out.length<32){const pattern=match[2];if(!/(?:flag|ctf|\{|\\\{|\[A-Za-z)/i.test(pattern))continue;const near=context(body,match.index);if(!strongContext(file,near))continue;out.push({type:'format',file,line:lineAt(body,match.index),pattern,confidence:'medium',evidence:near.slice(0,440)});}
   return out;
 }
 
@@ -131,8 +133,9 @@ function evaluateContracts(contracts,candidates){
 function directEligible(item){
   const contract=item?.contract;if(!contract||contract.type!=='exact')return false;
   if(flagLike(item.value))return true;
-  if(/^(?:flag|answer|submission|candidate)$/i.test(text(contract.variable)))return true;
-  return /(?:expected[_ -]?answer|correct[_ -]?answer|expected[_ -]?flag|correct[_ -]?flag)/i.test(text(contract.evidence));
+  const evidence=text(contract.evidence);
+  if(/(?:expected[_ -]?answer|correct[_ -]?answer|expected[_ -]?flag|correct[_ -]?flag)/i.test(evidence))return true;
+  return acceptanceContext(evidence)&&!rejectionContext(evidence);
 }
 
 async function runVerifierContractAutopilot(root,analysis={},options={}){
@@ -143,7 +146,7 @@ async function runVerifierContractAutopilot(root,analysis={},options={}){
     if(contracts.length>=MAX_CONTRACTS*2)break;
   }
   const unique=dedupeContracts(contracts);const candidates=candidateValues(analysis);const evaluated=evaluateContracts(unique,candidates);
-  const exactStrong=evaluated.direct.find((item)=>item.contract.confidence==='strong'&&directEligible(item));
+  const exactStrong=evaluated.direct.find((item)=>item.contract.confidence==='strong'&&directEligible(item))||null;
   const verifiedMatch=evaluated.verified.find((item)=>item.contract.confidence==='strong')||evaluated.verified[0]||null;
   const result=verifiedMatch?{value:verifiedMatch.value,verified:true,confidence:'verified',kind:flagLike(verifiedMatch.value)?'flag':'answer',source:`${verifiedMatch.method} @ ${verifiedMatch.contract.file}:${verifiedMatch.contract.line}`}:
     exactStrong?{value:exactStrong.value,verified:true,confidence:'verified',kind:flagLike(exactStrong.value)?'flag':'answer',source:`static exact verifier @ ${exactStrong.contract.file}:${exactStrong.contract.line}`}:
@@ -153,12 +156,12 @@ async function runVerifierContractAutopilot(root,analysis={},options={}){
   if(result)findings.push({id:'static-verifier-contract-satisfied',severity:'high',title:'静态 verifier contract 已形成强验证闭环',file:(verifiedMatch||exactStrong).contract.file,line:(verifiedMatch||exactStrong).contract.line,evidence:`${(verifiedMatch||exactStrong).contract.type} verifier -> ${result.kind}`,meaning:'题目 checker/verifier 源码中恢复到强约束，并已直接确定或验证当前候选；可升级为 verified result。'});
   else if(unique.length)findings.push({id:'static-verifier-contract-discovered',severity:'info',title:'发现可复用的 verifier contract',file:unique[0].file,line:unique[0].line,evidence:`contracts=${unique.length}; candidates=${candidates.length}`,meaning:'已恢复 exact/hash/format 约束，但当前没有候选满足强验证条件；保持候选/GAP。'});
   return{
-    schema:'newcyber.challenge-verifier-contract.v1',status,result,
-    summary:{sourceFiles:files.length,contracts:unique.length,exact:unique.filter((x)=>x.type==='exact').length,hash:unique.filter((x)=>x.type==='hash').length,format:unique.filter((x)=>x.type==='format').length,candidates:candidates.length,verifiedMatches:evaluated.verified.length,errors:errors.length},
+    schema:'newcyber.challenge-verifier-contract.v2',status,result,
+    summary:{sourceFiles:files.length,contracts:unique.length,exact:unique.filter((x)=>x.type==='exact').length,hash:unique.filter((x)=>x.type==='hash').length,format:unique.filter((x)=>x.type==='format').length,candidates:candidates.length,verifiedMatches:evaluated.verified.length,directEligible:evaluated.direct.filter(directEligible).length,errors:errors.length},
     contracts:unique,candidates:candidates.map((x)=>({source:x.source,valuePreview:flagLike(x.value)?x.value:x.value.slice(0,96)})),verifiedMatches:evaluated.verified.slice(0,32),findings,errors:errors.slice(0,32),
     next:result?'静态 verifier 已闭环，可把结果视为 verified。':unique.length?'已有 verifier contract；等待/生成满足 contract 的候选，不猜答案。':'未发现高置信静态 verifier contract。',
-    notes:['仅解析文本，不执行 checker/verifier 源码。','exact literal 只有在 verifier/checker 语境足够强且像答案/Flag 时才可直接形成 verified result。','hash contract 只验证已有候选；不会逆向哈希或枚举未知秘密。']
+    notes:['仅解析文本，不执行 checker/verifier 源码。','exact literal 只有在 Flag-like、明确 expected/correct answer 语义或无拒绝信号的成功分支语境下才能直接形成 verified result。','hash contract 只验证已有候选；不会逆向哈希或枚举未知秘密。','安全展开与恢复目录中的 verifier 源码也会进入静态扫描，但不会执行。']
   };
 }
 
-module.exports={SOURCE_EXTENSIONS,flagLike,strongContext,walkSources,discoverExactContracts,discoverHashContracts,discoverFormatContracts,dedupeContracts,candidateValues,evaluateContracts,directEligible,runVerifierContractAutopilot};
+module.exports={SOURCE_EXTENSIONS,flagLike,strongContext,acceptanceContext,rejectionContext,walkSources,discoverExactContracts,discoverHashContracts,discoverFormatContracts,dedupeContracts,candidateValues,evaluateContracts,directEligible,runVerifierContractAutopilot};
