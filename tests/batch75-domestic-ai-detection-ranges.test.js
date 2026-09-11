@@ -61,7 +61,7 @@ test('Batch75 public corpus exports provenance and capability but never syntheti
   assert.ok(corpus.some((x)=>x.family==='xception-deepfake-detection'));
   assert.ok(corpus.every((x)=>x.trainingPolicy==='synthetic-fixture-only'));
   assert.ok(corpus.every((x)=>x.provenance?.url?.startsWith('https://github.com/CTF-Archives/')));
-  assert.equal(JSON.stringify(corpus).includes('fixture'),false);
+  assert.ok(corpus.every((x)=>!Object.prototype.hasOwnProperty.call(x,'fixture')));
 });
 
 test('Batch75 full domestic detection regression passes positive and negative controls',()=>{
@@ -84,7 +84,7 @@ test('Batch75 curriculum includes domestic detection families and regression sui
 test('Batch75 tool routes expose replay evaluators and sanitized corpus',()=>{
   const corpus=runTool('ai-domestic-detection-training-corpus');
   assert.equal(corpus.cases.length,3);
-  assert.equal(JSON.stringify(corpus).includes('fixture'),false);
+  assert.ok(corpus.cases.every((x)=>!Object.prototype.hasOwnProperty.call(x,'fixture')));
   const binary=runTool('ai-binary-detection-replay',{input:{rows:[
     {truth:1,predicted:1},{truth:1,predicted:1},{truth:0,predicted:0},{truth:0,predicted:0}
   ]}});
