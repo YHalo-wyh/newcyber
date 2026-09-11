@@ -14,9 +14,11 @@ const SIGNALS=Object.freeze([
   {id:'rag',direction:'prompt-llm-security',weight:5,re:/\brag\b|retriev(?:al|er|ed)|vectorstore|embedding search|检索增强|向量库/i},
   {id:'agent-tool',direction:'prompt-llm-security',weight:5,re:/agent|tool[_ -]?call|function[_ -]?call|mcp|dispatch_tool|工具调用|智能体/i},
   {id:'confused-deputy',direction:'prompt-llm-security',weight:6,re:/confused deputy|forward(?:ed|ing)? request|inter[- _]?agent|agent trust|代理转发|信任边界/i},
-  {id:'adversarial',direction:'adversarial-example',weight:7,re:/adversarial|perturb|epsilon|\beps\b|fgsm|pgd|deepfool|linf|对抗样本|扰动/i},
+  {id:'adversarial-detection',direction:'adversarial-example',weight:7,re:/feature[_ -]?squeez|adversarial.{0,40}detect|detect.{0,40}adversarial|对抗检测/i},
+  {id:'adversarial',direction:'adversarial-example',weight:7,re:/adversarial|perturb|epsilon|\beps\b|fgsm|pgd|deepfool|linf|feature[_ -]?squeez|对抗样本|对抗检测|扰动/i},
   {id:'backdoor',direction:'backdoor-poisoning',weight:7,re:/backdoor|triggered_pred|target asr|attack success rate|后门|触发器/i},
-  {id:'poisoning',direction:'backdoor-poisoning',weight:5,re:/poison(?:ing|ed)?|label flip|sample_loss|投毒|污染样本/i},
+  {id:'loss-history-poison',direction:'backdoor-poisoning',weight:7,re:/loss(?:es)?[_ -]?history|loss history|loss.{0,30}变化(?:率)?|变化(?:率)?.{0,30}loss|poison.{0,30}loss|投毒.{0,30}(?:loss|损失)|损失.{0,30}变化/i},
+  {id:'poisoning',direction:'backdoor-poisoning',weight:5,re:/poison(?:ing|ed)?|label flip|sample_loss|loss(?:es)?[_ -]?history|投毒|污染样本|loss 变化/i},
   {id:'model-extraction',direction:'model-extraction',weight:7,re:/model extraction|model stealing|substitute model|surrogate|query.*confidence|soft[- _]?label|模型抽取|模型窃取/i},
   {id:'oracle',direction:'model-extraction',weight:4,re:/oracle|confidence|probabilit(?:y|ies)|logits?|score vector|top[- _]?k|置信度|概率向量/i},
   {id:'inversion',direction:'privacy-leakage',weight:7,re:/model inversion|embedding inversion|reconstruct(?:ion|ed)?|hidden[- _]?state|reference.*reconstructed|模型反演|重建/i},
@@ -25,6 +27,7 @@ const SIGNALS=Object.freeze([
   {id:'dataset',direction:'dataset-pipeline-security',weight:4,re:/dataset|tabular|feature store|label|csv|dataframe|数据集|结构化特征/i},
   {id:'ocr',direction:'multimodal-ai',weight:5,re:/\bocr\b|bounding box|recognized_text|char_confidence|文字识别/i},
   {id:'audio',direction:'multimodal-ai',weight:5,re:/\baudio\b|\bwav\b|whisper|transcrib|speech|asr|语音|音频/i},
+  {id:'deepfake',direction:'multimodal-ai',weight:7,re:/deepfake|deep fake|xception|faceforensics|forged face|fake face|深伪|人脸.{0,20}伪造|伪造人脸/i},
   {id:'onnx',direction:'adversarial-example',weight:3,re:/\bonnx\b|onnxruntime/i},
   {id:'verifier',direction:null,weight:3,re:/verifier|checker|判题|校验器/i},
   {id:'ssrf',direction:'prompt-llm-security',weight:3,re:/\bssrf\b|127\.0\.0\.1|localhost|internal service|内部服务/i}
@@ -35,7 +38,7 @@ const EXTENSION_HINTS=Object.freeze({
   '.pt':['supply-chain','backdoor'],'.pth':['supply-chain','backdoor'],'.pkl':['supply-chain','dataset'],'.pickle':['supply-chain','dataset'],
   '.safetensors':['supply-chain','inversion'],'.csv':['dataset'],'.tsv':['dataset'],'.jsonl':['dataset','model-extraction'],
   '.png':['ocr'],'.jpg':['ocr'],'.jpeg':['ocr'],'.bmp':['ocr'],'.wav':['audio'],'.mp3':['audio'],'.flac':['audio'],
-  '.pcap':['dataset'],'.pcapng':['dataset']
+  '.mp4':['deepfake'],'.avi':['deepfake'],'.mov':['deepfake'],'.pcap':['dataset'],'.pcapng':['dataset']
 });
 
 function analysisText(analysis={}){
