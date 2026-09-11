@@ -66,10 +66,7 @@ function runTool(tool, payload = {}) {
   if (tool === 'uav-injection-analyze') return analyzeUavChallengeEvidence(payload.input, { category: 'inject' });
   if (tool === 'uav-leak-analyze') return analyzeUavChallengeEvidence(payload.input, { category: 'leak' });
   if (tool === 'uav-challenge-matrix') return { ...analyzeUavChallengeEvidence(payload.input), catalog: getScenarioCatalog() };
-  if (tool === 'lowalt-assessment-mode') {
-    const result=buildLowaltAssessment(payload.input || payload);
-    return { ...result, schema:'newcyber.lowalt-assessment.v1', revision:2 };
-  }
+  if (tool === 'lowalt-assessment-mode') { const result=buildLowaltAssessment(payload.input || payload); return { ...result, schema:'newcyber.lowalt-assessment.v1', revision:2 }; }
   if (tool === 'lowalt-assessment-catalog') return getLowaltAssessmentCatalog();
   if (tool === 'lowalt-swarm-coordination') return analyzeSwarmCoordination(payload.input || payload, payload.options || {});
   if (tool === 'lowalt-cross-boundary-flow') return analyzeCrossBoundaryFlow(payload.input || payload, payload.options || {});
@@ -81,6 +78,7 @@ function runTool(tool, payload = {}) {
   if (tool === 'ai-source-scan') return auditAiChallengeSource(payload.input);
   if (tool === 'ai-skill-matrix') return diagnoseAiSkillMatrixExtended(payload.input ?? payload);
   if (tool === 'ai-training-curriculum') return getTrainingCurriculum();
+  if (tool === 'ai-training-schedule') return getTrainingCurriculum().schedule;
   if (tool === 'ai-training-full-regression') return runTrainingCurriculumRegression(payload.options || payload.input || {});
   if (tool === 'ai-training-family-match') return matchTrainingFamilies(payload.input || payload, payload.options || {});
   if (tool === 'ai-stage1-training-regression') return runAiStage1TrainingRegression(payload.options || payload.input || {});
@@ -112,14 +110,8 @@ function runTool(tool, payload = {}) {
   if (tool === 'ai-model-arithmetic-auto') return analyzeModelArithmeticBundle(payload.input || payload, payload.options || {});
   if (tool === 'ai-image-raster-forensics') return analyzeRasterImage(payload.input || payload);
   if (tool === 'ai-image-raster-compare') return compareRasterImages(payload.input || payload);
-  if (tool === 'ai-npy-sample-forensics') {
-    const input = payload.input || payload;
-    return analyzeNpySample(npyBuffer(input), input.fileName || 'sample.npy');
-  }
-  if (tool === 'ai-npy-sample-compare') {
-    const input = payload.input || payload;
-    return compareNpySamples(npyBuffer(input.left), npyBuffer(input.right));
-  }
+  if (tool === 'ai-npy-sample-forensics') { const input = payload.input || payload; return analyzeNpySample(npyBuffer(input), input.fileName || 'sample.npy'); }
+  if (tool === 'ai-npy-sample-compare') { const input = payload.input || payload; return compareNpySamples(npyBuffer(input.left), npyBuffer(input.right)); }
   if (tool === 'ai-tabular-profile') return analyzeTabularDataset(payload.input);
   if (tool === 'ai-tabular-candidate') return evaluateTabularCandidate(payload.input);
   if (tool === 'ai-adversarial-audit') return analyzeAdversarialPair(payload.input);
@@ -144,10 +136,7 @@ function runTool(tool, payload = {}) {
   if (tool === 'evm-disasm') return analyzeEvmRuntime(payload.input);
   if (tool === 'auto-decode') return autoDecode(payload.input, { maxDepth: payload.maxDepth });
   if (tool === 'context-crypto') return decryptCryptoContext(payload.input);
-  if (tool === 'knowledge-search') return {
-    results: searchKnowledge(payload.input, payload.domain || null, { track: payload.track, limit: payload.limit }),
-    stats: knowledgeStats()
-  };
+  if (tool === 'knowledge-search') return { results: searchKnowledge(payload.input, payload.domain || null, { track: payload.track, limit: payload.limit }), stats: knowledgeStats() };
   if (tool === 'solana-source-scan') return auditSolanaAnchor(payload.input) || { language: 'unknown', findings: [], notes: ['未检测到 Anchor/Solana Rust 特征。'] };
   return toolbox.runTool(tool, payload);
 }
