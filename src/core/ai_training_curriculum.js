@@ -10,6 +10,7 @@ const {getSgAiCtfTrainingCorpus,runSgAiCtfTrainingRegression}=require('./ai_sg_a
 const {getAiVillageTrainingCorpus,runAiVillageTrainingRegression}=require('./ai_aivillage_training');
 const {getPromptCtfTrainingCorpus,runPromptCtfTrainingRegression}=require('./ai_prompt_ctf_training');
 const {getDomesticDetectionTrainingCorpus,runDomesticDetectionTrainingRegression}=require('./ai_domestic_detection_training');
+const {getDomesticBackdoorTrainingCorpus,runDomesticBackdoorTrainingRegression}=require('./ai_domestic_backdoor_training');
 
 const TARGET_DIRECTIONS=Object.freeze([
   'prompt-llm-security','adversarial-example','model-extraction','privacy-leakage',
@@ -26,7 +27,8 @@ const CORPORA=Object.freeze([
   {id:'sg-aictf-2025',title:'AICTF 2025 Pre-U challenge replay',kind:'ctf-derived',get:getSgAiCtfTrainingCorpus},
   {id:'aivillage-defcon-30-31',title:'AI Village DEFCON 30/31 challenge replay',kind:'ctf-derived',get:getAiVillageTrainingCorpus},
   {id:'prompt-agent-ctf',title:'Prompt / Agent CTF challenge replay',kind:'ctf-derived',get:getPromptCtfTrainingCorpus},
-  {id:'domestic-detection-ranges-2025',title:'2025 domestic AI detection ranges',kind:'ctf-derived',get:getDomesticDetectionTrainingCorpus}
+  {id:'domestic-detection-ranges-2025',title:'2025 domestic AI detection ranges',kind:'ctf-derived',get:getDomesticDetectionTrainingCorpus},
+  {id:'domestic-backdoor-poisoning-2025-2026',title:'2025-2026 domestic backdoor / poisoning replay',kind:'ctf-derived',get:getDomesticBackdoorTrainingCorpus}
 ]);
 
 function text(value){return value==null?'':String(value).trim();}
@@ -111,7 +113,8 @@ const SUITES=Object.freeze([
   {id:'sg-aictf-2025',run:(options)=>runSgAiCtfTrainingRegression(options)},
   {id:'aivillage-defcon-30-31',run:(options)=>runAiVillageTrainingRegression(options)},
   {id:'prompt-agent-ctf',run:(options)=>runPromptCtfTrainingRegression(options)},
-  {id:'domestic-detection-ranges-2025',run:(options)=>runDomesticDetectionTrainingRegression(options)}
+  {id:'domestic-detection-ranges-2025',run:(options)=>runDomesticDetectionTrainingRegression(options)},
+  {id:'domestic-backdoor-poisoning-2025-2026',run:()=>runDomesticBackdoorTrainingRegression()}
 ]);
 function summarizeSuite(result){
   const summary=result&&typeof result.summary==='object'?result.summary:null;
