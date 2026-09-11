@@ -32,16 +32,16 @@ x = transforms.ToTensor()(img)
   assert.ok(result.conflicts.some((item)=>item.kind==='size'));
 });
 
-test('cv2 pipeline recovers BGR to RGB, CHW, scaling and dtype',()=>{
+test('cv2 pipeline recovers width-height order, RGB, CHW, scaling and dtype',()=>{
   const source=`
-img = cv2.resize(img, (128, 128))
+img = cv2.resize(img, (160, 96))
 img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 img = img.astype(np.float32) / 255.0
 img = np.transpose(img, (2,0,1))
 img = np.expand_dims(img, axis=0)
 `;
   const result=buildPreprocessingManifest([{file:'infer.py',text:source}]);
-  assert.equal(result.status,'ready');assert.deepEqual(result.pipeline.size,{height:128,width:128});assert.equal(result.pipeline.color,'RGB');assert.equal(result.pipeline.layout,'CHW');assert.equal(result.pipeline.dtype,'float32');assert.equal(result.pipeline.batch,'prepend-axis');
+  assert.equal(result.status,'ready');assert.deepEqual(result.pipeline.size,{height:96,width:160});assert.equal(result.pipeline.color,'RGB');assert.equal(result.pipeline.layout,'CHW');assert.equal(result.pipeline.dtype,'float32');assert.equal(result.pipeline.batch,'prepend-axis');
 });
 
 test('manifest stays not-detected when there is no preprocessing evidence',()=>{
