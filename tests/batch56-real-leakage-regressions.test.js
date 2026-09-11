@@ -12,7 +12,7 @@ const {
   indirectHannDotEvidence,resolveRealBundleFeatureRecipe,wrapBudgetedStreamingFeatureSource
 }=require('../src/core/sca_real_bundle_feature_source');
 const {resolveReducedProbe}=require('../src/core/sca_real_bundle_quality_core');
-const batch56=require('../src/core/sca_autopilot_batch56');
+const batch59=require('../src/core/sca_autopilot_batch59');
 const compat=require('../src/core/sca_autopilot_batch50');
 
 function challengeIndirectHannSource(){return `
@@ -120,6 +120,6 @@ test('Batch56 binds probe selection to candidate_vocab cardinality and ignores o
   }finally{await fs.rm(dir,{recursive:true,force:true});}
 });
 
-test('Batch50 stable production compatibility entry now routes to Batch56',()=>{
-  assert.equal(compat.runScaAutopilotPaths,batch56.runScaAutopilotPaths);
+test('Batch50 stable production compatibility entry now routes to Batch59',()=>{
+  assert.equal(compat.runScaAutopilotPaths,batch59.runScaAutopilotPaths);
 });
