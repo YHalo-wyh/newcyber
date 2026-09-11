@@ -4,12 +4,13 @@ const fs=require('fs/promises');
 const path=require('path');
 const base=require('./finals_analyzer_batch41');
 const {buildPreprocessingManifest}=require('./ai_preprocessing_manifest');
-const {buildChallengeSession}=require('./challenge_session');
+const {analyzeAiContestBundle}=require('./ai_contest_bundle_autopilot');
+const {buildChallengeSession}=require('./challenge_session_batch51');
 
-const SOURCE_EXTENSIONS=new Set(['.py','.pyw','.js','.mjs','.cjs','.ts','.tsx','.jsx','.json','.yaml','.yml','.toml','.ini','.cfg','.md','.txt']);
-const MAX_SOURCE_FILES=32;
-const MAX_SOURCE_BYTES=1024*1024;
-const MAX_TOTAL_SOURCE_BYTES=8*1024*1024;
+const SOURCE_EXTENSIONS=new Set(['.py','.pyw','.js','.mjs','.cjs','.ts','.tsx','.jsx','.json','.jsonl','.ndjson','.csv','.tsv','.yaml','.yml','.toml','.ini','.cfg','.md','.txt']);
+const MAX_SOURCE_FILES=48;
+const MAX_SOURCE_BYTES=2*1024*1024;
+const MAX_TOTAL_SOURCE_BYTES=12*1024*1024;
 
 function list(value){return Array.isArray(value)?value:[];}
 function inside(root,target){const rel=path.relative(root,target);return rel===''||(!rel.startsWith(`..${path.sep}`)&&rel!=='..'&&!path.isAbsolute(rel));}
@@ -31,8 +32,18 @@ async function collectSources(rootPath,analysis){
 
 function preserveSessionRuntime(oldSession,newSession){
   if(!oldSession)return newSession;
-  for(const key of ['solverPipeline','pipelineSummary','solverExecution','executorSummary','archiveIngest'])if(oldSession[key]!==undefined)newSession[key]=oldSession[key];
+  for(const key of ['solverPipeline','pipelineSummary','solverExecution','executorSummary','archiveIngest','recoveredArtifacts'])if(oldSession[key]!==undefined)newSession[key]=oldSession[key];
   return newSession;
+}
+
+function upsertAutomaticCheck(analysis,check){
+  analysis.autopilot||={};analysis.autopilot.automaticChecks||=[];
+  const existing=analysis.autopilot.automaticChecks.find((item)=>item.id===check.id);if(existing)Object.assign(existing,check);else analysis.autopilot.automaticChecks.push(check);
+}
+
+function mergeFindings(analysis,rows){
+  analysis.findings||=[];const seen=new Set(analysis.findings.map((item)=>`${item.id||item.title}:${item.file||''}:${item.line||''}:${item.evidence||''}`));
+  for(const item of list(rows)){const key=`${item.id||item.title}:${item.file||''}:${item.line||''}:${item.evidence||''}`;if(seen.has(key))continue;seen.add(key);analysis.findings.push(item);}
 }
 
 async function scanWorkspace(rootPath,options={}){
@@ -40,15 +51,23 @@ async function scanWorkspace(rootPath,options={}){
   const sources=await collectSources(rootPath,analysis);
   const manifest=buildPreprocessingManifest(sources);
   analysis.aiPreprocessingManifest=manifest;
-  if(manifest.status!=='not-detected'){
-    analysis.autopilot||={};analysis.autopilot.automaticChecks||=[];
-    const check={id:'ai-preprocessing-manifest',title:'AI 图像预处理证据恢复',hits:manifest.evidence.length};
-    const existing=analysis.autopilot.automaticChecks.find((item)=>item.id===check.id);if(existing)Object.assign(existing,check);else analysis.autopilot.automaticChecks.push(check);
+  if(manifest.status!=='not-detected')upsertAutomaticCheck(analysis,{id:'ai-preprocessing-manifest',title:'AI 图像预处理证据恢复',hits:manifest.evidence.length});
+
+  const contest=analyzeAiContestBundle(sources,analysis,manifest);
+  analysis.aiContestAutopilot=contest;
+  if(contest.status!=='not-detected'){
+    const hits=contest.verifierMatches?.length||contest.ranking?.candidateSets?.length||contest.discovery?.hintSources?.length||contest.discovery?.assets?.models?.length||1;
+    upsertAutomaticCheck(analysis,{id:'ai-contest-bundle-autopilot',title:'AI 赛题 Hint / Logits / Verifier 自动关联',hits});
+    mergeFindings(analysis,contest.findings);
+  }
+
+  if(manifest.status!=='not-detected'||contest.status!=='not-detected'){
     const old=analysis.challengeSession;
     analysis.challengeSession=preserveSessionRuntime(old,buildChallengeSession(analysis));
     analysis.challengeSession.aiPreprocessingManifest=manifest;
-  }else if(analysis.challengeSession){analysis.challengeSession.aiPreprocessingManifest=manifest;}
-  analysis.version=Math.max(Number(analysis.version)||1,49);
+    analysis.challengeSession.aiContestAutopilot={status:contest.status,next:contest.next,result:contest.result||null};
+  }else if(analysis.challengeSession){analysis.challengeSession.aiPreprocessingManifest=manifest;analysis.challengeSession.aiContestAutopilot={status:contest.status,next:contest.next,result:null};}
+  analysis.version=Math.max(Number(analysis.version)||1,51);
   return analysis;
 }
 
@@ -62,9 +81,19 @@ function preprocessingSection(analysis){
   lines.push('','> NewCyber 不凭模型名猜 preprocessing；冲突或缺字段时保持 partial/conflict。');return lines.join('\n');
 }
 
-function buildMarkdownReport(analysis,notes=''){
-  const report=base.buildMarkdownReport(analysis,notes),section=preprocessingSection(analysis);
-  return section?`${report.trim()}\n\n${section}\n`:report;
+function contestSection(analysis){
+  const a=analysis.aiContestAutopilot;if(!a||a.status==='not-detected')return'';
+  const lines=['## AI Contest Bundle Autopilot','',`- status：${a.status}`,`- next：${a.next}`];
+  if(a.result)lines.push(`- result：\`${a.result.value}\``,`- confidence：${a.result.confidence||'candidate'}`);
+  if(a.ranking)lines.push(`- hints：${a.ranking.hints}`,`- candidates：${a.ranking.candidates}`,`- candidateSets：${a.ranking.candidateSets?.length||0}`);
+  if(a.discovery?.verifiers?.length)lines.push(`- verifier signals：${a.discovery.verifiers.length}`);
+  for(const item of (a.findings||[]).slice(0,12))lines.push(`- ${item.title||item.id}：${item.evidence||''}`);
+  lines.push('','> 只有题目 verifier/hash 精确命中才升级 verified；没有 verifier 时 Top-1 仍是 candidate。');return lines.join('\n');
 }
 
-module.exports={...base,scanWorkspace,buildMarkdownReport,collectSources,preprocessingSection};
+function buildMarkdownReport(analysis,notes=''){
+  const report=base.buildMarkdownReport(analysis,notes);const sections=[preprocessingSection(analysis),contestSection(analysis)].filter(Boolean);
+  return sections.length?`${report.trim()}\n\n${sections.join('\n\n')}\n`:report;
+}
+
+module.exports={...base,scanWorkspace,buildMarkdownReport,collectSources,preprocessingSection,contestSection};
