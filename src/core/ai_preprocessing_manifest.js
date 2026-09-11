@@ -20,16 +20,31 @@ function add(rows,item){
   const key=`${item.kind}:${JSON.stringify(item.value)}:${item.file}:${item.line}`;
   if(!rows.some((x)=>x._key===key))rows.push({...item,_key:key});
 }
+function interpolationName(raw){
+  const value=String(raw||'').toUpperCase();
+  if(/NEAREST/.test(value))return'nearest';if(/BILINEAR|INTER_LINEAR\b/.test(value))return'bilinear';if(/BICUBIC|INTER_CUBIC/.test(value))return'bicubic';if(/LANCZOS/.test(value))return'lanczos';if(/INTER_AREA/.test(value))return'area';return null;
+}
 
 function scanSource(file,source){
   const rows=[];const patterns=[];
   const push=(kind,value,match,confidence='exact-source',detail='')=>add(rows,evidence(file,source,match.index,kind,value,confidence,detail));
   let match;
 
-  const torchvisionResize=/(?:transforms\.)?Resize\s*\(\s*\(?\s*(\d{2,4})\s*[,x]\s*(\d{2,4})\s*\)?\s*\)/gi;
-  while((match=torchvisionResize.exec(source))){const h=Number(match[1]),w=Number(match[2]);push('size',{height:h,width:w},match,'exact-source','torchvision/PIL Resize 使用 (height,width)');}
-  const cv2Resize=/cv2\.resize\s*\([^\n]{0,240}?\(\s*(\d{2,4})\s*,\s*(\d{2,4})\s*\)/gi;
-  while((match=cv2Resize.exec(source))){const w=Number(match[1]),h=Number(match[2]);push('size',{height:h,width:w},match,'exact-source','cv2.resize dsize 使用 (width,height)');}
+  const torchvisionResize=/(?:transforms\.)?Resize\s*\(\s*\(?\s*(\d{2,4})\s*[,x]\s*(\d{2,4})\s*\)?([^\n)]*)\)/gi;
+  while((match=torchvisionResize.exec(source))){
+    const h=Number(match[1]),w=Number(match[2]);push('size',{height:h,width:w},match,'exact-source','torchvision/PIL Resize 使用 (height,width)');
+    const explicit=interpolationName(match[3]);push('interpolation',explicit||'bilinear',match,explicit?'exact-source':'library-default',explicit?'Resize 显式 interpolation':'torchvision Resize 默认 interpolation=bilinear');
+  }
+  const cv2Resize=/cv2\.resize\s*\([^\n]{0,300}?\(\s*(\d{2,4})\s*,\s*(\d{2,4})\s*\)([^\n]*)/gi;
+  while((match=cv2Resize.exec(source))){
+    const w=Number(match[1]),h=Number(match[2]);push('size',{height:h,width:w},match,'exact-source','cv2.resize dsize 使用 (width,height)');
+    const explicit=interpolationName(match[3]);push('interpolation',explicit||'bilinear',match,explicit?'exact-source':'library-default',explicit?'cv2.resize 显式 interpolation':'cv2.resize 默认 interpolation=INTER_LINEAR');
+  }
+  const pilResize=/\.resize\s*\(\s*\(\s*(\d{2,4})\s*,\s*(\d{2,4})\s*\)\s*(?:,\s*([^\n)]*))?\)/gi;
+  while((match=pilResize.exec(source))){
+    if(/cv2\.resize/i.test(match[0]))continue;const w=Number(match[1]),h=Number(match[2]);push('size',{height:h,width:w},match,'exact-source','PIL Image.resize 使用 (width,height)');
+    const explicit=interpolationName(match[3]);if(explicit)push('interpolation',explicit,match,'exact-source','PIL Image.resize 显式 resample');
+  }
   const scalarResize=/(?:transforms\.)?Resize\s*\(\s*(\d{2,4})\s*\)/gi;
   while((match=scalarResize.exec(source)))push('resize-short-edge',Number(match[1]),match,'exact-source','单值 Resize 只约束短边，不能直接当最终 H×W');
   const crop=/(?:CenterCrop|RandomCrop)\s*\(\s*\(?\s*(\d{2,4})(?:\s*,\s*(\d{2,4}))?\s*\)?\s*\)/gi;
@@ -77,9 +92,9 @@ function scanSource(file,source){
     }
   }
 
-  const preprocessTokens=/(?:preprocess|transform|Resize|Normalize|ToTensor|cv2\.resize|permute|transpose|astype|unsqueeze|onnxruntime|InferenceSession)/gi;
+  const preprocessTokens=/(?:preprocess|transform|Resize|Normalize|ToTensor|cv2\.resize|permute|transpose|astype|unsqueeze|onnxruntime|InferenceSession|interpolation)/gi;
   while((match=preprocessTokens.exec(source)))patterns.push({file,line:lineOf(source,match.index),token:match[0],excerpt:clip(source.split(/\r?\n/)[lineOf(source,match.index)-1]||'')});
-  return{evidence:rows.map(({_key,...item})=>item),signals:patterns.slice(0,80)};
+  return{evidence:rows.map(({_key,...item})=>item),signals:patterns.slice(0,100)};
 }
 
 function keyValue(value){return JSON.stringify(value);}
@@ -90,6 +105,14 @@ function resolveKind(evidenceRows,kind){
   const best=ranked[0];const conflict=ranked.length>1&&ranked[1].score>=best.score*0.75;
   return{value:best.value,status:conflict?'conflict':'resolved',evidence:best.items,alternatives:ranked.slice(1,4).map((item)=>({value:item.value,score:item.score,evidence:item.items.slice(0,3)}))};
 }
+function buildOperationPlan(resolved){
+  const rows=[];for(const kind of ['size','interpolation','crop','color','scale','normalize','layout','dtype','batch'])for(const item of resolved[kind]?.evidence||[])rows.push({...item,kind});
+  const sourceScores=new Map();for(const row of rows)sourceScores.set(row.file,(sourceScores.get(row.file)||0)+(row.confidence==='exact-source'?3:row.confidence==='derived'?2:1));
+  const primary=[...sourceScores.entries()].sort((a,b)=>b[1]-a[1]||a[0].localeCompare(b[0]))[0]?.[0]||null;
+  const ordered=rows.filter((row)=>!primary||row.file===primary).sort((a,b)=>a.line-b.line||a.kind.localeCompare(b.kind));const seen=new Set();
+  const operations=[];for(const row of ordered){const key=`${row.line}:${row.kind}:${JSON.stringify(row.value)}`;if(seen.has(key))continue;seen.add(key);operations.push({kind:row.kind,value:row.value,file:row.file,line:row.line,confidence:row.confidence,detail:row.detail||null});}
+  return{primarySource:primary,operations:operations.slice(0,64),sourceScores:Object.fromEntries([...sourceScores.entries()].sort((a,b)=>b[1]-a[1]).slice(0,12))};
+}
 
 function buildPreprocessingManifest(sources,options={}){
   const scanned=[];let allEvidence=[];let allSignals=[];
@@ -99,22 +122,25 @@ function buildPreprocessingManifest(sources,options={}){
     const result=scanSource(file,body);scanned.push({file,bytes:Buffer.byteLength(body),evidence:result.evidence.length,signals:result.signals.length});
     allEvidence=allEvidence.concat(result.evidence);allSignals=allSignals.concat(result.signals);
   }
-  const resolved={};for(const kind of ['size','resize-short-edge','crop','color','layout','scale','normalize','dtype','batch','shape'])resolved[kind]=resolveKind(allEvidence,kind);
+  const resolved={};for(const kind of ['size','resize-short-edge','interpolation','crop','color','layout','scale','normalize','dtype','batch','shape'])resolved[kind]=resolveKind(allEvidence,kind);
   const missing=REQUIRED_FOR_IMAGE_EXECUTION.filter((kind)=>resolved[kind].status==='missing');
   const conflicts=Object.entries(resolved).filter(([,value])=>value.status==='conflict').map(([kind,value])=>({kind,value:value.value,alternatives:value.alternatives}));
   const evidenceCount=allEvidence.length;
   const status=!evidenceCount?'not-detected':conflicts.length?'conflict':missing.length?'partial':'ready';
   const confidence=status==='ready'?'high':status==='partial'?'medium':status==='conflict'?'low':'none';
+  const operationPlan=buildOperationPlan(resolved);
   const manifest={
-    schema:'newcyber.ai-preprocessing-manifest.v1',status,confidence,executionReady:status==='ready',
+    schema:'newcyber.ai-preprocessing-manifest.v2',status,confidence,executionReady:status==='ready',
     pipeline:{
-      size:resolved.size.value,resizeShortEdge:resolved['resize-short-edge'].value,crop:resolved.crop.value,color:resolved.color.value,
+      size:resolved.size.value,resizeShortEdge:resolved['resize-short-edge'].value,interpolation:resolved.interpolation.value,crop:resolved.crop.value,color:resolved.color.value,
       layout:resolved.layout.value,scale:resolved.scale.value,normalize:resolved.normalize.value,dtype:resolved.dtype.value,batch:resolved.batch.value,shape:resolved.shape.value
     },
-    missing,conflicts,
-    evidence:allEvidence.slice(0,160),signals:allSignals.slice(0,120),sources:scanned,
+    operationPlan,missing,conflicts,
+    evidence:allEvidence.slice(0,200),signals:allSignals.slice(0,140),sources:scanned,
     notes:[
       '所有 preprocessing 字段都必须能回溯到源码/配置证据；不会仅凭模型名称或常见架构默认 ImageNet mean/std。',
+      'interpolation 若来自 torchvision/cv2 未显式填写的默认值，会标记 library-default；它是库语义证据，不是架构猜测。',
+      'operationPlan 只在证据最集中的 primarySource 内按源码行号排序，跨文件顺序不会被擅自拼接。',
       'ready 只表示预处理参数证据足够，不表示模型输出或对抗样本结论已经验证。',
       '同一字段出现强冲突时状态为 conflict，自动执行器应停止而不是猜一个值。'
     ]
@@ -123,4 +149,4 @@ function buildPreprocessingManifest(sources,options={}){
   return manifest;
 }
 
-module.exports={REQUIRED_FOR_IMAGE_EXECUTION,scanSource,buildPreprocessingManifest};
+module.exports={REQUIRED_FOR_IMAGE_EXECUTION,scanSource,resolveKind,buildOperationPlan,buildPreprocessingManifest};
