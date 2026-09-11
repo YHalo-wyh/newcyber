@@ -8,4 +8,5 @@
 // finals_analyzer_batch83 adds calibration/query membership candidate generation for Drop-to-Result.
 // finals_analyzer_batch85 adds evidence-driven sample-submission packaging and keeps candidate/verified semantics separate.
 // finals_analyzer_batch86 adds universal trigger/backdoor candidate ranking across prompt holdouts.
-module.exports = require('./finals_analyzer_batch86');
+// finals_analyzer_batch87 adds victim↔candidate model fingerprint/extraction ranking on independent query evidence.
+module.exports = require('./finals_analyzer_batch87');
