@@ -1,5 +1,7 @@
 'use strict';
 
+const {attachScaQualityDiagnostics}=require('./sca_quality_diagnostics');
+
 function list(value){return Array.isArray(value)?value:[];}
 function stage(id,status,detail,data){return {id,status,detail,...(data?{data}:{})};}
 
@@ -68,8 +70,8 @@ function promoteContextualRecovery(result){
 function applyQualityResultGate(result,options={}){
   if(!result||typeof result!=='object')return result;
   const leakageGap=leakageQualityGate(result,options);
-  if(leakageGap)return leakageGap;
-  return promoteContextualRecovery(result);
+  if(leakageGap)return attachScaQualityDiagnostics(leakageGap);
+  return attachScaQualityDiagnostics(promoteContextualRecovery(result));
 }
 
 module.exports={exactLinearHannRecipe,contextualVerification,leakageQualityGate,promoteContextualRecovery,applyQualityResultGate};
