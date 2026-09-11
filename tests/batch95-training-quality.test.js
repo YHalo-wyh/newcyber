@@ -57,16 +57,16 @@ test('Batch95 ready requires family/event diversity and cross-event holdout cond
   assert.equal(quality.readiness,'ready');
 });
 
-test('Batch95 unified curriculum exposes quality health instead of raw-count-only coverage',()=>{
+test('Batch95 unified curriculum exposes quality health without breaking v1 schema consumers',()=>{
   const curriculum=getTrainingCurriculum();
-  assert.equal(curriculum.schema,'newcyber.ai-training-curriculum.v2');
+  assert.equal(curriculum.schema,'newcyber.ai-training-curriculum.v1');
   assert.equal(curriculum.quality.schema,'newcyber.ai-training-quality.v1');
   assert.equal(curriculum.summary.quality.directions,curriculum.quality.byDirection.length);
   assert.ok(curriculum.quality.byDirection.some((item)=>item.direction==='privacy-leakage'));
   assert.ok(curriculum.quality.byDirection.every((item)=>['seed','developing','ready'].includes(item.readiness)));
 
   const regression=runTrainingCurriculumRegression({variantsPerSeed:1});
-  assert.equal(regression.schema,'newcyber.ai-training-curriculum-regression.v2');
+  assert.equal(regression.schema,'newcyber.ai-training-curriculum-regression.v1');
   assert.deepEqual(regression.summary.quality,regression.quality.summary);
   assert.equal(regression.summary.suiteErrors,0);
 });
