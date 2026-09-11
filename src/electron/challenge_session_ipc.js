@@ -8,6 +8,7 @@ const {buildChallengeSession}=require('../core/challenge_session_batch51');
 const {expandChallengeArchive}=require('../core/challenge_archive_ingest');
 const {materializeRecoveredArtifacts}=require('../core/challenge_artifact_materialize');
 const {runChallengeOnnxAutopilot}=require('../core/challenge_onnx_autopilot');
+const {matchTrainingFamilies}=require('../core/ai_training_family_matcher');
 const {decodeImageWithElectron}=require('./challenge_image_decoder');
 
 const MAX_INPUT_FILES=64;
@@ -103,6 +104,15 @@ async function writeOnnxAutopilotManifest(root,result){
   await fs.writeFile(path.join(root,'newcyber_onnx_autopilot.json'),`${JSON.stringify(safe,null,2)}\n`,'utf8');
 }
 
+async function writeTrainingFamilyManifest(root,result){
+  if(!result||result.status==='not-detected')return;
+  const safe={
+    schema:'newcyber.challenge-training-family-match.v1',generatedAt:new Date().toISOString(),status:result.status,summary:result.summary||null,
+    directionRanking:(result.directionRanking||[]).slice(0,12),signals:(result.signals||[]).slice(0,32),matches:(result.matches||[]).slice(0,12),next:result.next||null,notes:result.notes||[]
+  };
+  await fs.writeFile(path.join(root,'newcyber_training_family_match.json'),`${JSON.stringify(safe,null,2)}\n`,'utf8');
+}
+
 async function stageFiles(inputFiles,root,session){
   const used=new Set(session.stagedNames.map((x)=>x.toLowerCase()));
   for(const file of inputFiles){
@@ -145,7 +155,7 @@ function descriptor(root,session){
 
 function preserveChallengeRuntime(previous,next){
   if(!previous)return next;
-  for(const key of ['solverPipeline','pipelineSummary','solverExecution','executorSummary','aiPreprocessingManifest','aiContestAutopilot','onnxContestAutopilot'])if(previous[key]!==undefined)next[key]=previous[key];
+  for(const key of ['solverPipeline','pipelineSummary','solverExecution','executorSummary','aiPreprocessingManifest','aiContestAutopilot','onnxContestAutopilot','trainingFamilyMatch'])if(previous[key]!==undefined)next[key]=previous[key];
   return next;
 }
 function upsertCheck(analysis,check){
@@ -175,6 +185,9 @@ async function scanSession(root,session){
     analysis.aiContestAutopilot=onnxAuto.contest;mergeFindings(analysis,onnxAuto.contest.findings);
   }
 
+  const familyMatch=matchTrainingFamilies(analysis,{limit:10});
+  analysis.trainingFamilyMatch=familyMatch;await writeTrainingFamilyManifest(root,familyMatch);
+
   input=descriptor(root,session);analysis.challengeInput=input;analysis.workspaceName=input.displayName;
   const ingest=ingestSummary(session);const recovery=recoverySummary(session);
   analysis.archiveIngest={schema:'newcyber.challenge-archive-ingest-summary.v1',archives:ingest.archives,expandedFiles:ingest.expandedFiles,expandedBytes:ingest.expandedBytes,skipped:ingest.skipped,unsupported:ingest.unsupported,errors:ingest.errors};
@@ -182,11 +195,13 @@ async function scanSession(root,session){
   if(ingest.archives>0)upsertCheck(analysis,{id:'archive-ingest',title:'压缩包安全展开 / 递归入库',hits:ingest.expandedFiles});
   if(recovery.files>0)upsertCheck(analysis,{id:'recovered-artifact-materialize',title:'恢复产物落盘 / 固定点复扫',hits:recovery.files});
   if(onnxAuto?.status&&onnxAuto.status!=='not-applicable')upsertCheck(analysis,{id:'challenge-onnx-autopilot',title:'本地 ONNX 候选批量推理 / 赛式排名',hits:Number(onnxAuto.runs)||0});
+  if(familyMatch.status!=='not-detected')upsertCheck(analysis,{id:'training-family-match',title:'历史赛题家族匹配 / 策略路由',hits:familyMatch.matches.length,detail:familyMatch.next});
   const previous=analysis.challengeSession;
   analysis.challengeSession=preserveChallengeRuntime(previous,buildChallengeSession(analysis));
   analysis.challengeSession.archiveIngest=analysis.archiveIngest;
   analysis.challengeSession.recoveredArtifacts=analysis.recoveredArtifacts;
   analysis.challengeSession.onnxContestAutopilot={status:onnxAuto?.status||'not-applicable',mode:onnxAuto?.mode||null,runs:Number(onnxAuto?.runs)||0,gap:onnxAuto?.gap||null};
+  analysis.challengeSession.trainingFamilyMatch={status:familyMatch.status,directionRanking:familyMatch.directionRanking.slice(0,5),matches:familyMatch.matches.slice(0,5),next:familyMatch.next};
   if(analysis.aiPreprocessingManifest)analysis.challengeSession.aiPreprocessingManifest=analysis.aiPreprocessingManifest;
   if(analysis.aiContestAutopilot)analysis.challengeSession.aiContestAutopilot={status:analysis.aiContestAutopilot.status,next:analysis.aiContestAutopilot.next,result:analysis.aiContestAutopilot.result||null};
   return analysis;
