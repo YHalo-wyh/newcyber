@@ -41,7 +41,13 @@ function analyzeUniversalTriggerCandidates(input={},options={}){
   const all=aggregate(rows).map((item)=>({...item,lengthOk:(minTokens==null||item.tokenCount>=minTokens)&&(maxTokens==null||item.tokenCount<=maxTokens),coverageOk:item.prompts>=minPrompts,asrOk:item.asr!=null&&item.asr>=minAsr}));
   const ranked=all.slice().sort((a,b)=>Number(b.lengthOk&&b.coverageOk&&b.asrOk)-Number(a.lengthOk&&a.coverageOk&&a.asrOk)||compareCandidates(a,b));
   const eligible=ranked.filter((x)=>x.lengthOk&&x.coverageOk&&x.asrOk);const best=eligible[0]||null;const second=eligible[1]||null;
-  const clear=Boolean(best&&(!second||(best.asr??0)-(second.asr??0)>=0.08||((best.asr??0)>=0.95&&(second.asr??0)<0.85))));
+  const clear=Boolean(
+    best&&(
+      !second ||
+      (best.asr??0)-(second.asr??0)>=0.08 ||
+      ((best.asr??0)>=0.95&&(second.asr??0)<0.85)
+    )
+  );
   const status=!rows.length?'gap':!best?'partial':clear?'candidate':'ambiguous';
   const findings=[];
   if(best)findings.push({id:'universal-trigger-candidate',severity:(best.asr??0)>=0.9?'high':'medium',title:'跨多 Prompt 的 Universal Trigger 候选',evidence:`prompts=${best.prompts}; asr=${(best.asr??0).toFixed(3)}; tokenCount=${best.tokenCount}; cleanFailure=${best.cleanFailureRate==null?'n/a':best.cleanFailureRate.toFixed(3)}`,meaning:'候选在多个不同 prompt 上重复命中目标行为，并满足当前显式长度/覆盖约束；仍需题目 reward/checker 对完整候选做最终验证。'});
