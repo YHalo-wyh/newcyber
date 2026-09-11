@@ -31,6 +31,9 @@
   let trainingResult=null;
   let trainingBusy=false;
   let trainingError='';
+  let ichunqiuResult=null;
+  let ichunqiuBusy=false;
+  let ichunqiuError='';
 
   function statusMeta(status) {
     return ({
@@ -117,15 +120,34 @@
     </div>`;
   }
 
+  function domesticRows() {
+    if (!ichunqiuResult?.results?.length) return [];
+    const grouped=new Map();
+    for (const item of ichunqiuResult.results) {
+      const current=grouped.get(item.challenge)||{challenge:item.challenge,total:0,pass:0};
+      current.total+=1;
+      if (item.status==='pass') current.pass+=1;
+      grouped.set(item.challenge,current);
+    }
+    return [...grouped.values()];
+  }
+
   function trainingPanel() {
     const rows=trainingResult?.directions||[];
     const overall=trainingResult?`${trainingResult.pass}/${trainingResult.caseCount}`:'—';
+    const cq=ichunqiuResult?.summary;
+    const cqOverall=cq?`${cq.pass}/${cq.total}`:'—';
+    const cqRows=domesticRows();
     return `<aside class="stage1-training-pane">
       <div class="stage1-pane-title"><div><span>PUBLIC CORPUS</span><b>训练回归</b></div><button class="button ghost" data-stage1-regression ${trainingBusy?'disabled':''}>${trainingBusy?'RUNNING':'RUN 100+'}</button></div>
       <div class="stage1-training-overall"><span>DETERMINISTIC CASES</span><b>${overall}</b><small>${trainingResult?`pass rate ${(trainingResult.passRate*100).toFixed(1)}%`:'HackAPrompt / AgentDojo / RobustBench / MICO / TrojAI / BackdoorBench / ModelScan 等公开样本族'}</small></div>
       ${trainingError?`<p class="stage1-training-error">${esc(trainingError)}</p>`:''}
       <div class="stage1-training-list">${rows.length?rows.map((row)=>`<div><span>${esc(row.title||row.id)}</span><b>${row.pass}/${row.total}</b><i class="stage1-status-dot ${row.passRate>=.9?'good':row.passRate>=.7?'warn':'gap'}"></i></div>`).join(''):DIRECTIONS.map(([,no,title])=>`<div><span>${no} · ${esc(title)}</span><b>READY</b><i class="stage1-status-dot quiet"></i></div>`).join('')}</div>
-      <div class="stage1-training-note"><span>TRAINING PRINCIPLE</span><p>公开题面 / benchmark 只提炼结构与 verifier，不复制答案。mutation 必须跨参数、跨表述，避免对某一道题过拟合。</p></div>
+      <div class="stage1-pane-title"><div><span>DOMESTIC CTF REPLAY</span><b>i春秋赛题族</b></div><button class="button ghost" data-ichunqiu-regression ${ichunqiuBusy?'disabled':''}>${ichunqiuBusy?'RUNNING':'RUN 12'}</button></div>
+      <div class="stage1-training-overall"><span>2025 春秋杯冬季赛</span><b>${cqOverall}</b><small>${cq?`${cq.challenges} challenges · ${cq.families} families · ${cq.controls} negative controls`:'越狱的翻译官 / 健忘的客服 / 窥探内心 / 幻觉诱导'}</small></div>
+      ${ichunqiuError?`<p class="stage1-training-error">${esc(ichunqiuError)}</p>`:''}
+      <div class="stage1-training-list">${cqRows.length?cqRows.map((row)=>`<div><span>${esc(row.challenge)}</span><b>${row.pass}/${row.total}</b><i class="stage1-status-dot ${row.pass===row.total?'good':'gap'}"></i></div>`).join(''):`<div><span>公开 WP → 攻击家族 → 训练 canary/judge</span><b>READY</b><i class="stage1-status-dot quiet"></i></div>`}</div>
+      <div class="stage1-training-note"><span>TRAINING PRINCIPLE</span><p>公开题面 / benchmark 只提炼结构与 verifier，不复制答案。国内赛题额外保留任务外壳、多轮授权语义与 judge oracle，避免只对 “ignore previous instructions” 过拟合。</p></div>
     </aside>`;
   }
 
@@ -164,6 +186,17 @@
       const next=document.querySelector('#tool-input'); if(next)next.value=input;
       return;
     }
+
+    const ichunqiu=event.target.closest('[data-ichunqiu-regression]');
+    if (ichunqiu && state.tool===TOOL && !ichunqiuBusy) {
+      const input=document.querySelector('#tool-input')?.value||'';
+      ichunqiuBusy=true;ichunqiuError='';render();state.tool=TOOL;
+      try { ichunqiuResult=await window.newcyber.runTool('ai-ichunqiu-training-regression',{}); }
+      catch(error){ ichunqiuResult=null;ichunqiuError=error?.message||String(error); }
+      finally { ichunqiuBusy=false;render();state.tool=TOOL;const next=document.querySelector('#tool-input');if(next)next.value=input; }
+      return;
+    }
+
     const regression=event.target.closest('[data-stage1-regression]');
     if (!regression || state.tool!==TOOL || trainingBusy) return;
     const input=document.querySelector('#tool-input')?.value||'';
