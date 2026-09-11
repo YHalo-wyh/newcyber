@@ -1,6 +1,7 @@
 'use strict';
 
 const base=require('./challenge_session');
+const {planChallengeNextInput}=require('./challenge_next_input');
 
 function list(value){return Array.isArray(value)?value:[];}
 function text(value){return String(value??'').trim();}
@@ -13,6 +14,10 @@ function promoteCandidate(session,result,headline,replace=false){
   if(!result||session.status==='solved'||isVerifiedResult(session.result))return;
   if(session.result&&!replace)return;
   session.result={...result,verified:false,confidence:'candidate'};session.status='candidate';session.headline=headline;
+}
+function verifierDisplay(result){
+  const value=String(result?.displayValue??result?.value??result?.payload??'');
+  return value.length<=512?value:`已验证结构化提交内容 · ${Buffer.byteLength(value,'utf8')} bytes`;
 }
 
 function buildChallengeSession(analysis={}){
@@ -78,6 +83,20 @@ function buildChallengeSession(analysis={}){
       promoteCandidate(session,{value:submission.result.payload,payload:submission.result.payload,displayValue:submission.result.displayValue||submission.result.payload,source:submission.result.source||'submission-autopilot',kind:submission.result.kind||'submission',format:submission.result.format||null,template:submission.result.template||null},'已按题目 submission 模板生成提交候选，等待 checker/scorer 确认',true);
     }
   }
+  const verifier=analysis.verifierContractAutopilot;
+  if(verifier&&verifier.status!=='not-applicable'){
+    session.verifierContractAutopilot={status:verifier.status,summary:verifier.summary||null,result:verifier.result||null,next:verifier.next||null};
+    upsertLedger(session.solverLedger||=[],{
+      id:'static-verifier-contract-v3',title:'静态 checker/verifier 结构化结果闭环',status:verifier.status==='verified'?'solved':verifier.status==='contracts-found'?'partial':verifier.status==='gap'?'blocked':'ran',confidence:verifier.status==='verified'?'verified':'guarded',detail:verifier.next||verifier.status,result:verifier.result?verifierDisplay(verifier.result):null,source:verifier.result?.source||null
+    });
+    if(verifier.status==='verified'&&verifier.result){
+      const value=String(verifier.result.value??verifier.result.payload??'');
+      session.result={...verifier.result,value,payload:String(verifier.result.payload??value),displayValue:verifierDisplay(verifier.result),verified:true,confidence:'verified'};
+      session.status='solved';session.headline='题目 checker/verifier 已验证当前自动生成结果';session.primaryNeed=null;session.needs=[];
+      if(session.aiHandoff)session.aiHandoff.ready=false;
+    }
+  }
+  session.nextInput=planChallengeNextInput(analysis,session);
   return session;
 }
 
