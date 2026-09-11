@@ -1,7 +1,7 @@
 'use strict';
 
 const base=require('./finals_analyzer_batch83');
-const {analyzeSubmissionBundle}=require('./challenge_submission_autopilot');
+const {analyzeSubmissionBundle}=require('./challenge_submission_autopilot_v2');
 const {buildChallengeSession}=require('./challenge_session_batch85');
 
 function upsertCheck(analysis,check){analysis.autopilot||={};analysis.autopilot.automaticChecks||=[];const current=analysis.autopilot.automaticChecks.find((item)=>item.id===check.id);if(current)Object.assign(current,check);else analysis.autopilot.automaticChecks.push(check);}
@@ -27,7 +27,7 @@ function batch85Section(analysis){
   if(auto.result)lines.push(`- 模板：${auto.result.template||'unknown'} · format=${auto.result.format||'unknown'} · kind=${auto.result.kind||'submission'}`);
   if(auto.result?.contract)lines.push(`- Contract：${JSON.stringify(auto.result.contract)}`);
   if(auto.next)lines.push(`- 下一步：${auto.next}`);
-  lines.push('','> 只根据题目自带 sample submission / submission template 的字段结构封装已有候选；不会凭文件名猜列语义。formatted 仍是 candidate，必须由 checker/verifier/scorer 才能升级 solved。');
+  lines.push('','> 只根据题目自带 sample submission / submission template 的字段结构封装已有候选；不会把普通 query/calibration 表误当提交模板。formatted 仍是 candidate，必须由 checker/verifier/scorer 才能升级 solved。');
   return lines.join('\n');
 }
 function buildMarkdownReport(analysis,notes=''){const report=base.buildMarkdownReport(analysis,notes);const section=batch85Section(analysis);return section?`${report.trim()}\n\n${section}\n`:report;}
