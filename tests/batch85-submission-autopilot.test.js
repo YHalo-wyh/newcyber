@@ -7,6 +7,7 @@ const path=require('node:path');
 const vm=require('node:vm');
 const {analyzeSubmissionBundle,parseDelimited}=require('../src/core/challenge_submission_autopilot_v2');
 const {buildChallengeSession}=require('../src/core/challenge_session_batch85');
+const {buildChallengeSession:buildCompatibilitySession}=require('../src/core/challenge_session_batch51');
 
 function membershipAnalysis(){return{
   workspaceName:'membership',workspacePath:'/tmp/membership',files:[],findings:[],candidates:{flags:[],urls:[],ips:[]},autopilot:{automaticChecks:[],flags:[],artifacts:[],actions:[],summary:{}},autoSolve:{status:'review',gaps:[]},
@@ -61,6 +62,16 @@ test('Batch85 challenge session prefers formatted submission candidate while kee
   assert.match(session.result.payload,/id,member/);
   assert.equal(session.result.verified,false);
   assert.equal(session.primaryNeed.code,'SUBMISSION_VERIFIER_MISSING');
+});
+
+test('Batch85 compatibility Challenge Session rebuild keeps formatted submission result for Electron file sessions',()=>{
+  const analysis=membershipAnalysis();
+  analysis.submissionAutopilot=analyzeSubmissionBundle([{path:'sample_submission.csv',text:'id,member\na,0\nb,0\nc,0\n'}],analysis);
+  const session=buildCompatibilitySession(analysis);
+  assert.equal(session.status,'candidate');
+  assert.equal(session.result.kind,'submission-table');
+  assert.match(session.result.payload,/a,1/);
+  assert.match(session.result.payload,/b,0/);
 });
 
 test('Batch85 compatibility entry and clean UI compile against the newest drop-to-result path',()=>{
