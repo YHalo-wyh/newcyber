@@ -8,6 +8,8 @@ const path=require('node:path');
 const zlib=require('node:zlib');
 const {discoverConstantInputBindings,validateFeedSpec,resolveModelInputPlan}=require('../src/core/challenge_onnx_input_bindings');
 const {scoreModel}=require('../src/core/challenge_onnx_model_selector');
+const {chooseScoreOutput}=require('../src/core/ai_adversarial_onnx_bridge');
+const {completeClassCount}=require('../src/core/challenge_score_space');
 const {discoverNamedJsonHints,runChallengeOnnxAutopilot}=require('../src/core/challenge_onnx_autopilot');
 
 function chunk(type,data){const body=Buffer.from(data);const out=Buffer.alloc(12+body.length);out.writeUInt32BE(body.length,0);Buffer.from(type).copy(out,4);body.copy(out,8);return out;}
@@ -27,8 +29,10 @@ test('constant ONNX bindings are discovered only from explicit binding keys',()=
   const generic=discoverConstantInputBindings([{file:'x.json',text:JSON.stringify({feeds:{temperature:{type:'float32',dims:[1],values:[1]}}})}]);assert.equal(generic.status,'not-detected');
 });
 
-test('binding validation rejects value-count mismatch and unsafe dtypes',()=>{
+test('binding validation rejects count, base64 length, bigint and dtype mismatches before runtime',()=>{
   assert.throws(()=>validateFeedSpec({type:'float32',dims:[2],values:[1]},'temperature'),/数量/);
+  assert.throws(()=>validateFeedSpec({type:'float32',dims:[1],base64:Buffer.alloc(2).toString('base64')},'temperature'),/解码长度/);
+  assert.throws(()=>validateFeedSpec({type:'int64',dims:[1],values:['not-an-int']},'seed'),/非法值/);
   assert.throws(()=>validateFeedSpec({type:'string',dims:[1],values:['x']},'name'),/不支持/);
 });
 
@@ -44,12 +48,18 @@ test('model scoring accepts evidence-bound auxiliary input and rejects unbound m
   const no=scoreModel(file,multiModel(),{mode:'image',manifest:manifest(),inputBindings:{bindings:{}}});assert.equal(no.score,-100);assert.match(no.reasons[0],/AUX_INPUT_BINDING_MISSING/);
 });
 
+test('complete contiguous class map can disambiguate multiple vector outputs without guessing',()=>{
+  assert.equal(completeClassCount({classes:[{name:'cat',index:0},{name:'dog',index:1}]}),2);assert.equal(completeClassCount({classes:[{name:'cat',index:0},{name:'dog',index:2}]}),null);
+  const result={schema:'newcyber.onnx-run.v1',outputs:{embedding:{type:'float32',dims:[1,4],elements:4,preview:[1,2,3,4],truncated:false},head:{type:'float32',dims:[1,2],elements:2,preview:[0.1,0.9],truncated:false}}};
+  assert.equal(chooseScoreOutput(result,{expectedClasses:2}).name,'head');
+});
+
 test('full challenge autopilot merges primary image tensor with evidence-bound constant input',async()=>{
   const root=await fs.mkdtemp(path.join(os.tmpdir(),'newcyber-multi-input-'));try{
     await fs.mkdir(path.join(root,'dog'));await fs.writeFile(path.join(root,'dog','55.png'),png());await fs.writeFile(path.join(root,'model.onnx'),'x');
     const meta=JSON.stringify({hints:[['cat','dog']],class_to_idx:{cat:0,dog:1},onnxInputs:{temperature:{type:'float32',dims:[1],values:[1]}}});await fs.writeFile(path.join(root,'meta.json'),meta);
     const files=[{path:'dog/55.png',extension:'.png',size:70},{path:'model.onnx',extension:'.onnx',size:1},{path:'meta.json',extension:'.json',size:Buffer.byteLength(meta)}];let seenFeeds=null;
     const result=await runChallengeOnnxAutopilot(root,{files,aiPreprocessingManifest:manifest(),findings:[]},{runtimeStatus:()=>({available:true}),inspectModel:async()=>multiModel(),runModel:async(_model,request)=>{seenFeeds=request.feeds;return run();}});
-    assert.equal(result.status,'ranked');assert.equal(result.scoreSpace.status,'ready');assert.equal(result.scoreSpace.mapping.mode,'class-map-to-output-index');assert.equal(result.inputPlan.primaryInputName,'image');assert.deepEqual(result.inputPlan.auxiliaryInputNames,['temperature']);assert.deepEqual(Object.keys(seenFeeds).sort(),['image','temperature']);assert.deepEqual(seenFeeds.temperature,{type:'float32',dims:[1],values:[1]});assert.deepEqual(result.bridge.candidateSets[0].ids,[55]);
+    assert.equal(result.status,'ranked');assert.equal(result.scoreSpace.status,'ready');assert.equal(result.scoreSpace.mapping.mode,'class-map-to-output-index');assert.equal(result.scoreSpace.mapping.completeClassCount,2);assert.equal(result.inputPlan.primaryInputName,'image');assert.deepEqual(result.inputPlan.auxiliaryInputNames,['temperature']);assert.deepEqual(Object.keys(seenFeeds).sort(),['image','temperature']);assert.deepEqual(seenFeeds.temperature,{type:'float32',dims:[1],values:[1]});assert.deepEqual(result.bridge.candidateSets[0].ids,[55]);
   }finally{await fs.rm(root,{recursive:true,force:true});}
 });
