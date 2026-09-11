@@ -17,6 +17,7 @@ contextBridge.exposeInMainWorld('newcyber', {
   rescanChallenge: (rootPath) => ipcRenderer.invoke('challenge:rescan', rootPath),
   inspectChallengeFile: (rootPath, relativePath) => ipcRenderer.invoke('challenge:inspect', rootPath, relativePath),
   revealArtifact: (rootPath, relativePath) => ipcRenderer.invoke('artifact:reveal-path', rootPath, relativePath),
+  exportSubmissionArtifact: (rootPath, relativePath, suggestedName) => ipcRenderer.invoke('artifact:export-submission', rootPath, relativePath, suggestedName),
   getPocIndexStatus: () => ipcRenderer.invoke('poc:index-status'),
   importPocIndex: () => ipcRenderer.invoke('poc:index-import'),
   getAdvisoryIndexStatus: () => ipcRenderer.invoke('advisory:index-status'),
