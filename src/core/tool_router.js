@@ -14,6 +14,7 @@ const { analyzeModelInversion } = require('./ai_model_inversion');
 const { diagnoseAiSkillMatrix } = require('./ai_skill_matrix');
 const { runAiRealCtfRegression, getAiRealCtfCorpus } = require('./ai_real_ctf_regression');
 const { runAiStage1TrainingRegression, PUBLIC_TRAINING_SEEDS } = require('./ai_stage1_training_corpus');
+const { runIchunqiuAiTrainingRegression, getIchunqiuAiTrainingCorpus, evaluateFalsePremiseReplay } = require('./ai_ichunqiu_training');
 const { analyzeRasterImage, compareRasterImages, analyzeNpySample, compareNpySamples } = require('./ai_sample_forensics');
 const { analyzeModelArithmeticBundle } = require('./ai_model_arithmetic');
 const { analyzeBinaryDataListing } = require('./binary_data_graph');
@@ -71,6 +72,9 @@ function runTool(tool, payload = {}) {
   if (tool === 'ai-skill-matrix') return diagnoseAiSkillMatrix(payload.input ?? payload);
   if (tool === 'ai-stage1-training-regression') return runAiStage1TrainingRegression(payload.options || payload.input || {});
   if (tool === 'ai-stage1-training-corpus') return {schema:'newcyber.ai-stage1-training-corpus.v1',cases:PUBLIC_TRAINING_SEEDS};
+  if (tool === 'ai-ichunqiu-training-regression') return runIchunqiuAiTrainingRegression();
+  if (tool === 'ai-ichunqiu-training-corpus') return { schema:'newcyber.ai-ichunqiu-stage1-corpus.v1', cases:getIchunqiuAiTrainingCorpus() };
+  if (tool === 'ai-false-premise-replay') return evaluateFalsePremiseReplay(payload.input || payload);
   if (tool === 'ai-real-ctf-regression') return runAiRealCtfRegression();
   if (tool === 'ai-real-ctf-corpus') return { schema:'newcyber.ai-real-ctf-corpus.v1', cases:getAiRealCtfCorpus() };
   if (tool === 'ai-model-arithmetic-auto') return analyzeModelArithmeticBundle(payload.input || payload, payload.options || {});
