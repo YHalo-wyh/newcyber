@@ -4,5 +4,6 @@
 // finals_analyzer_batch49 is the preprocessing/contest-analyzer base extended by Batch79.
 // finals_analyzer_batch79 adds family Strategy Contracts; finals_analyzer_batch80 adds official five-direction reinforcement.
 // finals_analyzer_batch81 adds worldwide source-derived holdout benchmarking and the Prompt MegaPack.
-// Batch82 adds black-box transcript/MCP supply-chain analyzers and the exact random-10 gate.
-module.exports = require('./finals_analyzer_batch82');
+// finals_analyzer_batch82 adds black-box transcript/MCP supply-chain analyzers and the exact random-10 gate.
+// finals_analyzer_batch83 adds calibration/query membership candidate generation for Drop-to-Result.
+module.exports = require('./finals_analyzer_batch83');
