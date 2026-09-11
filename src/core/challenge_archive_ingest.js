@@ -15,7 +15,7 @@ const DEFAULT_LIMITS=Object.freeze({
   maxCompressionRatio:500
 });
 
-const ZIP_EXTENSIONS=new Set(['.zip','.jar','.apk','.whl','.ipa']);
+const ZIP_EXTENSIONS=new Set(['.zip','.jar','.apk','.whl','.ipa','.npz']);
 const TAR_EXTENSIONS=new Set(['.tar']);
 const GZIP_EXTENSIONS=new Set(['.gz','.tgz']);
 
