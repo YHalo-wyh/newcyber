@@ -15,7 +15,9 @@
     'adversarial-example':'对抗样本',
     'privacy-leakage':'隐私 / 提取',
     'backdoor-poisoning':'后门 / 数据链路',
-    'infra-supply-chain':'基础设施 / 供应链'
+    'infra-supply-chain':'基础设施 / 供应链',
+    'model-extraction':'模型抽取',
+    'dataset-pipeline-security':'数据链路安全'
   };
   const GAP_LABELS={
     'add-provenance-backed-cases':'补公开来源样本',
@@ -23,7 +25,16 @@
     'add-cross-event-evidence':'补跨赛事证据',
     'upgrade-provenance-quality':'提升来源可信度',
     'reduce-duplicate-case-inflation':'降低重复样本膨胀',
-    'build-cross-event-holdout':'建立跨赛事 holdout'
+    'build-cross-event-holdout':'建立跨赛事 holdout',
+    'add-unseen-family-holdout':'补 unseen-family 压力测试',
+    'maintain-unseen-family-stress':'维持 unseen-family 泛化压力'
+  };
+  const MODE_LABELS={
+    'new-family':'优先找新 family',
+    'holdout-enablement':'先补足跨赛事 holdout 条件',
+    'unseen-family-stress':'补 unseen-family 测试',
+    'provenance-upgrade':'升级 provenance',
+    'cross-event-evidence':'补跨赛事证据'
   };
   const READINESS={
     ready:{label:'可评估',tone:'good',rank:2},
@@ -64,12 +75,13 @@
   function healthSummary(){
     const quality=curriculumResult?.quality?.summary||{};
     const holdout=curriculumResult?.holdout?.summary||{};
+    const schedule=curriculumResult?.schedule?.summary||{};
     const score=Number(quality.overallScore||0);
     return `<div class="stage1-health-summary">
       <div><span>QUALITY</span><b>${(score*100).toFixed(0)}%</b></div>
       <div><span>READY</span><b>${quality.ready||0}/${quality.directions||7}</b></div>
       <div><span>HOLDOUT</span><b>${holdout.eligibleDirections||0}/${holdout.directions||7}</b></div>
-      <div><span>UNSEEN</span><b>${holdout.unseenFamilyPlans||0}</b></div>
+      <div><span>NEXT</span><b>${h(schedule.topDirection||'—')}</b></div>
     </div>`;
   }
 
@@ -87,18 +99,37 @@
     }).join('');
   }
 
+  function schedulePanel(){
+    const queue=curriculumResult?.schedule?.queue||[];
+    if(!queue.length)return '';
+    const top=queue.slice(0,5);
+    return `<div class="stage1-schedule">
+      <div class="stage1-schedule-head"><span>NEXT ROUND</span><b>下一轮训练调度</b><small>按真实覆盖缺口排序，不按 raw case 堆数量。</small></div>
+      <div class="stage1-schedule-list">${top.map((item)=>{
+        const action=GAP_LABELS[item.nextAction]||item.nextAction;
+        const mode=MODE_LABELS[item.acquisitionMode]||item.acquisitionMode;
+        return `<div class="stage1-schedule-item ${h(item.priority)}">
+          <strong>#${item.rank}</strong>
+          <div><b>${h(TITLES[item.direction]||item.direction)}</b><span>${h(action)}</span><small>${h(mode)} · 目标 +E${item.targets?.newEvents||0} +F${item.targets?.newFamilies||0} · unseen ${item.targets?.unseenFamilyHoldout||0}</small></div>
+          <em>${Number(item.score||0).toFixed(0)}</em>
+        </div>`;
+      }).join('')}</div>
+    </div>`;
+  }
+
   function healthPanel(){
     const button=curriculumBusy?'加载中':'刷新';
     if (!curriculumResult) {
       return `<section class="stage1-health-panel">
         <div class="stage1-health-head"><div><span>TRAINING HEALTH</span><b>训练覆盖健康度</b></div><button class="button ghost" data-training-health ${curriculumBusy?'disabled':''}>${curriculumBusy?'加载中':'加载'}</button></div>
         ${curriculumError?`<p class="stage1-training-error">${h(curriculumError)}</p>`:''}
-        <div class="stage1-health-empty"><b>不是看样本数量，而是看能不能跨赛事评估。</b><p>读取 Batch95 quality + Batch96 holdout，显示有效样本、赛事 / family 弱项、clean holdout 和 unseen-family 压力测试。</p></div>
+        <div class="stage1-health-empty"><b>不是看样本数量，而是看能不能跨赛事评估。</b><p>读取 Batch95 quality + Batch96 holdout + Batch98 schedule，直接给出下一轮最该补哪一条 track。</p></div>
       </section>`;
     }
     return `<section class="stage1-health-panel">
       <div class="stage1-health-head"><div><span>TRAINING HEALTH</span><b>训练覆盖健康度</b></div><button class="button ghost" data-training-health ${curriculumBusy?'disabled':''}>${button}</button></div>
       ${healthSummary()}
+      ${schedulePanel()}
       <div class="stage1-health-table">${directionRows()}</div>
       <div class="stage1-health-legend"><span>有效/原始</span><span>E/F = 最弱子轨赛事 / family</span><span>H = clean holdout</span><span>U = unseen-family</span></div>
     </section>`;
@@ -111,7 +142,7 @@
     return html.replace(marker,`${healthPanel()}${marker}`);
   }
 
-  toolView=function batch97TrainingHealthToolView(tool){
+  toolView=function batch98TrainingHealthToolView(tool){
     const html=previousToolView(tool);
     return tool===TOOL?injectHealth(html):html;
   };
