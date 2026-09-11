@@ -49,11 +49,25 @@ function pythonFunctionBlocks(sourceText){
     }
     if(body.length&&body.length<=256){
       const bodyText=body.join('\n');
-      if(bodyText.length<=16_384)out.push({name:match[2],body:bodyText,line:index+1});
+      if(bodyText.length<=16_384)out.push({name:match[2],body:bodyText,line:index+1,startLine:index+2,endLine:end});
     }
     index=Math.max(index,end-1);
   }
   return out;
+}
+function pythonFunctionBodyLines(sourceText){
+  const lines=String(sourceText||'').split(/\r?\n/);const bodyLines=new Set();
+  for(let index=0;index<lines.length;index+=1){
+    const raw=lines[index];const match=raw.match(/^([ \t]*)def\s+[A-Za-z_]\w*\s*\([^)]{0,512}\)\s*(?:->\s*[^:]{1,128})?\s*:\s*(?:#.*)?$/);
+    if(!match)continue;
+    const indent=match[1].replace(/\t/g,'    ').length;
+    for(let end=index+1;end<lines.length;end+=1){
+      const line=lines[end];
+      if(line.trim()&&leadingIndent(line)<=indent)break;
+      bodyLines.add(end+1);
+    }
+  }
+  return bodyLines;
 }
 function safeHannDerivedExpression(expr,tainted){
   const value=String(expr||'').trim();
@@ -95,10 +109,17 @@ function discoverHannReturningFunctions(sourceText){
   return {functions,evidence};
 }
 function hannKernelProvenance(sourceText){
-  const assignments=assignmentLines(sourceText);const tainted=new Set();const evidence=[];
-  const helperReturns=discoverHannReturningFunctions(sourceText);
+  const text=String(sourceText||'');const allLines=text.split(/\r?\n/);const bodyLines=pythonFunctionBodyLines(text);
+  const assignments=[];
+  for(let index=0;index<allLines.length;index+=1){
+    const line=allLines[index].replace(/#.*$/,'').trim();const match=line.match(/^([A-Za-z_]\w*)\s*=\s*(.+)$/);
+    if(match&&match[2].length<=512)assignments.push({name:match[1],rhs:match[2],line:index+1,inFunction:bodyLines.has(index+1)});
+  }
+  const tainted=new Set();const evidence=[];
+  const helperReturns=discoverHannReturningFunctions(text);
   evidence.push(...helperReturns.evidence);
   for(const item of assignments){
+    if(item.inFunction)continue;
     if(HANN_SOURCE_PATTERN.test(item.rhs)){
       tainted.add(item.name);evidence.push(`hann-source:${item.name}`);
       continue;
@@ -111,7 +132,7 @@ function hannKernelProvenance(sourceText){
   for(let round=0;round<8;round++){
     let changed=false;
     for(const item of assignments){
-      if(tainted.has(item.name))continue;
+      if(item.inFunction||tainted.has(item.name))continue;
       const parent=[...tainted].find((name)=>new RegExp(`\\b${escapeRegex(name)}\\b`).test(item.rhs));
       if(!parent)continue;
       const calls=[...item.rhs.matchAll(/\b([A-Za-z_]\w*(?:\.\w+)*)\s*\(/g)].map((m)=>m[1]);
@@ -121,7 +142,7 @@ function hannKernelProvenance(sourceText){
     }
     if(!changed)break;
   }
-  return {assignments,tainted,evidence,helperReturns:[...helperReturns.functions.keys()]};
+  return {assignments:assignments.filter((item)=>!item.inFunction),tainted,evidence,helperReturns:[...helperReturns.functions.keys()]};
 }
 function indirectHannDotEvidence(sourceText){
   const text=String(sourceText||'');const provenance=hannKernelProvenance(text);const {assignments,tainted,evidence}=provenance;
