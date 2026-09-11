@@ -7,6 +7,7 @@ const {
   getDomesticBackdoorTrainingCorpus,
   runDomesticBackdoorTrainingRegression
 }=require('../src/core/ai_domestic_backdoor_training');
+const {CORPORA,getTrainingCurriculum,runTrainingCurriculumRegression}=require('../src/core/ai_training_curriculum');
 
 test('Batch94 domestic backdoor corpus keeps provenance and synthetic-only policy',()=>{
   const corpus=getDomesticBackdoorTrainingCorpus();
@@ -40,4 +41,15 @@ test('Batch94 CIFAR-10 replay requires target ASR plus neutral-control specifici
   assert.ok(positive.findingIds.includes('backdoor-control-specificity'));
   assert.ok(!negative.findingIds.includes('backdoor-target-asr-candidate'));
   assert.ok(!negative.findingIds.includes('backdoor-control-specificity'));
+});
+
+test('Batch94 corpus is part of the unified curriculum and full regression',()=>{
+  const curriculum=getTrainingCurriculum();
+  assert.equal(curriculum.summary.corpora,CORPORA.length);
+  assert.equal(curriculum.summary.byCorpus['domestic-backdoor-poisoning-2025-2026'],3);
+  assert.ok(curriculum.cases.some((row)=>row.id.startsWith('domestic-backdoor-poisoning-2025-2026:ccsssc-2026-cifar10')));
+  const full=runTrainingCurriculumRegression({variantsPerSeed:1});
+  assert.equal(full.summary.suites,CORPORA.length);
+  assert.equal(full.summary.suiteErrors,0);
+  assert.ok(full.suites.some((row)=>row.id==='domestic-backdoor-poisoning-2025-2026'&&row.ok));
 });
