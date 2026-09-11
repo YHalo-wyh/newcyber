@@ -18,6 +18,7 @@ const { runAiRealCtfRegression, getAiRealCtfCorpus } = require('./ai_real_ctf_re
 const { runAiStage1TrainingRegression, PUBLIC_TRAINING_SEEDS } = require('./ai_stage1_training_corpus');
 const { runPublicChallengeTrainingRegression, getPublicChallengeTrainingCorpus } = require('./ai_public_challenge_training');
 const { runOdysseyTrainingRegression, getOdysseyTrainingCorpus } = require('./ai_odyssey_training');
+const { runSgAiCtfTrainingRegression, getSgAiCtfTrainingCorpus } = require('./ai_sg_aictf_training');
 const { getTrainingCurriculum, runTrainingCurriculumRegression } = require('./ai_training_curriculum');
 const { runIchunqiuAiTrainingRegression, getIchunqiuAiTrainingCorpus, evaluateFalsePremiseReplay } = require('./ai_ichunqiu_training');
 const { analyzeRasterImage, compareRasterImages, analyzeNpySample, compareNpySamples } = require('./ai_sample_forensics');
@@ -83,6 +84,8 @@ function runTool(tool, payload = {}) {
   if (tool === 'ai-public-challenge-training-corpus') return {schema:'newcyber.ai-public-challenge-training-corpus.v1',cases:getPublicChallengeTrainingCorpus()};
   if (tool === 'ai-odyssey-training-regression') return runOdysseyTrainingRegression(payload.options || payload.input || {});
   if (tool === 'ai-odyssey-training-corpus') return {schema:'newcyber.ai-odyssey-training-corpus.v1',cases:getOdysseyTrainingCorpus()};
+  if (tool === 'ai-sg-aictf-training-regression') return runSgAiCtfTrainingRegression(payload.options || payload.input || {});
+  if (tool === 'ai-sg-aictf-training-corpus') return {schema:'newcyber.ai-sg-aictf-training-corpus.v1',cases:getSgAiCtfTrainingCorpus()};
   if (tool === 'ai-ichunqiu-training-regression') return runIchunqiuAiTrainingRegression();
   if (tool === 'ai-ichunqiu-training-corpus') return { schema:'newcyber.ai-ichunqiu-stage1-corpus.v1', cases:getIchunqiuAiTrainingCorpus() };
   if (tool === 'ai-false-premise-replay') return evaluateFalsePremiseReplay(payload.input || payload);
