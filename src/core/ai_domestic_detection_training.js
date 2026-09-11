@@ -100,7 +100,7 @@ function evaluateLossHistoryPoisonReplay(input={}){
 function binaryFixture(kind){
   const positives=kind==='deepfake'?['fake-a','fake-b','fake-c','fake-d']:['adv-a','adv-b','adv-c','adv-d'];
   const negatives=kind==='deepfake'?['real-a','real-b','real-c','real-d']:['clean-a','clean-b','clean-c','clean-d'];
-  return{rows:[...positives.map((id,index)=>({id,truth:1,predicted:index===3?0:1})),...negatives.map((id,index)=>({id,truth:0,predicted:index===3?1:0}))]};
+  return{rows:[...positives.map((id)=>({id,truth:1,predicted:1})),...negatives.map((id,index)=>({id,truth:0,predicted:index===3?1:0}))]};
 }
 function poisonFixture(){
   return{thresholdRatio:0.25,poisonTruth:['sample-p1','sample-p2'],rows:[
