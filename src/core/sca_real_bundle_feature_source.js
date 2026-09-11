@@ -4,7 +4,7 @@ const {sourceRecipe,resolveGroupedFeatureRecipe,transformRow,hannWeight,constant
 
 const MAX_RAW_VALUES_PER_READ=2_000_000;
 const DERIVED_CALL_ALLOWLIST=new Set(['np.sum','numpy.sum','sum','np.asarray','numpy.asarray','np.array','numpy.array']);
-const DOT_CALL_PATTERN=/(?:np|numpy)\.(?:dot|inner|vdot)|torch\.(?:dot|inner)/i;
+const DOT_CALL_PATTERN=/(?:np|numpy)\.(?:dot|inner|vdot|einsum)|torch\.(?:dot|inner|einsum)/i;
 const GUARD_AGGREGATE_CALLS=new Set(['np.concatenate','numpy.concatenate','np.hstack','numpy.hstack','np.stack','numpy.stack','np.asarray','numpy.asarray','np.array','numpy.array','list','tuple']);
 
 function list(value){return Array.isArray(value)?value:[];}
@@ -27,10 +27,10 @@ function callAllowed(name,tainted){
 function expressionMentionsTainted(expr,tainted){
   return [...tainted].some((name)=>new RegExp(`\\b${escapeRegex(name)}\\b`).test(expr));
 }
-function indirectHannDotEvidence(sourceText){
-  const text=String(sourceText||'');const assignments=assignmentLines(text);const tainted=new Set();const evidence=[];
+function hannKernelProvenance(sourceText){
+  const assignments=assignmentLines(sourceText);const tainted=new Set();const evidence=[];
   for(const item of assignments){
-    if(/(?:np\.)?(?:hanning|hann)\s*\(|torch\.hann_window\s*\(|(?:signal\.)?windows\.hann\s*\(/i.test(item.rhs)){
+    if(/(?:(?:np|numpy)\.)?(?:hanning|hann)\s*\(|torch\.hann_window\s*\(|(?:signal\.)?windows\.hann\s*\(/i.test(item.rhs)){
       tainted.add(item.name);evidence.push(`hann-source:${item.name}`);
     }
   }
@@ -47,9 +47,14 @@ function indirectHannDotEvidence(sourceText){
     }
     if(!changed)break;
   }
-  const callRegex=/\b((?:np|numpy)\.(?:dot|inner|vdot)|torch\.(?:dot|inner))\s*\(([^,\n]{1,240}),\s*([^\)\n]{1,240})\)/gi;
-  for(const match of text.matchAll(callRegex)){
-    const args=`${match[2]} ${match[3]}`;
+  return {assignments,tainted,evidence};
+}
+function indirectHannDotEvidence(sourceText){
+  const text=String(sourceText||'');const provenance=hannKernelProvenance(text);const {assignments,tainted,evidence}=provenance;
+  for(const raw of text.split(/\r?\n/)){
+    const match=raw.match(/\b((?:np|numpy)\.(?:dot|inner|vdot|einsum)|torch\.(?:dot|inner|einsum))\s*\(([^\n]{1,700})\)/i);
+    if(!match)continue;
+    const args=match[2];
     const kernel=[...tainted].find((name)=>new RegExp(`\\b${escapeRegex(name)}\\b`).test(args));
     if(kernel)return {status:'ok',kernel,sink:match[1],evidence:[...evidence,`dot-kernel:${kernel}`,`linear-sink:${match[1].toLowerCase()}`]};
   }
@@ -119,6 +124,26 @@ function guardSampleProvenance(sourceText,width){
 function meanCall(expr){
   return /\b(?:np|numpy)\.(?:mean|average)\s*\(/i.test(expr)||/\b[A-Za-z_]\w*\.mean\s*\(/i.test(expr);
 }
+function safeCenteredAliasExpression(expr,parent){
+  const value=String(expr||'').trim();const name=escapeRegex(parent);
+  const indexed=`${name}(?:\\s*\\[[^\\]\\n]*\\])*`;
+  if(new RegExp(`^${indexed}(?:\\.T)?$`).test(value))return true;
+  if(new RegExp(`^${indexed}\\.(?:reshape|ravel|flatten|squeeze|transpose|astype|copy)\\s*\\([^\\n]*\\)$`,'i').test(value))return true;
+  if(new RegExp(`^(?:np|numpy)\\.(?:asarray|array|reshape|ravel|squeeze|transpose)\\s*\\(\\s*${indexed}(?:\\s*,[^\\n]*)?\\)$`,'i').test(value))return true;
+  return false;
+}
+function propagateCenteredAliases(assignments,centeredVars,evidence){
+  for(let round=0;round<8;round++){
+    let changed=false;
+    for(const item of assignments){
+      if(centeredVars.has(item.name))continue;
+      const parent=[...centeredVars].find((name)=>new RegExp(`\\b${escapeRegex(name)}\\b`).test(item.rhs));
+      if(!parent||!safeCenteredAliasExpression(item.rhs,parent))continue;
+      centeredVars.add(item.name);evidence.push(`guard-centered-alias:${item.name}<-${parent}`);changed=true;
+    }
+    if(!changed)break;
+  }
+}
 function guardBaselineEvidence(sourceText,recipe){
   const layout=guardLayout(recipe);
   if(!layout)return {status:'missing',reason:'guard-layout-not-proven'};
@@ -152,20 +177,26 @@ function guardBaselineEvidence(sourceText,recipe){
     if(!baseline)continue;
     centeredVars.add(item.name);evidence.push(`guard-centered:${item.name}<-${baseline}`);
   }
-  const callRegex=/\b((?:np|numpy)\.(?:dot|inner|vdot)|torch\.(?:dot|inner))\s*\(([^\n]{1,500})\)/gi;
-  for(const match of text.matchAll(callRegex)){
+  propagateCenteredAliases(provenance.assignments,centeredVars,evidence);
+
+  const hann=hannKernelProvenance(text);
+  for(const raw of text.split(/\r?\n/)){
+    const match=raw.match(/\b((?:np|numpy)\.(?:dot|inner|vdot|einsum)|torch\.(?:dot|inner|einsum))\s*\(([^\n]{1,700})\)/i);
+    if(!match)continue;
     const args=match[2];
     const centered=[...centeredVars].find((name)=>new RegExp(`\\b${escapeRegex(name)}\\b`).test(args));
     const inlineBaseline=[...baselineVars].find((name)=>new RegExp(`-\\s*${escapeRegex(name)}\\b`).test(args));
-    if(centered||inlineBaseline){
-      return {status:'ok',baselineGuard:{mode:'edge-mean',leading:layout.leading,trailing:layout.trailing,subtract:'feature-windows',source:'challenge-source',evidence:[...evidence,`baseline-linear-sink:${match[1].toLowerCase()}`]}};
+    const kernel=[...hann.tainted].find((name)=>new RegExp(`\\b${escapeRegex(name)}\\b`).test(args));
+    if((centered||inlineBaseline)&&kernel){
+      return {status:'ok',baselineGuard:{mode:'edge-mean',leading:layout.leading,trailing:layout.trailing,subtract:'feature-windows',source:'challenge-source',evidence:[...evidence,`baseline-hann-kernel:${kernel}`,`baseline-linear-sink:${match[1].toLowerCase()}`]}};
     }
   }
   for(const raw of text.split(/\r?\n/)){
     if(!raw.includes('@'))continue;
     const centered=[...centeredVars].find((name)=>new RegExp(`\\b${escapeRegex(name)}\\b`).test(raw));
     const inlineBaseline=[...baselineVars].find((name)=>new RegExp(`-\\s*${escapeRegex(name)}\\b`).test(raw));
-    if(centered||inlineBaseline)return {status:'ok',baselineGuard:{mode:'edge-mean',leading:layout.leading,trailing:layout.trailing,subtract:'feature-windows',source:'challenge-source',evidence:[...evidence,'baseline-linear-sink:@']}};
+    const kernel=[...hann.tainted].find((name)=>new RegExp(`\\b${escapeRegex(name)}\\b`).test(raw));
+    if((centered||inlineBaseline)&&kernel)return {status:'ok',baselineGuard:{mode:'edge-mean',leading:layout.leading,trailing:layout.trailing,subtract:'feature-windows',source:'challenge-source',evidence:[...evidence,`baseline-hann-kernel:${kernel}`,'baseline-linear-sink:@']}};
   }
   return {status:'missing',reason:'centered-value-does-not-feed-linear-sink',evidence};
 }
