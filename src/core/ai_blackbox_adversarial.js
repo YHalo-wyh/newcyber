@@ -2,7 +2,10 @@
 
 const {parseRows}=require('./ai_privacy');
 
-function num(value){const n=Number(value);return Number.isFinite(n)?n:null;}
+function num(value){
+  if(value===null||value===undefined||value==='')return null;
+  const n=Number(value);return Number.isFinite(n)?n:null;
+}
 function text(value){return String(value??'').trim();}
 function bool(value){
   if(typeof value==='boolean')return value;
