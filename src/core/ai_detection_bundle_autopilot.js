@@ -30,6 +30,7 @@ function binary(value){
 const ALIASES=Object.freeze({
   id:['id','file','filename','file_name','name','path','image','image_path','sample','sample_id'],
   truth:['truth','ground_truth','groundtruth','gt','y_true','expected','target_truth','true_label','label'],
+  poisonTruth:['poison_truth','poisoned','is_poisoned','is_poison','poison_label'],
   prediction:['predicted','prediction','pred','y_pred','detected','result','decision','is_adversarial','is_poisoned','is_fake','value'],
   score:['score','probability','prob','confidence','pred_score','prediction_score','fraud_probability','fake_probability'],
   threshold:['threshold','decision_threshold','score_threshold'],
@@ -151,7 +152,7 @@ function lossHistoryCandidate(rows,container=null){
     const row=rows[index];const losses=lossesFromRow(row);const metric=lossChangeMetric(losses);if(!metric)continue;
     const idKey=findKey(row,'id');const id=text(idKey?row[idKey]:`row-${index+1}`);
     parsed.push({id,losses});
-    const truthKey=findKey(row,'truth');if(truthKey&&binary(row[truthKey])===1)truth.push(id);
+    const truthKey=findKey(row,'poisonTruth');if(truthKey&&binary(row[truthKey])===1)truth.push(id);
   }
   if(parsed.length<4)return null;
   const ratio=thresholdRatioFromContainer(container,rows);
@@ -212,16 +213,28 @@ async function runAiDetectionBundleAutopilot(root,analysis={},options={}){
       findings.push({id:'poison-loss-history-ranking-candidate',severity:'info',title:'发现可自动排序的 loss-history 数据',file:file.relative,evidence:`rows=${lossInput.rows}; threshold ratio not evidenced`,meaning:'已生成异常变化排名，但未发现明确 threshold_ratio，因此不猜测投毒集合大小。'});
     }
   }
-  const binaryRuns=evaluations.filter((x)=>x.kind==='binary-detection');
+
+  let correlation=null;
+  try{
+    const {runDetectionTableCorrelation}=require('./ai_detection_table_correlation');
+    correlation=await runDetectionTableCorrelation(root,options);
+    for(const item of correlation.correlations||[])evaluations.push({file:item.predictionFile,kind:'split-table-correlation',truthFile:item.truthFile,predictionFile:item.predictionFile,matchedRows:item.matchedRows,coverage:item.coverage,confidence:item.confidence,result:item.result});
+    for(const gap of correlation.gaps||[])gaps.push({source:'split-table-correlation',...gap});
+    for(const finding of correlation.findings||[])findings.push(finding);
+  }catch(error){
+    gaps.push({source:'split-table-correlation',reason:'correlation-exception',detail:String(error?.message||error).slice(0,300)});
+  }
+
+  const binaryRuns=evaluations.filter((x)=>x.kind==='binary-detection'||x.kind==='split-table-correlation');
   const lossRuns=evaluations.filter((x)=>x.kind.startsWith('loss-history'));
   const effective=binaryRuns.filter((x)=>x.result?.verdict==='candidate-effective').length+evaluations.filter((x)=>x.kind==='loss-history-poison'&&x.result?.verdict==='candidate-effective').length;
   const status=evaluations.length?(gaps.length?'partial':'evaluated'):(gaps.length?'gap':'not-applicable');
   return{
-    schema:'newcyber.ai-detection-bundle-autopilot.v1',status,
-    summary:{structuredFiles:files.length,evaluations:evaluations.length,binaryRuns:binaryRuns.length,lossHistoryRuns:lossRuns.length,effectiveCandidates:effective,gaps:gaps.length},
-    evaluations:evaluations.slice(0,64),gaps:gaps.slice(0,64),findings:findings.slice(0,128),
-    next:status==='not-applicable'?'未发现可确定解释的检测结果表。':status==='gap'?'发现检测型结构化数据，但缺少显式 threshold、truth/prediction 配对或足够样本。':gaps.length?'已自动复算可验证部分，其余结构化结果保留为 GAP。':'已自动复算检测结果；最终是否可提交仍以题目 scorer/verifier 为准。',
-    notes:['不会把 prediction-only CSV 当 ground truth，也不会默认 score threshold=0.5。','loss-history 没有显式 threshold_ratio 时只给完整异常排名，不猜投毒样本数量。','本模块只读取结构化结果文件，不执行题目脚本或加载不受信模型。']
+    schema:'newcyber.ai-detection-bundle-autopilot.v2',status,
+    summary:{structuredFiles:files.length,evaluations:evaluations.length,binaryRuns:binaryRuns.length,lossHistoryRuns:lossRuns.length,splitTableCorrelations:Number(correlation?.summary?.correlations)||0,effectiveCandidates:effective,gaps:gaps.length},
+    evaluations:evaluations.slice(0,64),gaps:gaps.slice(0,64),findings:findings.slice(0,128),correlation,
+    next:status==='not-applicable'?'未发现可确定解释的检测结果表。':status==='gap'?'发现检测型结构化数据，但缺少显式 threshold、可靠 truth/prediction 配对或足够样本。':gaps.length?'已自动复算可验证部分，其余结构化结果保留为 GAP。':'已自动复算检测结果；最终是否可提交仍以题目 scorer/verifier 为准。',
+    notes:['不会把 prediction-only CSV 当 ground truth，也不会默认 score threshold=0.5。','分离 truth/prediction 表只按稳定样本 ID 和高置信文件角色关联，不按行号强拼。','loss-history 没有显式 threshold_ratio 时只给完整异常排名，不猜投毒样本数量。','本模块只读取结构化结果文件，不执行题目脚本或加载不受信模型。']
   };
 }
 
