@@ -7,4 +7,5 @@
 // finals_analyzer_batch82 adds black-box transcript/MCP supply-chain analyzers and the exact random-10 gate.
 // finals_analyzer_batch83 adds calibration/query membership candidate generation for Drop-to-Result.
 // finals_analyzer_batch85 adds evidence-driven sample-submission packaging and keeps candidate/verified semantics separate.
-module.exports = require('./finals_analyzer_batch85');
+// finals_analyzer_batch86 adds universal trigger/backdoor candidate ranking across prompt holdouts.
+module.exports = require('./finals_analyzer_batch86');
