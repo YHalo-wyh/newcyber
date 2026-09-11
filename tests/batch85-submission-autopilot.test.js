@@ -5,7 +5,7 @@ const assert=require('node:assert/strict');
 const fs=require('node:fs');
 const path=require('node:path');
 const vm=require('node:vm');
-const {analyzeSubmissionBundle,parseDelimited}=require('../src/core/challenge_submission_autopilot');
+const {analyzeSubmissionBundle,parseDelimited}=require('../src/core/challenge_submission_autopilot_v2');
 const {buildChallengeSession}=require('../src/core/challenge_session_batch85');
 
 function membershipAnalysis(){return{
@@ -35,6 +35,15 @@ test('Batch85 preserves sample row IDs and emits confidence when template reques
   assert.ok(Number(parsed.rows[2].score)<.2);
 });
 
+test('Batch85 never treats ordinary query/calibration tables as submission templates',()=>{
+  const analysis=membershipAnalysis();
+  const result=analyzeSubmissionBundle([
+    {path:'query.csv',text:'id,confidence\na,.9\nb,.1\nc,.8\n'},
+    {path:'calibration.csv',text:'id,member,confidence\nx,1,.9\ny,0,.1\n'}
+  ],analysis);
+  assert.equal(result.status,'not-detected');
+});
+
 test('Batch85 fills generic JSON answer template but refuses ambiguous unrelated JSON',()=>{
   const base={...membershipAnalysis(),aiMembershipAutopilot:{status:'not-detected'},challengeSession:{result:{value:'FLAG{candidate}',payload:'FLAG{candidate}',kind:'answer',verified:false}}};
   const good=analyzeSubmissionBundle([{path:'submission.json',text:'{"answer":""}'}],base);
@@ -57,12 +66,18 @@ test('Batch85 challenge session prefers formatted submission candidate while kee
 test('Batch85 compatibility entry and clean UI compile against the newest drop-to-result path',()=>{
   const root=path.join(__dirname,'..');
   const entry=fs.readFileSync(path.join(root,'src/core/finals_analyzer_batch15.js'),'utf8');
-  const renderer=fs.readFileSync(path.join(root,'renderer/challenge_session_batch84.js'),'utf8');
+  const renderer84=fs.readFileSync(path.join(root,'renderer/challenge_session_batch84.js'),'utf8');
+  const renderer85=fs.readFileSync(path.join(root,'renderer/challenge_session_batch85.js'),'utf8');
+  const html=fs.readFileSync(path.join(root,'renderer/toolbox.html'),'utf8');
   const ipc=fs.readFileSync(path.join(root,'src/electron/challenge_session_ipc.js'),'utf8');
   assert.match(entry,/finals_analyzer_batch85/);
-  assert.doesNotThrow(()=>new vm.Script(renderer,{filename:'challenge_session_batch84.js'}));
-  assert.match(renderer,/下一步只做这件事/);
-  assert.match(renderer,/复制结果/);
+  assert.doesNotThrow(()=>new vm.Script(renderer84,{filename:'challenge_session_batch84.js'}));
+  assert.doesNotThrow(()=>new vm.Script(renderer85,{filename:'challenge_session_batch85.js'}));
+  assert.match(renderer84,/下一步只做这件事/);
+  assert.match(renderer84,/复制结果/);
+  assert.match(renderer85,/checker \/ verifier \/ scorer/);
+  assert.match(html,/challenge_session_batch85\.js/);
+  assert.ok(html.indexOf('challenge_session_batch85.js')>html.indexOf('challenge_session_batch84.js'));
   assert.match(ipc,/buildChallengeSession/);
   assert.match(ipc,/finals_analyzer_batch15/);
 });
