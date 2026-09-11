@@ -9,6 +9,7 @@ const {getOdysseyTrainingCorpus,runOdysseyTrainingRegression}=require('./ai_odys
 const {getSgAiCtfTrainingCorpus,runSgAiCtfTrainingRegression}=require('./ai_sg_aictf_training');
 const {getAiVillageTrainingCorpus,runAiVillageTrainingRegression}=require('./ai_aivillage_training');
 const {getPromptCtfTrainingCorpus,runPromptCtfTrainingRegression}=require('./ai_prompt_ctf_training');
+const {getDomesticDetectionTrainingCorpus,runDomesticDetectionTrainingRegression}=require('./ai_domestic_detection_training');
 
 const TARGET_DIRECTIONS=Object.freeze([
   'prompt-llm-security','adversarial-example','model-extraction','privacy-leakage',
@@ -24,7 +25,8 @@ const CORPORA=Object.freeze([
   {id:'ai-odyssey-2026',title:'TryHackMe 2026 AI Odyssey',kind:'ctf-derived',get:getOdysseyTrainingCorpus},
   {id:'sg-aictf-2025',title:'AICTF 2025 Pre-U challenge replay',kind:'ctf-derived',get:getSgAiCtfTrainingCorpus},
   {id:'aivillage-defcon-30-31',title:'AI Village DEFCON 30/31 challenge replay',kind:'ctf-derived',get:getAiVillageTrainingCorpus},
-  {id:'prompt-agent-ctf',title:'Prompt / Agent CTF challenge replay',kind:'ctf-derived',get:getPromptCtfTrainingCorpus}
+  {id:'prompt-agent-ctf',title:'Prompt / Agent CTF challenge replay',kind:'ctf-derived',get:getPromptCtfTrainingCorpus},
+  {id:'domestic-detection-ranges-2025',title:'2025 domestic AI detection ranges',kind:'ctf-derived',get:getDomesticDetectionTrainingCorpus}
 ]);
 
 function text(value){return value==null?'':String(value).trim();}
@@ -108,7 +110,8 @@ const SUITES=Object.freeze([
   {id:'ai-odyssey-2026',run:(options)=>runOdysseyTrainingRegression(options)},
   {id:'sg-aictf-2025',run:(options)=>runSgAiCtfTrainingRegression(options)},
   {id:'aivillage-defcon-30-31',run:(options)=>runAiVillageTrainingRegression(options)},
-  {id:'prompt-agent-ctf',run:(options)=>runPromptCtfTrainingRegression(options)}
+  {id:'prompt-agent-ctf',run:(options)=>runPromptCtfTrainingRegression(options)},
+  {id:'domestic-detection-ranges-2025',run:(options)=>runDomesticDetectionTrainingRegression(options)}
 ]);
 function summarizeSuite(result){
   const summary=result&&typeof result.summary==='object'?result.summary:null;
