@@ -2,12 +2,35 @@
 
 const fs=require('fs/promises');
 const crypto=require('crypto');
-const v3=require('./challenge_verifier_contract_v3');
+const base=require('./challenge_verifier_contract_v2');
 
 const MAX_PREDICATE_CONTRACTS=96;
 const MAX_RETURN_EXPR=2048;
 
 function text(value){return String(value??'');}
+function list(value){return Array.isArray(value)?value:[];}
+function candidateString(value){
+  if(value===null||value===undefined)return'';
+  if(typeof value==='string')return value;
+  if(typeof value==='number'||typeof value==='boolean'||typeof value==='bigint')return String(value);
+  try{return JSON.stringify(value);}catch{return String(value);}
+}
+function extraCandidateValues(analysis={}){
+  const out=[];const seen=new Set();
+  const add=(value,source)=>{
+    const s=candidateString(value);if(!s||s.length>4*1024*1024)return;
+    const key=`${source}\u0000${s}`;if(seen.has(key))return;seen.add(key);out.push({value:s,source});
+  };
+  const addResult=(result,source)=>{if(!result)return;add(result.payload,`${source}:payload`);add(result.value,`${source}:value`);};
+  addResult(analysis.aiMembershipAutopilot?.result,'ai-membership-autopilot');
+  for(const id of list(analysis.aiMembershipAutopilot?.result?.memberIds).slice(0,512))add(id,'ai-membership-member-id');
+  addResult(analysis.aiUniversalTriggerAutopilot?.result,'ai-universal-trigger-autopilot');
+  addResult(analysis.aiModelFingerprintAutopilot?.result,'ai-model-fingerprint-autopilot');
+  addResult(analysis.aiContestAutopilot?.result,'ai-contest-autopilot');
+  addResult(analysis.submissionAutopilot?.result,'submission-autopilot');
+  addResult(analysis.challengeSession?.result,'challenge-session');
+  return out.slice(0,1024);
+}
 function stripOuterParens(value){
   let s=String(value||'').trim();
   while(s.startsWith('(')&&s.endsWith(')')){
@@ -31,9 +54,7 @@ function splitConjunction(expr){
     if(ch==='"'||ch==="'"||ch==='`'){quote=ch;continue;}
     if('([{'.includes(ch)){depth+=1;continue;}if(')]}'.includes(ch)){depth=Math.max(0,depth-1);continue;}
     if(depth!==0)continue;
-    const rest=s.slice(i);
-    const match=rest.match(/^(?:\s+and\s+|\s*&&\s*)/);
-    if(!match)continue;
+    const match=s.slice(i).match(/^(?:\s+and\s+|\s*&&\s*)/);if(!match)continue;
     out.push(s.slice(start,i).trim());i+=match[0].length-1;start=i+1;
   }
   out.push(s.slice(start).trim());return out.filter(Boolean);
@@ -44,8 +65,7 @@ function decodeStringLiteral(raw){
   return s.slice(1,-1).replace(/\\([\\'"`nrt])/g,(_m,ch)=>({n:'\n',r:'\r',t:'\t'}[ch]??ch));
 }
 function parseScalar(raw){
-  const s=String(raw||'').trim();
-  const str=decodeStringLiteral(s);if(str!==null)return{kind:'string',value:str};
+  const s=String(raw||'').trim();const str=decodeStringLiteral(s);if(str!==null)return{kind:'string',value:str};
   if(/^(?:true|false)$/i.test(s))return{kind:'boolean',value:s.toLowerCase()==='true'};
   if(/^(?:none|null)$/i.test(s))return{kind:'null',value:null};
   if(/^-?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$/i.test(s)){const n=Number(s);if(Number.isFinite(n))return{kind:'number',value:n};}
@@ -64,12 +84,10 @@ function parseAtom(raw){
   if((m=atom.match(/^len\(\s*([A-Za-z_$][\w$]*)\s*\)\s*(===|==|!==|!=|>=|<=|>|<)\s*(\d+)$/)))return{type:'raw-length',variable:m[1],op:parseComparator(m[2]),expected:Number(m[3])};
   if((m=atom.match(/^([A-Za-z_$][\w$]*)\.length\s*(===|==|!==|!=|>=|<=|>|<)\s*(\d+)$/)))return{type:'raw-length',variable:m[1],op:parseComparator(m[2]),expected:Number(m[3])};
   if((m=atom.match(/^([A-Za-z_$][\w$]*)\.(startswith|endswith|startsWith|endsWith|includes)\(\s*(["'`](?:\\.|[^\\])*?["'`])\s*\)$/))){
-    const expected=decodeStringLiteral(m[3]);if(expected===null)return null;
-    const kind=/starts/i.test(m[2])?'prefix':/ends/i.test(m[2])?'suffix':'contains';return{type:`raw-${kind}`,variable:m[1],expected};
+    const expected=decodeStringLiteral(m[3]);if(expected===null)return null;const kind=/starts/i.test(m[2])?'prefix':/ends/i.test(m[2])?'suffix':'contains';return{type:`raw-${kind}`,variable:m[1],expected};
   }
   if((m=atom.match(/^(["'`](?:\\.|[^\\])*?["'`])\s+in\s+([A-Za-z_$][\w$]*)$/))){const expected=decodeStringLiteral(m[1]);return expected===null?null:{type:'raw-contains',variable:m[2],expected};}
   if((m=atom.match(/^([A-Za-z_$][\w$]*)\s*(===|==|!==|!=)\s*(["'`](?:\\.|[^\\])*?["'`])$/))){const expected=decodeStringLiteral(m[3]);return expected===null?null:{type:'raw-scalar',variable:m[1],op:parseComparator(m[2]),expected};}
-
   if((m=atom.match(/^len\(\s*((?:[A-Za-z_$][\w$]*\s*\[\s*["'][^"']+["']\s*\])|(?:[A-Za-z_$][\w$]*\.get\(\s*["'][^"']+["']\s*\))|(?:[A-Za-z_$][\w$]*\.[A-Za-z_$][\w$]*))\s*\)\s*(===|==|!==|!=|>=|<=|>|<)\s*(\d+)$/))){
     const access=pathFromAccessor(m[1]);return access?{type:'json-field-length',...access,op:parseComparator(m[2]),expected:Number(m[3])}:null;
   }
@@ -83,13 +101,11 @@ function parseAtom(raw){
 }
 function verifierNamed(file){return /(?:^|[_.-])(verif(?:y|ier)?|check(?:er)?|judge|scor(?:e|er)|validat(?:e|or)|submit)(?:[_.-]|$)/i.test(String(file||'').split('/').pop());}
 function discoverPredicateContracts(file,body){
-  if(!verifierNamed(file))return[];
-  const out=[];const lines=String(body||'').split(/\r?\n/);
+  if(!verifierNamed(file))return[];const out=[];const lines=String(body||'').split(/\r?\n/);
   for(let i=0;i<lines.length&&out.length<MAX_PREDICATE_CONTRACTS;i+=1){
-    const line=lines[i];let match=line.match(/^\s*return\s+(.+?)\s*;?\s*$/);if(!match)continue;
+    const line=lines[i];const match=line.match(/^\s*return\s+(.+?)\s*;?\s*$/);if(!match)continue;
     const expr=match[1].replace(/;\s*$/,'').trim();if(!expr||expr.length>MAX_RETURN_EXPR||/\bor\b|\|\|/.test(expr))continue;
-    const rawAtoms=splitConjunction(expr);if(!rawAtoms.length||rawAtoms.length>16)continue;
-    const atoms=rawAtoms.map(parseAtom);if(atoms.some((item)=>!item))continue;
+    const rawAtoms=splitConjunction(expr);if(!rawAtoms.length||rawAtoms.length>16)continue;const atoms=rawAtoms.map(parseAtom);if(atoms.some((item)=>!item))continue;
     out.push({type:'predicate-return',file,line:i+1,confidence:'strong',expression:expr,atoms,evidence:line.trim().slice(0,MAX_RETURN_EXPR)});
   }
   return out;
@@ -121,8 +137,7 @@ function evaluatePredicateContracts(contracts,candidates){
   for(const contract of contracts){
     for(const candidate of candidates){
       const value=text(candidate.value);if(!value||value.length>4*1024*1024)continue;
-      const jsonCache={value:undefined};const checks=contract.atoms.map((atom)=>({...atom,...evaluateAtom(atom,value,jsonCache)}));
-      const ok=checks.length>0&&checks.every((item)=>item.ok===true);
+      const jsonCache={value:undefined};const checks=contract.atoms.map((atom)=>({...atom,...evaluateAtom(atom,value,jsonCache)}));const ok=checks.length>0&&checks.every((item)=>item.ok===true);
       attempts.push({contract:{file:contract.file,line:contract.line,type:contract.type},candidateSource:candidate.source,ok,checks:checks.map((item)=>({type:item.type,path:item.path||null,op:item.op||null,expected:item.expected,actual:item.actual,ok:item.ok}))});
       if(ok)verified.push({contract,value,candidateSource:candidate.source,method:'bounded-predicate-return',checks});
     }
@@ -134,22 +149,30 @@ function proofForMatch(match){
   if(!match)return null;const digest=candidateDigest(match.value);
   return{schema:'newcyber.result-proof.v1',method:match.method,candidateSource:match.candidateSource||match.source||'unknown',contract:{type:match.contract?.type||'unknown',file:match.contract?.file||null,line:match.contract?.line||null,expression:match.contract?.expression||null,confidence:match.contract?.confidence||null},candidate:digest,checks:(match.checks||[]).map((item)=>({type:item.type,path:item.path||null,op:item.op||null,expected:item.expected,actual:item.actual,ok:Boolean(item.ok)})),policy:{sourceExecuted:false,allPredicatesSupported:true,allPredicatesSatisfied:true}};
 }
+function structuredClosure(first,analysis={}){
+  if(first.status==='verified')return first;
+  const extras=extraCandidateValues(analysis);if(!extras.length||!first.contracts?.length)return{...first,extraCandidates:extras.length,summary:{...(first.summary||{}),extraCandidates:extras.length}};
+  const evaluated=base.evaluateContracts(first.contracts,extras);const hit=evaluated.verified.find((item)=>item.contract.confidence==='strong')||evaluated.verified[0]||null;
+  if(!hit)return{...first,extraCandidates:extras.length,verifiedMatches:[...(first.verifiedMatches||[]),...evaluated.verified].slice(0,32),summary:{...(first.summary||{}),extraCandidates:extras.length}};
+  const result={value:hit.value,payload:hit.value,verified:true,confidence:'verified',kind:base.flagLike(hit.value)?'flag':'answer',source:`${hit.method} @ ${hit.contract.file}:${hit.contract.line}`};
+  const finding={id:'static-verifier-structured-candidate-satisfied',severity:'high',title:'自动生成的结构化候选命中题目 verifier',file:hit.contract.file,line:hit.contract.line,evidence:`${hit.contract.type} <- ${hit.candidateSource}`,meaning:'Membership / Trigger / Fingerprint / Submission 等自动生成结果已满足题目 checker/verifier 的强约束，可从 candidate 升级为 verified。'};
+  return{...first,status:'verified',result,extraCandidates:extras.length,verifiedMatches:[...(first.verifiedMatches||[]),...evaluated.verified].slice(0,32),findings:[...(first.findings||[]).filter((item)=>item.id!=='static-verifier-contract-discovered'),finding],summary:{...(first.summary||{}),extraCandidates:extras.length,verifiedMatches:(first.summary?.verifiedMatches||0)+evaluated.verified.length},next:'自动生成的结构化候选已命中静态 verifier，可视为 verified。'};
+}
 
 async function runVerifierContractAutopilot(root,analysis={},options={}){
-  const first=await v3.runVerifierContractAutopilot(root,analysis,options);
+  let first=await base.runVerifierContractAutopilot(root,analysis,options);first=structuredClosure(first,analysis);
   if(first.status==='verified'){
     const match=(first.verifiedMatches||[])[0]||null;const proof=match?proofForMatch(match):{schema:'newcyber.result-proof.v1',method:'static-exact-direct',candidateSource:'static-verifier',contract:{type:'exact',file:first.contracts?.[0]?.file||null,line:first.contracts?.[0]?.line||null},candidate:candidateDigest(first.result?.value||''),checks:[],policy:{sourceExecuted:false,allPredicatesSupported:true,allPredicatesSatisfied:true}};
     return{...first,schema:'newcyber.challenge-verifier-contract.v4',proof,summary:{...(first.summary||{}),predicateContracts:0,predicateAttempts:0,predicateVerified:0}};
   }
-  const files=await v3.walkSources(root,options);const predicates=[];const errors=[];
+  const files=await base.walkSources(root,options);const predicates=[];const errors=[];
   for(const file of files){let body;try{body=await fs.readFile(file.path,'utf8');}catch(error){errors.push({file:file.relative,error:String(error?.message||error).slice(0,240)});continue;}predicates.push(...discoverPredicateContracts(file.relative,body));if(predicates.length>=MAX_PREDICATE_CONTRACTS)break;}
-  const seen=new Set();const candidates=[];for(const item of [...v3.extraCandidateValues(analysis),...v3.candidateValues(analysis)]){const key=`${item.source}\u0000${item.value}`;if(seen.has(key))continue;seen.add(key);candidates.push(item);if(candidates.length>=1024)break;}
-  const evaluated=evaluatePredicateContracts(predicates,candidates);const verified=evaluated.verified[0]||null;
-  const contracts=[...(first.contracts||[]),...predicates].slice(0,224);
+  const seen=new Set();const candidates=[];for(const item of [...extraCandidateValues(analysis),...base.candidateValues(analysis)]){const key=`${item.source}\u0000${item.value}`;if(seen.has(key))continue;seen.add(key);candidates.push(item);if(candidates.length>=1024)break;}
+  const evaluated=evaluatePredicateContracts(predicates,candidates);const verified=evaluated.verified[0]||null;const contracts=[...(first.contracts||[]),...predicates].slice(0,224);
   if(!verified)return{...first,schema:'newcyber.challenge-verifier-contract.v4',contracts,predicateContracts:predicates,predicateAttempts:evaluated.attempts,proof:null,errors:[...(first.errors||[]),...errors].slice(0,32),summary:{...(first.summary||{}),contracts:contracts.length,predicateContracts:predicates.length,predicateAttempts:evaluated.attempts.length,predicateVerified:0},next:predicates.length?'已恢复受限 return-predicate checker；现有候选尚未完整满足全部静态谓词。':'未发现可安全解释的完整 return-predicate checker。'};
-  const proof=proofForMatch(verified);const result={value:verified.value,payload:verified.value,verified:true,confidence:'verified',kind:v3.flagLike(verified.value)?'flag':'answer',source:`bounded predicate @ ${verified.contract.file}:${verified.contract.line}`,proof};
+  const proof=proofForMatch(verified);const result={value:verified.value,payload:verified.value,verified:true,confidence:'verified',kind:base.flagLike(verified.value)?'flag':'answer',source:`bounded predicate @ ${verified.contract.file}:${verified.contract.line}`,proof};
   const finding={id:'bounded-checker-predicate-satisfied',severity:'high',title:'受限 Checker Contract Interpreter 已形成验证闭环',file:verified.contract.file,line:verified.contract.line,evidence:`return ${verified.contract.expression} <- ${verified.candidateSource}`,meaning:'checker 的 return 表达式只包含 NewCyber 明确支持的静态谓词，当前候选满足全部谓词；未执行题目源码，可升级为 verified。'};
   return{...first,schema:'newcyber.challenge-verifier-contract.v4',status:'verified',result,proof,contracts,predicateContracts:predicates,predicateAttempts:evaluated.attempts,verifiedMatches:[...(first.verifiedMatches||[]),verified].slice(0,32),findings:[...(first.findings||[]).filter((item)=>item.id!=='static-verifier-contract-discovered'),finding],errors:[...(first.errors||[]),...errors].slice(0,32),summary:{...(first.summary||{}),contracts:contracts.length,verifiedMatches:(first.summary?.verifiedMatches||0)+1,predicateContracts:predicates.length,predicateAttempts:evaluated.attempts.length,predicateVerified:1},next:'受限 checker return-predicate 已完整满足；结果具备静态 proof，可视为 verified。'};
 }
 
-module.exports={...v3,stripOuterParens,splitConjunction,decodeStringLiteral,parseScalar,parseAtom,discoverPredicateContracts,evaluateAtom,evaluatePredicateContracts,candidateDigest,proofForMatch,runVerifierContractAutopilot};
+module.exports={...base,candidateString,extraCandidateValues,stripOuterParens,splitConjunction,decodeStringLiteral,parseScalar,parseAtom,discoverPredicateContracts,evaluateAtom,evaluatePredicateContracts,candidateDigest,proofForMatch,structuredClosure,runVerifierContractAutopilot};
