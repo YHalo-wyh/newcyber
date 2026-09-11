@@ -10,7 +10,7 @@ const path=require('path');
 const batch42=require('../src/core/sca_autopilot_batch42');
 const batch50=require('../src/core/sca_autopilot_batch50');
 const batch55=require('../src/core/sca_autopilot_batch55');
-const batch56=require('../src/core/sca_autopilot_batch56');
+const batch59=require('../src/core/sca_autopilot_batch59');
 const {rerankCandidateShortlists}=require('../src/core/sca_probe_calibration');
 const {scoreSourcePath,prioritizeScaPaths,inspectQualityIntent}=require('../src/core/sca_source_priority');
 
@@ -102,13 +102,13 @@ test('Batch55 actual rerank telemetry never calls shortlist expansion a verified
   assert.equal(Object.hasOwn(surfaced,'verifiedRecoveredRows'),false);
 });
 
-test('Production compatibility upgrades historical Batch42/Batch50 callers to Batch56 while keeping Batch55 baseline distinct',()=>{
+test('Production compatibility upgrades historical Batch42/Batch50 callers to Batch59 while keeping Batch55 baseline distinct',()=>{
   assert.equal(batch42.runScaAutopilotPaths,batch50.runScaAutopilotPaths);
-  assert.equal(batch50.runScaAutopilotPaths,batch56.runScaAutopilotPaths);
-  assert.notEqual(batch56.runScaAutopilotPaths,batch55.runScaAutopilotPaths);
+  assert.equal(batch50.runScaAutopilotPaths,batch59.runScaAutopilotPaths);
+  assert.notEqual(batch59.runScaAutopilotPaths,batch55.runScaAutopilotPaths);
   assert.notEqual(batch55.runScaAutopilotPaths,batch55.runQualityGroupedScaAutopilotPaths);
   const b42=fs.readFileSync(require.resolve('../src/core/sca_autopilot_batch42'),'utf8');
   const b50=fs.readFileSync(require.resolve('../src/core/sca_autopilot_batch50'),'utf8');
   assert.match(b42,/sca_autopilot_batch50/);
-  assert.match(b50,/sca_autopilot_batch56/);
+  assert.match(b50,/sca_autopilot_batch59/);
 });
