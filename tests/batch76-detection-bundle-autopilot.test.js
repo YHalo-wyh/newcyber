@@ -51,6 +51,18 @@ test('Batch76 keeps loss-history as ranking only when threshold ratio is absent'
   assert.equal(result.reason,'threshold-ratio-not-evidenced');
 });
 
+test('Batch77 does not mistake generic class label=1 for poison truth',()=>{
+  const rows=[
+    {file:'a',label:1,losses:[0.4,1.5,0.3]},
+    {file:'b',label:0,losses:[0.8,0.75,0.7]},
+    {file:'c',label:1,losses:[0.7,0.68,0.66]},
+    {file:'d',label:0,losses:[0.9,0.87,0.84]}
+  ];
+  const result=lossHistoryCandidate(rows,{threshold_ratio:0.25,rows});
+  assert.equal(result.kind,'loss-history');
+  assert.equal(result.poisonTruth,null);
+});
+
 test('Batch76 evaluates prediction CSV dropped into a challenge directory',async(t)=>{
   const root=await fs.mkdtemp(path.join(os.tmpdir(),'newcyber-b76-'));t.after(()=>fs.rm(root,{recursive:true,force:true}));
   await fs.writeFile(path.join(root,'result.csv'),[
@@ -77,17 +89,17 @@ test('Batch76 evaluates JSON score rows only with an explicit threshold',async(t
   assert.equal(result.evaluations[0].result.verdict,'candidate-effective');
 });
 
-test('Batch76 loss-history JSON uses explicit threshold_ratio and validates supplied truth',async(t)=>{
+test('Batch76 loss-history JSON uses explicit threshold_ratio and validates supplied poison truth',async(t)=>{
   const root=await fs.mkdtemp(path.join(os.tmpdir(),'newcyber-b76-loss-'));t.after(()=>fs.rm(root,{recursive:true,force:true}));
   const rows=[
-    {id:'c1',truth:0,losses:[0.82,0.78,0.75,0.73]},
-    {id:'p1',truth:1,losses:[0.40,1.35,0.32,1.48]},
-    {id:'c2',truth:0,losses:[0.76,0.73,0.71,0.69]},
-    {id:'c3',truth:0,losses:[0.91,0.87,0.84,0.82]},
-    {id:'p2',truth:1,losses:[0.52,1.62,0.41,1.70]},
-    {id:'c4',truth:0,losses:[0.67,0.64,0.62,0.61]},
-    {id:'c5',truth:0,losses:[0.88,0.85,0.82,0.80]},
-    {id:'c6',truth:0,losses:[0.72,0.70,0.68,0.67]}
+    {id:'c1',is_poisoned:0,losses:[0.82,0.78,0.75,0.73]},
+    {id:'p1',is_poisoned:1,losses:[0.40,1.35,0.32,1.48]},
+    {id:'c2',is_poisoned:0,losses:[0.76,0.73,0.71,0.69]},
+    {id:'c3',is_poisoned:0,losses:[0.91,0.87,0.84,0.82]},
+    {id:'p2',is_poisoned:1,losses:[0.52,1.62,0.41,1.70]},
+    {id:'c4',is_poisoned:0,losses:[0.67,0.64,0.62,0.61]},
+    {id:'c5',is_poisoned:0,losses:[0.88,0.85,0.82,0.80]},
+    {id:'c6',is_poisoned:0,losses:[0.72,0.70,0.68,0.67]}
   ];
   await fs.writeFile(path.join(root,'loss_history.json'),JSON.stringify({threshold_ratio:0.25,rows}));
   const result=await runAiDetectionBundleAutopilot(root,{});
@@ -111,4 +123,7 @@ test('Batch76 Challenge Session IPC wires detection autopilot and manifest',asyn
   assert.match(source,/newcyber_detection_autopilot\.json/);
   assert.match(source,/ai-detection-bundle-autopilot/);
   assert.match(source,/aiDetectionAutopilot/);
+  const ui=await fs.readFile(path.join(__dirname,'../renderer/challenge_session_batch53.js'),'utf8');
+  assert.match(ui,/DETECT/);
+  assert.match(ui,/aiDetectionAutopilot/);
 });
