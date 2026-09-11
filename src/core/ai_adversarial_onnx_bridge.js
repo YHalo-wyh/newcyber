@@ -46,6 +46,10 @@ function scoreVectorFromView(name, view, options = {}) {
   return { name, scores: preview, dims, type: view.type || null, elements };
 }
 
+function preferredOutput(items) {
+  const preferred = items.filter((item) => /(?:logits?|scores?|probabilities|probs|class(?:ification)?_?output)/i.test(item.name));
+  return preferred.length === 1 ? preferred[0] : null;
+}
 function chooseScoreOutput(run, options = {}) {
   const entries = outputCandidates(run);
   const requested = options.outputName == null ? null : String(options.outputName);
@@ -63,8 +67,18 @@ function chooseScoreOutput(run, options = {}) {
   if (!safe.length) throw new Error('没有可自动识别的完整分类输出；请指定 outputName，且输出必须是未截断的 [C] 或 [1,C]');
   if (safe.length === 1) return safe[0];
 
-  const preferred = safe.filter((item) => /(?:logits?|scores?|probabilities|probs|class(?:ification)?_?output)/i.test(item.name));
-  if (preferred.length === 1) return preferred[0];
+  const expectedClasses = Number(options.expectedClasses);
+  if (Number.isInteger(expectedClasses) && expectedClasses >= 2) {
+    const matched = safe.filter((item) => item.elements === expectedClasses);
+    if (matched.length === 1) return matched[0];
+    if (matched.length > 1) {
+      const named = preferredOutput(matched);if (named) return named;
+      throw new Error(`有 ${matched.length} 个输出都匹配已恢复的 ${expectedClasses} 类 label space：${matched.map((item)=>item.name).join(', ')}；请显式指定 outputName`);
+    }
+  }
+
+  const preferred = preferredOutput(safe);
+  if (preferred) return preferred;
   throw new Error(`存在多个可用分类输出：${safe.map((item) => item.name).join(', ')}；请显式指定 outputName`);
 }
 
@@ -73,7 +87,8 @@ function normalizeRunEntry(entry, index, defaults = {}) {
   const run = entry.run ?? entry.result ?? entry.onnxRun;
   const vector = chooseScoreOutput(run, {
     outputName: entry.outputName ?? defaults.outputName,
-    allowFlatten: entry.allowFlatten ?? defaults.allowFlatten
+    allowFlatten: entry.allowFlatten ?? defaults.allowFlatten,
+    expectedClasses: entry.expectedClasses ?? defaults.expectedClasses
   });
   const id = entry.id ?? entry.file ?? entry.name ?? `candidate-${index}`;
   const assignedLabel = entry.assignedLabel ?? entry.folderLabel ?? entry.bucketLabel ?? entry.classLabel;
@@ -98,20 +113,23 @@ function adaptOnnxRunsToContestBundle(input = {}) {
   if (runs.length > 100000) throw new Error('ONNX run 数量超过 100000 上限');
   const hints = input.hints ?? input.hintPairs ?? input.transitions;
   if (!Array.isArray(hints) || !hints.length) throw new Error('需要 hints');
-  const defaults = { outputName: input.outputName, allowFlatten: input.allowFlatten === true };
+  const expectedClasses = Number(input.expectedClasses);
+  const defaults = { outputName: input.outputName, allowFlatten: input.allowFlatten === true, expectedClasses:Number.isInteger(expectedClasses)&&expectedClasses>=2?expectedClasses:null };
   const candidates = runs.map((entry, index) => normalizeRunEntry(entry, index, defaults));
   return {
-    schema: 'newcyber.ai-adversarial-onnx-contest-bundle.v1',
+    schema: 'newcyber.ai-adversarial-onnx-contest-bundle.v2',
     hints,
     candidates,
     shortlistSize: input.shortlistSize,
     beamWidth: input.beamWidth,
     maxSets: input.maxSets,
+    expectedClasses: defaults.expectedClasses,
     outputNames: [...new Set(candidates.map((item) => item.onnx.outputName))],
     providers: [...new Set(candidates.map((item) => item.onnx.provider).filter(Boolean))],
     notes: [
       '仅使用完整未截断 ONNX 输出向量；不会把 local_ml_runtime 的 preview 截断片段误当作全部类别。',
-      '自动模式只接受 [C] 或 [1,C]。更高维输出默认拒绝，避免把 feature map/embedding 错当 logits。'
+      '自动模式只接受 [C] 或 [1,C]。更高维输出默认拒绝，避免把 feature map/embedding 错当 logits。',
+      '若题目材料恢复出完整连续 class_to_idx，可用类别总数消歧多个向量输出；不完整 label map 不参与猜测。'
     ]
   };
 }
@@ -126,11 +144,12 @@ function rankAdversarialContestFromOnnxRuns(input = {}) {
     maxSets: bundle.maxSets
   });
   return {
-    schema: 'newcyber.ai-adversarial-onnx-contest-ranking.v1',
+    schema: 'newcyber.ai-adversarial-onnx-contest-ranking.v2',
     bridge: {
       runs: bundle.candidates.length,
       outputNames: bundle.outputNames,
-      providers: bundle.providers
+      providers: bundle.providers,
+      expectedClasses: bundle.expectedClasses
     },
     bundle,
     ranking,
