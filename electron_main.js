@@ -1,10 +1,12 @@
-const {app,BrowserWindow,ipcMain,nativeTheme,shell}=require('electron');
+const {app,BrowserWindow,ipcMain,nativeTheme,shell,dialog}=require('electron');
 const os=require('os');
 const path=require('path');
+const fs=require('fs/promises');
 const {registerBinaryElfIpc}=require('./src/electron/binary_elf_ipc');
 const {registerIdaSnapshotIpc}=require('./src/electron/ida_snapshot_ipc');
 const {registerAiScaIpc}=require('./src/electron/ai_sca_ipc');
 const {registerChallengeSessionIpc}=require('./src/electron/challenge_session_ipc');
+const {resolveSubmissionArtifact,safeSuggestedName}=require('./src/core/challenge_submission_export');
 
 let activeWindow=null;
 const materialByWindow=new WeakMap();
@@ -77,6 +79,19 @@ ipcMain.handle('artifact:reveal-path',(_event,rootPath,relativePath)=>{
   const target=path.resolve(root,rel);const prefix=root.endsWith(path.sep)?root:`${root}${path.sep}`;
   if(target!==root&&!target.startsWith(prefix))return false;
   shell.showItemInFolder(target);return true;
+});
+ipcMain.handle('artifact:export-submission',async(_event,rootPath,relativePath,suggestedName)=>{
+  const parent=path.resolve(path.join(app.getPath('temp'),'newcyber-challenge-sessions'));
+  const root=path.resolve(String(rootPath||''));const parentPrefix=parent.endsWith(path.sep)?parent:`${parent}${path.sep}`;
+  if(root===parent||!root.startsWith(parentPrefix))return{saved:false,reason:'UNAPPROVED_SESSION_ROOT'};
+  const source=resolveSubmissionArtifact(root,relativePath);if(!source)return{saved:false,reason:'INVALID_SUBMISSION_ARTIFACT'};
+  let stat;try{stat=await fs.stat(source);}catch{return{saved:false,reason:'ARTIFACT_NOT_FOUND'};}
+  if(!stat.isFile()||stat.size<=0||stat.size>16*1024*1024)return{saved:false,reason:'ARTIFACT_SIZE_INVALID'};
+  const name=safeSuggestedName(suggestedName||path.basename(source));const ext=path.extname(name).replace(/^\./,'')||'txt';
+  const result=await dialog.showSaveDialog(activeWindow,{title:'保存 NewCyber 提交结果',defaultPath:name,filters:[{name:'Submission result',extensions:[ext]}]});
+  if(result.canceled||!result.filePath)return{saved:false,canceled:true};
+  await fs.copyFile(source,result.filePath);
+  return{saved:true,path:result.filePath,bytes:stat.size};
 });
 
 nativeTheme.on('updated',()=>emitState());
