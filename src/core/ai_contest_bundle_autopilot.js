@@ -16,11 +16,12 @@ function finiteArray(value){return Array.isArray(value)&&value.length>=2&&value.
 function labelOf(row){return row?.assignedLabel??row?.folderLabel??row?.bucketLabel??row?.classLabel??row?.label??row?.targetLabel??null;}
 function candidateScores(row){return row?.scores??row?.logits??row?.output??row?.predictionScores;}
 function candidateLike(row){return row&&typeof row==='object'&&!Array.isArray(row)&&finiteArray(candidateScores(row));}
+function labelToken(value){if(typeof value==='number')return Number.isFinite(value);if(typeof value==='string'){const normalized=value.trim();return normalized.length>0&&normalized.length<=256;}return false;}
 function hintLike(row){
-  if(Array.isArray(row)&&row.length>=2&&row.length<=4)return Number.isFinite(Number(row[0]))&&Number.isFinite(Number(row[1]));
+  if(Array.isArray(row)&&row.length>=2&&row.length<=4)return labelToken(row[0])&&labelToken(row[1]);
   if(!row||typeof row!=='object'||Array.isArray(row))return false;
   const a=row.originLabel??row.origin??row.from,b=row.adversarialLabel??row.targetLabel??row.target??row.to;
-  return a!==undefined&&b!==undefined;
+  return labelToken(a)&&labelToken(b);
 }
 function normalizedHint(row){
   if(Array.isArray(row))return[row[0],row[1]];
@@ -181,4 +182,4 @@ function analyzeAiContestBundle(sources,analysis={},preprocessing=null){
   };
 }
 
-module.exports={discoverJsonMaterial,discoverTextHints,discoverDelimitedCandidates,discoverVerifierDigests,digestsForIds,analyzeAiContestBundle};
+module.exports={labelToken,hintLike,discoverJsonMaterial,discoverTextHints,discoverDelimitedCandidates,discoverVerifierDigests,digestsForIds,analyzeAiContestBundle};
