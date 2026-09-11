@@ -6,6 +6,7 @@ const MAX_RAW_VALUES_PER_READ=2_000_000;
 const DERIVED_CALL_ALLOWLIST=new Set(['np.sum','numpy.sum','sum','np.asarray','numpy.asarray','np.array','numpy.array']);
 const DOT_CALL_PATTERN=/(?:np|numpy)\.(?:dot|inner|vdot|einsum)|torch\.(?:dot|inner|einsum)/i;
 const GUARD_AGGREGATE_CALLS=new Set(['np.concatenate','numpy.concatenate','np.hstack','numpy.hstack','np.stack','numpy.stack','np.asarray','numpy.asarray','np.array','numpy.array','list','tuple']);
+const HANN_SOURCE_PATTERN=/(?:(?:np|numpy)\.)?(?:hanning|hann)\s*\(|torch\.hann_window\s*\(|(?:signal\.)?windows\.hann\s*\(/i;
 
 function list(value){return Array.isArray(value)?value:[];}
 function escapeRegex(value){return String(value).replace(/[.*+?^${}()|[\]\\]/g,'\\$&');}
@@ -27,11 +28,84 @@ function callAllowed(name,tainted){
 function expressionMentionsTainted(expr,tainted){
   return [...tainted].some((name)=>new RegExp(`\\b${escapeRegex(name)}\\b`).test(expr));
 }
+function leadingIndent(raw){
+  const prefix=String(raw||'').match(/^[ \t]*/)?.[0]||'';
+  return prefix.replace(/\t/g,'    ').length;
+}
+function pythonFunctionBlocks(sourceText){
+  const lines=String(sourceText||'').split(/\r?\n/);const out=[];
+  for(let index=0;index<lines.length;index+=1){
+    const raw=lines[index];
+    const match=raw.match(/^([ \t]*)def\s+([A-Za-z_]\w*)\s*\([^)]{0,512}\)\s*(?:->\s*[^:]{1,128})?\s*:\s*(?:#.*)?$/);
+    if(!match)continue;
+    const indent=match[1].replace(/\t/g,'    ').length;const body=[];
+    let end=index+1;
+    for(;end<lines.length;end+=1){
+      const line=lines[end];
+      if(!line.trim()){body.push(line);continue;}
+      if(leadingIndent(line)<=indent)break;
+      body.push(line);
+      if(body.length>256)break;
+    }
+    if(body.length&&body.length<=256){
+      const bodyText=body.join('\n');
+      if(bodyText.length<=16_384)out.push({name:match[2],body:bodyText,line:index+1});
+    }
+    index=Math.max(index,end-1);
+  }
+  return out;
+}
+function safeHannDerivedExpression(expr,tainted){
+  const value=String(expr||'').trim();
+  if(!value||value.length>700||!/^[A-Za-z0-9_\.\s+\-*/(),\[\]@]+$/.test(value))return false;
+  if(HANN_SOURCE_PATTERN.test(value))return true;
+  if(!expressionMentionsTainted(value,tainted))return false;
+  const calls=[...value.matchAll(/\b([A-Za-z_]\w*(?:\.\w+)*)\s*\(/g)].map((m)=>m[1]);
+  return calls.every((name)=>callAllowed(name,tainted));
+}
+function discoverHannReturningFunctions(sourceText){
+  const functions=new Map();const evidence=[];
+  for(const block of pythonFunctionBlocks(sourceText)){
+    const bodyLines=block.body.split(/\r?\n/).map((raw)=>raw.replace(/#.*$/,'').trim()).filter(Boolean);
+    if(bodyLines.some((line)=>/^(?:if|elif|else|for|while|try|except|finally|with|match|case|yield|raise|lambda)\b/.test(line)))continue;
+    const returns=bodyLines.map((line)=>line.match(/^return\s+(.+)$/)).filter(Boolean).map((match)=>match[1].trim());
+    if(returns.length!==1)continue;
+    const assignments=assignmentLines(block.body);const tainted=new Set();const localEvidence=[];
+    for(const item of assignments){
+      if(HANN_SOURCE_PATTERN.test(item.rhs)){
+        tainted.add(item.name);localEvidence.push(`hann-source:${block.name}.${item.name}`);
+      }
+    }
+    for(let round=0;round<8;round++){
+      let changed=false;
+      for(const item of assignments){
+        if(tainted.has(item.name))continue;
+        const parent=[...tainted].find((name)=>new RegExp(`\\b${escapeRegex(name)}\\b`).test(item.rhs));
+        if(!parent||!safeHannDerivedExpression(item.rhs,tainted))continue;
+        tainted.add(item.name);localEvidence.push(`hann-derived:${block.name}.${item.name}<-${parent}`);changed=true;
+      }
+      if(!changed)break;
+    }
+    const returned=returns[0];
+    if(!safeHannDerivedExpression(returned,tainted))continue;
+    const parent=[...tainted].find((name)=>new RegExp(`\\b${escapeRegex(name)}\\b`).test(returned))||'direct-hann';
+    functions.set(block.name,{line:block.line,parent,evidence:localEvidence});
+    evidence.push(...localEvidence,`hann-function-return:${block.name}<-${parent}`);
+  }
+  return {functions,evidence};
+}
 function hannKernelProvenance(sourceText){
   const assignments=assignmentLines(sourceText);const tainted=new Set();const evidence=[];
+  const helperReturns=discoverHannReturningFunctions(sourceText);
+  evidence.push(...helperReturns.evidence);
   for(const item of assignments){
-    if(/(?:(?:np|numpy)\.)?(?:hanning|hann)\s*\(|torch\.hann_window\s*\(|(?:signal\.)?windows\.hann\s*\(/i.test(item.rhs)){
+    if(HANN_SOURCE_PATTERN.test(item.rhs)){
       tainted.add(item.name);evidence.push(`hann-source:${item.name}`);
+      continue;
+    }
+    const helper=[...helperReturns.functions.keys()].find((name)=>new RegExp(`^${escapeRegex(name)}\\s*\\([^()\n]{0,512}\\)$`).test(item.rhs.trim()));
+    if(helper){
+      tainted.add(item.name);evidence.push(`hann-derived:${item.name}<-${helper}()`);continue;
     }
   }
   for(let round=0;round<8;round++){
@@ -47,7 +121,7 @@ function hannKernelProvenance(sourceText){
     }
     if(!changed)break;
   }
-  return {assignments,tainted,evidence};
+  return {assignments,tainted,evidence,helperReturns:[...helperReturns.functions.keys()]};
 }
 function indirectHannDotEvidence(sourceText){
   const text=String(sourceText||'');const provenance=hannKernelProvenance(text);const {assignments,tainted,evidence}=provenance;
@@ -188,7 +262,7 @@ function guardBaselineEvidence(sourceText,recipe){
     const inlineBaseline=[...baselineVars].find((name)=>new RegExp(`-\\s*${escapeRegex(name)}\\b`).test(args));
     const kernel=[...hann.tainted].find((name)=>new RegExp(`\\b${escapeRegex(name)}\\b`).test(args));
     if((centered||inlineBaseline)&&kernel){
-      return {status:'ok',baselineGuard:{mode:'edge-mean',leading:layout.leading,trailing:layout.trailing,subtract:'feature-windows',source:'challenge-source',evidence:[...evidence,`baseline-hann-kernel:${kernel}`,`baseline-linear-sink:${match[1].toLowerCase()}`]}};
+      return {status:'ok',baselineGuard:{mode:'edge-mean',leading:layout.leading,trailing:layout.trailing,subtract:'feature-windows',source:'challenge-source',evidence:[...evidence,...hann.evidence,`baseline-hann-kernel:${kernel}`,`baseline-linear-sink:${match[1].toLowerCase()}`]}};
     }
   }
   for(const raw of text.split(/\r?\n/)){
@@ -196,9 +270,9 @@ function guardBaselineEvidence(sourceText,recipe){
     const centered=[...centeredVars].find((name)=>new RegExp(`\\b${escapeRegex(name)}\\b`).test(raw));
     const inlineBaseline=[...baselineVars].find((name)=>new RegExp(`-\\s*${escapeRegex(name)}\\b`).test(raw));
     const kernel=[...hann.tainted].find((name)=>new RegExp(`\\b${escapeRegex(name)}\\b`).test(raw));
-    if((centered||inlineBaseline)&&kernel)return {status:'ok',baselineGuard:{mode:'edge-mean',leading:layout.leading,trailing:layout.trailing,subtract:'feature-windows',source:'challenge-source',evidence:[...evidence,`baseline-hann-kernel:${kernel}`,'baseline-linear-sink:@']}};
+    if((centered||inlineBaseline)&&kernel)return {status:'ok',baselineGuard:{mode:'edge-mean',leading:layout.leading,trailing:layout.trailing,subtract:'feature-windows',source:'challenge-source',evidence:[...evidence,...hann.evidence,`baseline-hann-kernel:${kernel}`,'baseline-linear-sink:@']}};
   }
-  return {status:'missing',reason:'centered-value-does-not-feed-linear-sink',evidence};
+  return {status:'missing',reason:'centered-value-does-not-feed-linear-sink',evidence:[...evidence,...hann.evidence]};
 }
 function withGuardBaseline(sourceText,recipe){
   const result=guardBaselineEvidence(sourceText,recipe);
@@ -268,4 +342,9 @@ function wrapBudgetedStreamingFeatureSource(rowSource,recipe,options={}){
   };
 }
 
-module.exports={MAX_RAW_VALUES_PER_READ,DERIVED_CALL_ALLOWLIST,DOT_CALL_PATTERN,GUARD_AGGREGATE_CALLS,indirectHannDotEvidence,guardBaselineEvidence,baselineValue,transformRealBundleRow,resolveRealBundleFeatureRecipe,wrapBudgetedStreamingFeatureSource};
+module.exports={
+  MAX_RAW_VALUES_PER_READ,DERIVED_CALL_ALLOWLIST,DOT_CALL_PATTERN,GUARD_AGGREGATE_CALLS,
+  pythonFunctionBlocks,discoverHannReturningFunctions,hannKernelProvenance,
+  indirectHannDotEvidence,guardBaselineEvidence,baselineValue,transformRealBundleRow,
+  resolveRealBundleFeatureRecipe,wrapBudgetedStreamingFeatureSource
+};
