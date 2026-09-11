@@ -24,12 +24,15 @@ test('Batch89 artifact result renderer compiles and never puts full payload into
   assert.match(source,/submissionAutopilot\?\.result\?\.payload/);
 });
 
-test('Batch89 reveal action is exposed through preload and containment-checked in Electron main',async()=>{
+test('Batch89 reveal action is exposed through preload and containment-checked before Electron shell reveal',async()=>{
   const preload=await read('preload.js');
   const main=await read('electron_main.js');
+  const resolver=await read('src/core/challenge_submission_export.js');
   assert.match(preload,/revealArtifact: \(rootPath, relativePath\) => ipcRenderer\.invoke\('artifact:reveal-path'/);
   assert.match(main,/ipcMain\.handle\('artifact:reveal-path'/);
-  assert.match(main,/path\.isAbsolute\(rel\)/);
-  assert.match(main,/target\.startsWith\(prefix\)/);
+  assert.match(main,/isolatedChallengeRoot\(rootPath\)/);
+  assert.match(main,/resolveSubmissionArtifact\(root,relativePath\)/);
   assert.match(main,/shell\.showItemInFolder\(target\)/);
+  assert.match(resolver,/path\.isAbsolute\(rel\)/);
+  assert.match(resolver,/target\.startsWith\(prefix\)/);
 });
