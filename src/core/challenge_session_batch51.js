@@ -80,8 +80,15 @@ function buildChallengeSession(analysis={}){
   if(submission&&submission.status!=='not-detected'){
     session.submissionAutopilot={status:submission.status,result:submission.result||null,next:submission.next||null};
     if(submission.status==='formatted'&&submission.result){
-      promoteCandidate(session,{value:submission.result.payload,payload:submission.result.payload,displayValue:submission.result.displayValue||submission.result.payload,source:submission.result.source||'submission-autopilot',kind:submission.result.kind||'submission',format:submission.result.format||null,template:submission.result.template||null},'已按题目 submission 模板生成提交候选，等待 checker/scorer 确认',true);
+      promoteCandidate(session,{value:submission.result.payload,payload:submission.result.payload,displayValue:submission.result.displayValue||submission.result.payload,source:submission.result.source||'submission-autopilot',kind:submission.result.kind||'submission',format:submission.result.format||null,template:submission.result.template||null,artifact:submission.result.artifact||null},'已按题目 submission 模板生成提交候选，等待 checker/scorer 确认',true);
     }
+  }
+  const submissionArtifact=analysis.submissionArtifact?.artifact||submission?.result?.artifact||null;
+  if(submissionArtifact){
+    session.submissionArtifact=submissionArtifact;
+    const fact={label:submissionArtifact.verified?'已验证提交文件':'提交候选文件',value:submissionArtifact.filename||submissionArtifact.path,detail:`${submissionArtifact.format||'txt'} · ${submissionArtifact.bytes||0} bytes · sha256=${String(submissionArtifact.sha256||'').slice(0,16)}…`};
+    session.facts=[fact,...list(session.facts).filter((item)=>item.label!==fact.label)].slice(0,6);
+    if(session.result&&!session.result.artifact)session.result.artifact=submissionArtifact;
   }
   const verifier=analysis.verifierContractAutopilot;
   if(verifier&&verifier.status!=='not-applicable'){
@@ -91,8 +98,8 @@ function buildChallengeSession(analysis={}){
     });
     if(verifier.status==='verified'&&verifier.result){
       const value=String(verifier.result.value??verifier.result.payload??'');
-      session.result={...verifier.result,value,payload:String(verifier.result.payload??value),displayValue:verifierDisplay(verifier.result),verified:true,confidence:'verified'};
-      session.status='solved';session.headline='题目 checker/verifier 已验证当前自动生成结果';session.primaryNeed=null;session.needs=[];
+      session.result={...verifier.result,value,payload:String(verifier.result.payload??value),displayValue:verifier.result.artifact?.verified?`已验证提交文件：${verifier.result.artifact.filename||verifier.result.artifact.path}`:verifierDisplay(verifier.result),verified:true,confidence:'verified'};
+      session.status='solved';session.headline=verifier.result.artifact?.verified?'已生成并验证可直接提交的结果文件':'题目 checker/verifier 已验证当前自动生成结果';session.primaryNeed=null;session.needs=[];
       if(session.aiHandoff)session.aiHandoff.ready=false;
     }
   }
