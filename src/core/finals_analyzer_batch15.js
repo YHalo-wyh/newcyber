@@ -6,4 +6,5 @@
 // finals_analyzer_batch81 adds worldwide source-derived holdout benchmarking and the Prompt MegaPack.
 // finals_analyzer_batch82 adds black-box transcript/MCP supply-chain analyzers and the exact random-10 gate.
 // finals_analyzer_batch83 adds calibration/query membership candidate generation for Drop-to-Result.
-module.exports = require('./finals_analyzer_batch83');
+// finals_analyzer_batch85 adds evidence-driven sample-submission packaging and keeps candidate/verified semantics separate.
+module.exports = require('./finals_analyzer_batch85');
