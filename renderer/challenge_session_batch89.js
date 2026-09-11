@@ -4,7 +4,7 @@
 
   function escapeHtml(value){
     if(typeof esc==='function')return esc(String(value??''));
-    return String(value??'').replace(/[&<>"']/g,(ch)=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot',"'":'&#39;'}[ch]));
+    return String(value??'').replace(/[&<>"']/g,(ch)=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
   }
   function artifactOf(){
     const workspace=state.workspace||{};const session=workspace.challengeSession||{};
@@ -48,8 +48,7 @@
       if(typeof toast==='function')toast('已复制提交内容');return;
     }
     if(target.hasAttribute('data-session-reveal-artifact')){
-      const root=state.workspace?.challengeInput?.stagedRoot||state.workspace?.workspacePath||'';
-      const relative=artifact.path||'';
+      const root=state.workspace?.challengeInput?.stagedRoot||'';const relative=artifact.path||'';
       const ok=await window.newcyber.revealArtifact?.(root,relative);
       if(typeof toast==='function')toast(ok?'已在文件夹中定位提交文件':'无法定位提交文件',!ok);
     }
