@@ -6,6 +6,7 @@ const {parseNpyAdvanced}=require('./model_artifacts');
 const {runtimeStatus,inspectOnnxModel,runOnnxModel}=require('./local_ml_runtime');
 const {rankAdversarialContestFromOnnxRuns}=require('./ai_adversarial_onnx_bridge');
 const {discoverJsonMaterial,discoverTextHints,analyzeAiContestBundle}=require('./ai_contest_bundle_autopilot');
+const {decodePng,preprocessDecodedImage,MAX_IMAGE_BYTES,MAX_IMAGE_PIXELS}=require('./ai_image_preprocess_executor');
 
 const MAX_MODEL_BYTES=2*1024*1024*1024;
 const MAX_NPY_BYTES=128*1024*1024;
@@ -13,11 +14,10 @@ const MAX_CANDIDATES=512;
 const MAX_SOURCE_FILES=48;
 const MAX_SOURCE_BYTES=2*1024*1024;
 const MAX_TOTAL_SOURCE_BYTES=12*1024*1024;
+const IMAGE_EXTENSIONS=new Set(['.png','.jpg','.jpeg','.bmp','.webp']);
 
 function list(value){return Array.isArray(value)?value:[];}
 function inside(root,target){const rel=path.relative(path.resolve(root),path.resolve(target));return rel===''||(!rel.startsWith(`..${path.sep}`)&&rel!=='..'&&!path.isAbsolute(rel));}
-function numeric(value){const n=Number(value);return Number.isFinite(n)?n:null;}
-function labelsEqual(a,b){return String(a)===String(b);}
 
 function dtypeToTensorType(descr){
   const value=String(descr||'');
@@ -43,10 +43,7 @@ function npyTensorSpec(buffer,fileName='candidate.npy'){
   return{type,dims:meta.shape.slice(),base64:payload.toString('base64'),npy:{descr:meta.descr,shape:meta.shape.slice(),payloadBytes:meta.payloadBytes}};
 }
 
-function staticDimension(value){
-  if(Number.isInteger(Number(value))&&Number(value)>0)return Number(value);
-  return null;
-}
+function staticDimension(value){if(Number.isInteger(Number(value))&&Number(value)>0)return Number(value);return null;}
 function dimsCompatible(specDims,modelDims){
   if(!Array.isArray(modelDims)||!modelDims.length)return true;
   if(specDims.length!==modelDims.length)return false;
@@ -79,14 +76,12 @@ function labelFromPath(relativePath,hints){
   for(const part of parts){if(targets.has(String(part)))return part;}
   return null;
 }
-function idFromPath(relativePath){
-  const base=path.basename(String(relativePath||''));const match=base.match(/^(\d+)(?:\.[^.]+)?$/);return match?Number(match[1]):relativePath;
-}
+function idFromPath(relativePath){const base=path.basename(String(relativePath||''));const match=base.match(/^(\d+)(?:\.[^.]+)?$/);return match?Number(match[1]):relativePath;}
 
-function chooseHintSet(sets,npyPaths){
+function chooseHintSet(sets,candidatePaths){
   if(!sets.length)return null;
   const ranked=sets.map((set)=>{
-    let matches=0;for(const file of npyPaths)if(labelFromPath(file,set.rows)!==null)matches+=1;
+    let matches=0;for(const file of candidatePaths)if(labelFromPath(file,set.rows)!==null)matches+=1;
     return{...set,matches};
   }).sort((a,b)=>b.matches-a.matches||b.rows.length-a.rows.length||a.file.localeCompare(b.file));
   return ranked[0];
@@ -107,6 +102,7 @@ async function collectSources(root,analysis){
 
 function modelFiles(analysis){return list(analysis.files).filter((file)=>String(file.extension||path.extname(file.path||'')).toLowerCase()==='.onnx');}
 function npyFiles(analysis){return list(analysis.files).filter((file)=>String(file.extension||path.extname(file.path||'')).toLowerCase()==='.npy');}
+function imageFiles(analysis){return list(analysis.files).filter((file)=>IMAGE_EXTENSIONS.has(String(file.extension||path.extname(file.path||'')).toLowerCase()));}
 
 function safeFeedSpec(value){
   if(!value||typeof value!=='object'||Array.isArray(value))return false;
@@ -132,66 +128,109 @@ function discoverExplicitFeedBundle(sources){
   return null;
 }
 
-async function inspectUniqueModel(root,analysis){
+async function inspectUniqueModel(root,analysis,options={}){
   const models=modelFiles(analysis);
   if(!models.length)return{ok:false,code:'MODEL_MISSING',detail:'no ONNX model in challenge session'};
   if(models.length>1)return{ok:false,code:'MODEL_AMBIGUOUS',detail:`${models.length} ONNX models found`,models:models.map((x)=>x.path)};
   const file=models[0];if(Number(file.size)>MAX_MODEL_BYTES)return{ok:false,code:'MODEL_TOO_LARGE',detail:`model size ${file.size} exceeds ${MAX_MODEL_BYTES}`};
   const target=path.resolve(root,file.path);if(!inside(root,target))return{ok:false,code:'MODEL_PATH_INVALID',detail:file.path};
   const stat=await fs.lstat(target);if(!stat.isFile()||stat.isSymbolicLink())return{ok:false,code:'MODEL_PATH_INVALID',detail:file.path};
-  const model=await inspectOnnxModel(target,{provider:'cpu'});
+  const inspect=options.inspectModel||inspectOnnxModel;const model=await inspect(target,{provider:'cpu'});
   return{ok:true,file,target,model};
 }
 
-async function runExplicitBundle(modelInfo,bundle){
-  const inputNames=modelInfo.model.inputs.map((item)=>item.name);
+async function runExplicitBundle(modelInfo,bundle,options={}){
+  const inputNames=modelInfo.model.inputs.map((item)=>item.name);const execute=options.runModel||runOnnxModel;
   const runs=[];const errors=[];
   for(let index=0;index<bundle.candidates.length;index+=1){
     const candidate=bundle.candidates[index];const feedNames=Object.keys(candidate.feeds||{});
     if(inputNames.some((name)=>!feedNames.includes(name))){errors.push({id:candidate.id??index,error:'explicit feeds do not cover all model inputs'});continue;}
     try{
-      const run=await runOnnxModel(modelInfo.target,{feeds:candidate.feeds,outputs:bundle.outputName?[bundle.outputName]:undefined},{provider:'cpu'});
+      const run=await execute(modelInfo.target,{feeds:candidate.feeds,outputs:bundle.outputName?[bundle.outputName]:undefined},{provider:'cpu'});
       runs.push({id:candidate.id??candidate.file??candidate.name??index,assignedLabel:candidate.assignedLabel??candidate.folderLabel??candidate.bucketLabel??candidate.classLabel,run,outputName:bundle.outputName||undefined});
     }catch(error){errors.push({id:candidate.id??index,error:String(error?.message||error).slice(0,260)});}
   }
   return{runs,errors,mode:'explicit-feeds'};
 }
 
-async function runNpyBundle(root,analysis,modelInfo,hintSet){
+async function runNpyBundle(root,analysis,modelInfo,hintSet,options={}){
   if(modelInfo.model.inputs.length!==1)return{runs:[],errors:[{error:`auto NPY mode requires exactly one ONNX input, got ${modelInfo.model.inputs.length}`}],mode:'npy'};
-  const input=modelInfo.model.inputs[0];const files=npyFiles(analysis).slice(0,MAX_CANDIDATES);const runs=[];const errors=[];
+  const execute=options.runModel||runOnnxModel;const input=modelInfo.model.inputs[0];const files=npyFiles(analysis).slice(0,MAX_CANDIDATES);const runs=[];const errors=[];
   for(const file of files){
     const assignedLabel=labelFromPath(file.path,hintSet.rows);if(assignedLabel===null)continue;
     const target=path.resolve(root,file.path);if(!inside(root,target))continue;
     try{
       const stat=await fs.lstat(target);if(!stat.isFile()||stat.isSymbolicLink()||stat.size<=0||stat.size>MAX_NPY_BYTES)throw new Error(`NPY size ${stat.size} outside auto-run limit`);
       const buffer=await fs.readFile(target);const raw=npyTensorSpec(buffer,file.path);const spec=adaptDimsToModel(raw,input.metadata);
-      const run=await runOnnxModel(modelInfo.target,{feeds:{[input.name]:{type:spec.type,dims:spec.dims,base64:spec.base64}}},{provider:'cpu'});
+      const run=await execute(modelInfo.target,{feeds:{[input.name]:{type:spec.type,dims:spec.dims,base64:spec.base64}}},{provider:'cpu'});
       runs.push({id:idFromPath(file.path),file:file.path,assignedLabel,run,npy:{descr:raw.npy.descr,shape:raw.npy.shape,adaptation:spec.adaptation}});
     }catch(error){errors.push({file:file.path,error:String(error?.message||error).slice(0,300)});}
   }
   return{runs,errors,mode:'npy'};
 }
 
+function normalizeDecodedImage(value,file){
+  if(!value||!Number.isSafeInteger(Number(value.width))||!Number.isSafeInteger(Number(value.height)))throw new Error(`${file}: decoder 未返回 width/height`);
+  const width=Number(value.width),height=Number(value.height);if(width<=0||height<=0||width*height>MAX_IMAGE_PIXELS)throw new Error(`${file}: decoded image 像素数超限`);
+  const rgba=value.rgba instanceof Uint8Array?value.rgba:Buffer.isBuffer(value.rgba)?new Uint8Array(value.rgba):null;if(!rgba||rgba.length!==width*height*4)throw new Error(`${file}: decoder RGBA 长度不匹配`);
+  return{schema:'newcyber.decoded-image.v1',width,height,rgba:new Uint8Array(rgba),source:value.source||{format:'injected-decoder'}};
+}
+async function decodeCandidateImage(target,file,options={}){
+  const stat=await fs.lstat(target);if(!stat.isFile()||stat.isSymbolicLink()||stat.size<=0||stat.size>MAX_IMAGE_BYTES)throw new Error(`${file}: image size ${stat.size} outside auto-run limit`);
+  const buffer=await fs.readFile(target);const ext=path.extname(file).toLowerCase();
+  if(ext==='.png'){
+    try{return decodePng(buffer);}catch(error){if(typeof options.decodeImage!=='function')throw error;}
+  }
+  if(typeof options.decodeImage!=='function')throw new Error(`${file}: ${ext||'image'} 需要受控图片解码器`);
+  return normalizeDecodedImage(await options.decodeImage({path:target,file,buffer,extension:ext,maxPixels:MAX_IMAGE_PIXELS}),file);
+}
+
+async function runImageBundle(root,analysis,modelInfo,hintSet,options={}){
+  if(modelInfo.model.inputs.length!==1)return{runs:[],errors:[{error:`auto image mode requires exactly one ONNX input, got ${modelInfo.model.inputs.length}`}],mode:'image'};
+  const manifest=analysis.aiPreprocessingManifest;if(!manifest||manifest.status!=='ready'||manifest.executionReady!==true)return{runs:[],errors:[{error:`preprocessing manifest is ${manifest?.status||'missing'}`}],mode:'image'};
+  const execute=options.runModel||runOnnxModel;const input=modelInfo.model.inputs[0];const files=imageFiles(analysis).slice(0,MAX_CANDIDATES);const runs=[];const errors=[];
+  for(const file of files){
+    const assignedLabel=labelFromPath(file.path,hintSet.rows);if(assignedLabel===null)continue;const target=path.resolve(root,file.path);if(!inside(root,target))continue;
+    try{
+      const decoded=await decodeCandidateImage(target,file.path,options);const tensor=preprocessDecodedImage(decoded,manifest,input.metadata);
+      const run=await execute(modelInfo.target,{feeds:{[input.name]:{type:tensor.type,dims:tensor.dims,base64:tensor.base64}}},{provider:'cpu'});
+      runs.push({id:idFromPath(file.path),file:file.path,assignedLabel,run,image:{width:decoded.width,height:decoded.height,tensorDims:tensor.dims,adaptation:tensor.adaptation,backend:tensor.backend,trace:tensor.trace}});
+    }catch(error){errors.push({file:file.path,error:String(error?.message||error).slice(0,360)});}
+  }
+  return{runs,errors,mode:'image'};
+}
+
 async function runChallengeOnnxAutopilot(rootPath,analysis,options={}){
-  const root=path.resolve(String(rootPath||''));const runtime=runtimeStatus();
-  const base={schema:'newcyber.challenge-onnx-autopilot.v1',runtime:{available:runtime.available,source:runtime.source||null,version:runtime.version||null},status:'not-applicable',mode:null,runs:0,errors:[],contest:null,gap:null};
+  const root=path.resolve(String(rootPath||''));
+  const sources=await collectSources(root,analysis);const explicit=discoverExplicitFeedBundle(sources);const npys=npyFiles(analysis);const images=imageFiles(analysis);const hintSets=hintRowsFromSources(sources);
+  const candidatePaths=[...npys,...images].map((x)=>x.path);const hintSet=chooseHintSet(hintSets,candidatePaths);
+  const npyEligible=hintSet?npys.some((file)=>labelFromPath(file.path,hintSet.rows)!==null):false;const imageEligible=hintSet?images.some((file)=>labelFromPath(file.path,hintSet.rows)!==null):false;
+  if(!explicit&&!npyEligible&&!imageEligible){
+    const code=!candidatePaths.length?'CANDIDATES_MISSING':!hintSet?'HINTS_MISSING':'CANDIDATE_LABEL_MAPPING_MISSING';
+    return{schema:'newcyber.challenge-onnx-autopilot.v1',runtime:{available:null,source:null,version:null},status:'not-applicable',mode:null,runs:0,errors:[],contest:null,gap:{code,detail:'need explicit feed bundle or label-folder candidates plus hint pairs'}};
+  }
+  if(!explicit&&!npyEligible&&imageEligible&&(analysis.aiPreprocessingManifest?.status!=='ready'||analysis.aiPreprocessingManifest?.executionReady!==true)){
+    const m=analysis.aiPreprocessingManifest;
+    return{schema:'newcyber.challenge-onnx-autopilot.v1',runtime:{available:null,source:null,version:null},status:'gap',mode:'image',runs:0,errors:[],contest:null,gap:{code:'PREPROCESSING_NOT_READY',detail:`image candidates found but preprocessing manifest=${m?.status||'missing'}`,missing:m?.missing||[],conflicts:(m?.conflicts||[]).map((x)=>x.kind)}};
+  }
+  const runtime=(options.runtimeStatus||runtimeStatus)();const base={schema:'newcyber.challenge-onnx-autopilot.v1',runtime:{available:runtime.available,source:runtime.source||null,version:runtime.version||null},status:'not-applicable',mode:null,runs:0,errors:[],contest:null,gap:null};
   if(!runtime.available)return{...base,status:'gap',gap:{code:'MODEL_RUNTIME_GAP',detail:runtime.installHint||runtime.error||'onnxruntime-node unavailable'}};
-  const sources=await collectSources(root,analysis);const explicit=discoverExplicitFeedBundle(sources);
-  const npys=npyFiles(analysis);const hintSets=hintRowsFromSources(sources);const hintSet=chooseHintSet(hintSets,npys.map((x)=>x.path));
-  if(!explicit&&(!npys.length||!hintSet))return{...base,status:'not-applicable',gap:{code:!npys.length?'CANDIDATE_TENSORS_MISSING':'HINTS_MISSING',detail:'need explicit feed bundle or NPY candidates plus hint pairs'}};
-  let modelInfo;try{modelInfo=await inspectUniqueModel(root,analysis);}catch(error){return{...base,status:'gap',gap:{code:'MODEL_INSPECTION_FAILED',detail:String(error?.message||error).slice(0,400)}};}
+  let modelInfo;try{modelInfo=await inspectUniqueModel(root,analysis,options);}catch(error){return{...base,status:'gap',gap:{code:'MODEL_INSPECTION_FAILED',detail:String(error?.message||error).slice(0,400)}};}
   if(!modelInfo.ok)return{...base,status:'gap',gap:{code:modelInfo.code,detail:modelInfo.detail,models:modelInfo.models||null}};
   let executed;
-  try{executed=explicit?await runExplicitBundle(modelInfo,explicit):await runNpyBundle(root,analysis,modelInfo,hintSet);}catch(error){return{...base,status:'gap',gap:{code:'INFERENCE_FAILED',detail:String(error?.message||error).slice(0,400)}};}
+  try{
+    if(explicit)executed=await runExplicitBundle(modelInfo,explicit,options);
+    else if(npyEligible)executed=await runNpyBundle(root,analysis,modelInfo,hintSet,options);
+    else executed=await runImageBundle(root,analysis,modelInfo,hintSet,options);
+  }catch(error){return{...base,status:'gap',gap:{code:'INFERENCE_FAILED',detail:String(error?.message||error).slice(0,400)}};}
   const hints=explicit?.hints||hintSet?.rows;
-  if(!executed.runs.length)return{...base,status:'gap',mode:executed.mode,errors:executed.errors,gap:{code:'NO_SUCCESSFUL_INFERENCE',detail:'no candidate produced a complete ONNX classification output'}};
+  if(!executed.runs.length)return{...base,status:'gap',mode:executed.mode,model:modelInfo.file.path,errors:executed.errors.slice(0,64),gap:{code:'NO_SUCCESSFUL_INFERENCE',detail:'no candidate produced a complete ONNX classification output'}};
   let bridge;try{bridge=rankAdversarialContestFromOnnxRuns({hints,runs:executed.runs,outputName:explicit?.outputName||undefined,shortlistSize:3,beamWidth:2,maxSets:128});}
-  catch(error){return{...base,status:'gap',mode:executed.mode,runs:executed.runs.length,errors:executed.errors,gap:{code:'RANKING_FAILED',detail:String(error?.message||error).slice(0,400)}};}
+  catch(error){return{...base,status:'gap',mode:executed.mode,model:modelInfo.file.path,runs:executed.runs.length,errors:executed.errors.slice(0,64),gap:{code:'RANKING_FAILED',detail:String(error?.message||error).slice(0,400)}};}
   const synthetic={hints,candidates:bridge.bundle.candidates.map((item)=>({id:item.id,assignedLabel:item.assignedLabel,scores:item.scores}))};
   const contest=analyzeAiContestBundle([...sources,{file:'__newcyber_onnx_runs__.json',text:JSON.stringify(synthetic)}],analysis,analysis.aiPreprocessingManifest||null);
   const status=contest.status==='verified'?'verified':'ranked';
   return{...base,status,mode:executed.mode,model:modelInfo.file.path,runs:executed.runs.length,errors:executed.errors.slice(0,64),bridge:{outputNames:bridge.bridge.outputNames,providers:bridge.bridge.providers,candidateSets:bridge.ranking.candidateSets.slice(0,64)},contest,gap:null};
 }
 
-module.exports={dtypeToTensorType,npyTensorSpec,adaptDimsToModel,labelFromPath,idFromPath,discoverExplicitFeedBundle,runChallengeOnnxAutopilot};
+module.exports={dtypeToTensorType,npyTensorSpec,adaptDimsToModel,labelFromPath,idFromPath,chooseHintSet,imageFiles,discoverExplicitFeedBundle,decodeCandidateImage,runImageBundle,runChallengeOnnxAutopilot};
