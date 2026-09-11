@@ -38,7 +38,7 @@ test('Batch88 closes a SHA-256 checker against an auto-generated CSV submission 
   ].join('\n');
   await fs.writeFile(path.join(root,'checker.py'),source);
   const result=await verifier.runVerifierContractAutopilot(root,{submissionAutopilot:{result:{payload,value:'已生成提交'}}});
-  assert.equal(result.schema,'newcyber.challenge-verifier-contract.v3');
+  assert.equal(result.schema,'newcyber.challenge-verifier-contract.v4');
   assert.equal(result.status,'verified');
   assert.equal(result.result.value,payload);
   assert.equal(result.result.verified,true);
