@@ -4,7 +4,7 @@ const {app,BrowserWindow,dialog,ipcMain}=require('electron');
 const fs=require('fs/promises');
 const path=require('path');
 const {scanWorkspace,inspectFile}=require('../core/finals_analyzer_batch15');
-const {buildChallengeSession}=require('../core/challenge_session');
+const {buildChallengeSession}=require('../core/challenge_session_batch51');
 const {expandChallengeArchive}=require('../core/challenge_archive_ingest');
 const {materializeRecoveredArtifacts}=require('../core/challenge_artifact_materialize');
 
@@ -131,7 +131,7 @@ function descriptor(root,session){
 
 function preserveChallengeRuntime(previous,next){
   if(!previous)return next;
-  for(const key of ['solverPipeline','pipelineSummary','solverExecution','executorSummary','aiPreprocessingManifest'])if(previous[key]!==undefined)next[key]=previous[key];
+  for(const key of ['solverPipeline','pipelineSummary','solverExecution','executorSummary','aiPreprocessingManifest','aiContestAutopilot'])if(previous[key]!==undefined)next[key]=previous[key];
   return next;
 }
 
@@ -162,6 +162,7 @@ async function scanSession(root,session){
   analysis.challengeSession.archiveIngest=analysis.archiveIngest;
   analysis.challengeSession.recoveredArtifacts=analysis.recoveredArtifacts;
   if(analysis.aiPreprocessingManifest)analysis.challengeSession.aiPreprocessingManifest=analysis.aiPreprocessingManifest;
+  if(analysis.aiContestAutopilot)analysis.challengeSession.aiContestAutopilot={status:analysis.aiContestAutopilot.status,next:analysis.aiContestAutopilot.next,result:analysis.aiContestAutopilot.result||null};
   return analysis;
 }
 
