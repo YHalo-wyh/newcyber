@@ -1,5 +1,6 @@
-const {app,BrowserWindow,ipcMain,nativeTheme}=require('electron');
+const {app,BrowserWindow,ipcMain,nativeTheme,shell}=require('electron');
 const os=require('os');
+const path=require('path');
 const {registerBinaryElfIpc}=require('./src/electron/binary_elf_ipc');
 const {registerIdaSnapshotIpc}=require('./src/electron/ida_snapshot_ipc');
 const {registerAiScaIpc}=require('./src/electron/ai_sca_ipc');
@@ -69,6 +70,13 @@ ipcMain.handle('window:task-progress',(_event,value)=>{
   else if(value==='none'||value==null)win.setProgressBar(-1);
   else if(Number.isFinite(Number(value)))win.setProgressBar(Math.max(0,Math.min(1,Number(value))));
   return true;
+});
+ipcMain.handle('artifact:reveal-path',(_event,rootPath,relativePath)=>{
+  const root=path.resolve(String(rootPath||''));const rel=String(relativePath||'');
+  if(!root||!rel||path.isAbsolute(rel)||rel.includes('\0'))return false;
+  const target=path.resolve(root,rel);const prefix=root.endsWith(path.sep)?root:`${root}${path.sep}`;
+  if(target!==root&&!target.startsWith(prefix))return false;
+  shell.showItemInFolder(target);return true;
 });
 
 nativeTheme.on('updated',()=>emitState());
