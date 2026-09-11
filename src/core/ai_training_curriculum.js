@@ -72,7 +72,7 @@ function collectCases(){
   for(const corpus of CORPORA){
     let rows;try{rows=corpus.get();}catch(error){errors.push({corpus:corpus.id,error:String(error?.message||error)});continue;}
     if(!Array.isArray(rows)){errors.push({corpus:corpus.id,error:'corpus getter did not return array'});continue;}
-    rows.forEach((item,index)=>out.push(normalizeCase(item,corpus,index));
+    rows.forEach((item,index)=>out.push(normalizeCase(item,corpus,index)));
   }
   return{cases:out,errors};
 }
