@@ -6,9 +6,11 @@ const path=require('path');
 const {scanWorkspace,inspectFile}=require('../core/finals_analyzer_batch15');
 const {buildChallengeSession}=require('../core/challenge_session');
 const {expandChallengeArchive}=require('../core/challenge_archive_ingest');
+const {materializeRecoveredArtifacts}=require('../core/challenge_artifact_materialize');
 
 const MAX_INPUT_FILES=64;
 const MAX_TOTAL_BYTES=2*1024*1024*1024;
+const MAX_MATERIALIZATION_PASSES=2;
 const sessions=new Map();
 
 function activeWindow(){return BrowserWindow.getFocusedWindow()||BrowserWindow.getAllWindows()[0]||null;}
@@ -52,6 +54,17 @@ function ingestSummary(session){
   return {archives:applicable.length,expandedFiles,expandedBytes,skipped,unsupported,errors,items};
 }
 
+function recoverySummary(session){
+  const passes=Array.isArray(session.materializations)?session.materializations:[];
+  return {
+    passes:passes.length,
+    files:passes.reduce((sum,item)=>sum+(item.files?.length||0),0),
+    bytes:passes.reduce((sum,item)=>sum+(Number(item.totalBytes)||0),0),
+    skipped:passes.reduce((sum,item)=>sum+(item.skipped?.length||0),0),
+    items:passes
+  };
+}
+
 async function writeIngestManifest(root,session){
   const summary=ingestSummary(session);
   if(!summary.archives&&!summary.errors)return;
@@ -66,6 +79,16 @@ async function writeIngestManifest(root,session){
     }))
   };
   await fs.writeFile(path.join(root,'newcyber_ingest_manifest.json'),`${JSON.stringify(manifest,null,2)}\n`,'utf8');
+}
+
+async function writeRecoveryManifest(root,session){
+  const summary=recoverySummary(session);if(!summary.passes)return;
+  const manifest={
+    schema:'newcyber.challenge-recovered-artifacts.v1',generatedAt:new Date().toISOString(),
+    summary:{passes:summary.passes,files:summary.files,bytes:summary.bytes,skipped:summary.skipped},
+    passes:summary.items.map((item)=>({pass:item.pass,outputRoot:item.outputRoot,totalBytes:item.totalBytes,files:item.files,skipped:item.skipped}))
+  };
+  await fs.writeFile(path.join(root,'newcyber_recovered_manifest.json'),`${JSON.stringify(manifest,null,2)}\n`,'utf8');
 }
 
 async function stageFiles(inputFiles,root,session){
@@ -86,7 +109,7 @@ async function stageFiles(inputFiles,root,session){
 
 function descriptor(root,session){
   const names=session.sources.map((x)=>path.basename(x));
-  const ingest=ingestSummary(session);
+  const ingest=ingestSummary(session);const recovery=recoverySummary(session);
   return {
     kind:'file-session',
     stagedRoot:root,
@@ -99,31 +122,52 @@ function descriptor(root,session){
     expandedBytes:ingest.expandedBytes,
     archiveSkipped:ingest.skipped,
     archiveUnsupported:ingest.unsupported,
-    archiveErrors:ingest.errors
+    archiveErrors:ingest.errors,
+    recoveredPasses:recovery.passes,
+    recoveredFileCount:recovery.files,
+    recoveredBytes:recovery.bytes
   };
 }
 
+function preserveChallengeRuntime(previous,next){
+  if(!previous)return next;
+  for(const key of ['solverPipeline','pipelineSummary','solverExecution','executorSummary','aiPreprocessingManifest'])if(previous[key]!==undefined)next[key]=previous[key];
+  return next;
+}
+
 async function scanSession(root,session){
-  const input=descriptor(root,session);
-  const analysis=await scanWorkspace(root,{challengeInput:input});
-  analysis.challengeInput=input;
-  analysis.workspaceName=input.displayName;
-  const ingest=ingestSummary(session);
-  analysis.archiveIngest={schema:'newcyber.challenge-archive-ingest-summary.v1',...ingest,items:undefined};
-  if(ingest.archives>0){
-    analysis.autopilot||={};analysis.autopilot.automaticChecks||=[];
-    const existing=analysis.autopilot.automaticChecks.find((item)=>item.id==='archive-ingest');
-    const check={id:'archive-ingest',title:'压缩包安全展开 / 递归入库',hits:ingest.expandedFiles};
-    if(existing)Object.assign(existing,check);else analysis.autopilot.automaticChecks.push(check);
+  let input=descriptor(root,session);
+  let analysis=await scanWorkspace(root,{challengeInput:input});
+  for(let index=0;index<MAX_MATERIALIZATION_PASSES;index+=1){
+    const recovered=await materializeRecoveredArtifacts(root,analysis,session.materializationState);
+    if(!recovered.files.length)break;
+    session.materializations.push(recovered);await writeRecoveryManifest(root,session);
+    input=descriptor(root,session);
+    analysis=await scanWorkspace(root,{challengeInput:input});
   }
-  analysis.challengeSession=buildChallengeSession(analysis);
+
+  input=descriptor(root,session);analysis.challengeInput=input;analysis.workspaceName=input.displayName;
+  const ingest=ingestSummary(session);const recovery=recoverySummary(session);
+  analysis.archiveIngest={schema:'newcyber.challenge-archive-ingest-summary.v1',archives:ingest.archives,expandedFiles:ingest.expandedFiles,expandedBytes:ingest.expandedBytes,skipped:ingest.skipped,unsupported:ingest.unsupported,errors:ingest.errors};
+  analysis.recoveredArtifacts={schema:'newcyber.challenge-recovered-artifact-summary.v1',passes:recovery.passes,files:recovery.files,bytes:recovery.bytes,skipped:recovery.skipped};
+  analysis.autopilot||={};analysis.autopilot.automaticChecks||=[];
+  if(ingest.archives>0){
+    const check={id:'archive-ingest',title:'压缩包安全展开 / 递归入库',hits:ingest.expandedFiles};const existing=analysis.autopilot.automaticChecks.find((item)=>item.id===check.id);if(existing)Object.assign(existing,check);else analysis.autopilot.automaticChecks.push(check);
+  }
+  if(recovery.files>0){
+    const check={id:'recovered-artifact-materialize',title:'恢复产物落盘 / 固定点复扫',hits:recovery.files};const existing=analysis.autopilot.automaticChecks.find((item)=>item.id===check.id);if(existing)Object.assign(existing,check);else analysis.autopilot.automaticChecks.push(check);
+  }
+  const previous=analysis.challengeSession;
+  analysis.challengeSession=preserveChallengeRuntime(previous,buildChallengeSession(analysis));
   analysis.challengeSession.archiveIngest=analysis.archiveIngest;
+  analysis.challengeSession.recoveredArtifacts=analysis.recoveredArtifacts;
+  if(analysis.aiPreprocessingManifest)analysis.challengeSession.aiPreprocessingManifest=analysis.aiPreprocessingManifest;
   return analysis;
 }
 
 async function createFromPaths(paths){
   const inputs=await validateInputPaths(paths);const root=await newSessionRoot();
-  const session={sources:[],stagedNames:[],archiveIngest:[],createdAt:new Date().toISOString()};sessions.set(root,session);
+  const session={sources:[],stagedNames:[],archiveIngest:[],materializations:[],materializationState:{materializedHashes:new Set(),materializationPass:0},createdAt:new Date().toISOString()};sessions.set(root,session);
   try{await stageFiles(inputs,root,session);return await scanSession(root,session);}catch(error){sessions.delete(root);await fs.rm(root,{recursive:true,force:true}).catch(()=>{});throw error;}
 }
 
@@ -147,4 +191,4 @@ function registerChallengeSessionIpc(){
   ipcMain.handle('challenge:inspect',async(_event,rootPath,relativePath)=>{const {root}=requireSession(rootPath);return inspectFile(root,relativePath);});
 }
 
-module.exports={registerChallengeSessionIpc,validateInputPaths,descriptor,ingestSummary};
+module.exports={registerChallengeSessionIpc,validateInputPaths,descriptor,ingestSummary,recoverySummary};
