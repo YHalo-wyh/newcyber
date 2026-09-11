@@ -12,6 +12,7 @@ const {getPromptCtfTrainingCorpus,runPromptCtfTrainingRegression}=require('./ai_
 const {getDomesticDetectionTrainingCorpus,runDomesticDetectionTrainingRegression}=require('./ai_domestic_detection_training');
 const {getDomesticBackdoorTrainingCorpus,runDomesticBackdoorTrainingRegression}=require('./ai_domestic_backdoor_training');
 const {analyzeTrainingQuality}=require('./ai_training_quality');
+const {analyzeCrossEventHoldout}=require('./ai_training_holdout');
 
 const TARGET_DIRECTIONS=Object.freeze([
   'prompt-llm-security','adversarial-example','model-extraction','privacy-leakage',
@@ -93,16 +94,18 @@ function getTrainingCurriculum(){
   const collected=collectCases();const cases=collected.cases;
   const challengeKey=(row)=>`${row.event} :: ${row.challenge}`;
   const quality=analyzeTrainingQuality(cases,{directions:TARGET_DIRECTIONS});
+  const holdout=analyzeCrossEventHoldout(cases,{directions:TARGET_DIRECTIONS,minTrainEvents:2});
   return{
     schema:'newcyber.ai-training-curriculum.v1',
     generatedFrom:CORPORA.map(({id,title,kind})=>({id,title,kind})),
-    summary:{cases:cases.length,corpora:CORPORA.length,events:uniqueCount(cases,'event'),challenges:uniqueCount(cases,challengeKey),families:uniqueCount(cases,'family'),directions:uniqueCount(cases,'direction'),byCorpus:countBy(cases,'corpus'),byDirection:countBy(cases,'direction'),byCaseType:countBy(cases,'caseType'),byEvidence:countBy(cases,evidenceTier),quality:quality.summary},
+    summary:{cases:cases.length,corpora:CORPORA.length,events:uniqueCount(cases,'event'),challenges:uniqueCount(cases,challengeKey),families:uniqueCount(cases,'family'),directions:uniqueCount(cases,'direction'),byCorpus:countBy(cases,'corpus'),byDirection:countBy(cases,'direction'),byCaseType:countBy(cases,'caseType'),byEvidence:countBy(cases,evidenceTier),quality:quality.summary,holdout:holdout.summary},
     coverageDebt:coverageDebt(cases),
     quality,
+    holdout,
     duplicateGroups:duplicateGroups(cases),
     sourceErrors:collected.errors,
     cases,
-    note:'这是赛题驱动的确定性回归 curriculum，不是对底座模型做参数微调。raw case 数不再等价于训练覆盖：quality 会按独立 family/event、provenance、重复折损和 cross-event holdout 条件单独评估。'
+    note:'这是赛题驱动的确定性回归 curriculum，不是对底座模型做参数微调。raw case 数不再等价于训练覆盖；quality 评估覆盖结构，holdout 则按完整 event 隔离生成跨赛事泛化评估计划。'
   };
 }
 
@@ -137,10 +140,11 @@ function runTrainingCurriculumRegression(options={}){
     schema:'newcyber.ai-training-curriculum-regression.v1',
     variantsPerSeed:variants,
     suites,
-    summary:{suites:suites.length,suiteErrors:suites.filter((x)=>!x.ok).length,curriculumCases:curriculum.summary.cases,challenges:curriculum.summary.challenges,events:curriculum.summary.events,quality:curriculum.quality.summary},
+    summary:{suites:suites.length,suiteErrors:suites.filter((x)=>!x.ok).length,curriculumCases:curriculum.summary.cases,challenges:curriculum.summary.challenges,events:curriculum.summary.events,quality:curriculum.quality.summary,holdout:curriculum.holdout.summary},
     coverageDebt:curriculum.coverageDebt,
     quality:curriculum.quality,
-    note:'Full regression 聚合已有 deterministic replay；训练质量门禁会额外识别重复样本膨胀、provenance 偏弱与缺少 cross-event holdout 的方向。'
+    holdout:curriculum.holdout,
+    note:'Full regression 聚合已有 deterministic replay；quality 检查语料结构，holdout 额外生成按 event 隔离的跨赛事评估计划，避免同赛事信息泄漏导致虚高。'
   };
 }
 
