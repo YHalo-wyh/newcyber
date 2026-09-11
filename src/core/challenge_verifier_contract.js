@@ -30,8 +30,8 @@ function decodeQuoted(raw){
     return inner.replace(/\\([\\'"`nrt])/g,(_m,ch)=>({n:'\n',r:'\r',t:'\t'}[ch]??ch));
   }catch{return inner;}
 }
-function literalPattern(){return String.raw`(["'\x60])((?:\\.|(?!\1)[^\\\r\n]){1,512})\1`;}
-function literalFromMatch(match,quoteIndex,bodyIndex){return safeLiteral(decodeQuoted(`${match[quoteIndex]}${match[bodyIndex]}${match[quoteIndex]}`));}
+function literalPattern(){return String.raw`((?:"(?:\\.|[^"\\\r\n]){1,512}")|(?:'(?:\\.|[^'\\\r\n]){1,512}')|(?:\x60(?:\\.|[^\x60\\\r\n]){1,512}\x60))`;}
+function literalFromMatch(match,index){return safeLiteral(decodeQuoted(match[index]));}
 
 async function walkSources(root,options={}){
   const maxFiles=Math.max(1,Math.min(10000,Number(options.maxFiles)||MAX_FILES));const out=[];let total=0;
@@ -40,9 +40,7 @@ async function walkSources(root,options={}){
     let entries;try{entries=await fs.readdir(dir,{withFileTypes:true});}catch{return;}
     for(const entry of entries){
       if(out.length>=maxFiles||total>=MAX_TOTAL_BYTES)break;
-      if(['.git','node_modules','__pycache__','__expanded__','__recovered__'].includes(entry.name)&&entry.name!== '__recovered__'){
-        if(entry.name!== '__recovered__')continue;
-      }
+      if(['.git','node_modules','__pycache__','__expanded__'].includes(entry.name))continue;
       const full=path.join(dir,entry.name);
       if(entry.isDirectory()){await visit(full);continue;}
       if(!entry.isFile()||/^newcyber_/i.test(entry.name))continue;
@@ -64,9 +62,9 @@ function discoverExactContracts(file,body){
   ];
   for(let pIndex=0;pIndex<patterns.length;pIndex+=1){let match;while((match=patterns[pIndex].exec(body))&&out.length<MAX_CONTRACTS){
     let value,variable=null;
-    if(pIndex===0){variable=match[1];value=literalFromMatch(match,2,3);}
-    else if(pIndex===1){value=literalFromMatch(match,1,2);variable=match[3];}
-    else value=literalFromMatch(match,1,2);
+    if(pIndex===0){variable=match[1];value=literalFromMatch(match,2);}
+    else if(pIndex===1){value=literalFromMatch(match,1);variable=match[2];}
+    else value=literalFromMatch(match,1);
     if(!value)continue;const near=context(body,match.index);const strong=strongContext(file,near);
     if(!strong&&!flagLike(value))continue;
     out.push({type:'exact',file,line:lineAt(body,match.index),variable,expected:value,confidence:(verifierNamed(file)&&strong)||flagLike(value)?'strong':'medium',evidence:near.slice(0,420)});
@@ -130,6 +128,12 @@ function evaluateContracts(contracts,candidates){
   }
   return{verified,direct};
 }
+function directEligible(item){
+  const contract=item?.contract;if(!contract||contract.type!=='exact')return false;
+  if(flagLike(item.value))return true;
+  if(/^(?:flag|answer|submission|candidate)$/i.test(text(contract.variable)))return true;
+  return /(?:expected[_ -]?answer|correct[_ -]?answer|expected[_ -]?flag|correct[_ -]?flag)/i.test(text(contract.evidence));
+}
 
 async function runVerifierContractAutopilot(root,analysis={},options={}){
   const files=await walkSources(root,options);const contracts=[];const errors=[];
@@ -139,7 +143,7 @@ async function runVerifierContractAutopilot(root,analysis={},options={}){
     if(contracts.length>=MAX_CONTRACTS*2)break;
   }
   const unique=dedupeContracts(contracts);const candidates=candidateValues(analysis);const evaluated=evaluateContracts(unique,candidates);
-  const exactStrong=evaluated.direct.find((item)=>item.contract.confidence==='strong');
+  const exactStrong=evaluated.direct.find((item)=>item.contract.confidence==='strong'&&directEligible(item));
   const verifiedMatch=evaluated.verified.find((item)=>item.contract.confidence==='strong')||evaluated.verified[0]||null;
   const result=verifiedMatch?{value:verifiedMatch.value,verified:true,confidence:'verified',kind:flagLike(verifiedMatch.value)?'flag':'answer',source:`${verifiedMatch.method} @ ${verifiedMatch.contract.file}:${verifiedMatch.contract.line}`}:
     exactStrong?{value:exactStrong.value,verified:true,confidence:'verified',kind:flagLike(exactStrong.value)?'flag':'answer',source:`static exact verifier @ ${exactStrong.contract.file}:${exactStrong.contract.line}`}:
@@ -153,8 +157,8 @@ async function runVerifierContractAutopilot(root,analysis={},options={}){
     summary:{sourceFiles:files.length,contracts:unique.length,exact:unique.filter((x)=>x.type==='exact').length,hash:unique.filter((x)=>x.type==='hash').length,format:unique.filter((x)=>x.type==='format').length,candidates:candidates.length,verifiedMatches:evaluated.verified.length,errors:errors.length},
     contracts:unique,candidates:candidates.map((x)=>({source:x.source,valuePreview:flagLike(x.value)?x.value:x.value.slice(0,96)})),verifiedMatches:evaluated.verified.slice(0,32),findings,errors:errors.slice(0,32),
     next:result?'静态 verifier 已闭环，可把结果视为 verified。':unique.length?'已有 verifier contract；等待/生成满足 contract 的候选，不猜答案。':'未发现高置信静态 verifier contract。',
-    notes:['仅解析文本，不执行 checker/verifier 源码。','exact literal 只有在 verifier/checker 语境足够强时才可直接形成 verified result。','hash contract 只验证已有候选；不会逆向哈希或枚举未知秘密。']
+    notes:['仅解析文本，不执行 checker/verifier 源码。','exact literal 只有在 verifier/checker 语境足够强且像答案/Flag 时才可直接形成 verified result。','hash contract 只验证已有候选；不会逆向哈希或枚举未知秘密。']
   };
 }
 
-module.exports={SOURCE_EXTENSIONS,flagLike,strongContext,walkSources,discoverExactContracts,discoverHashContracts,discoverFormatContracts,dedupeContracts,candidateValues,evaluateContracts,runVerifierContractAutopilot};
+module.exports={SOURCE_EXTENSIONS,flagLike,strongContext,walkSources,discoverExactContracts,discoverHashContracts,discoverFormatContracts,dedupeContracts,candidateValues,evaluateContracts,directEligible,runVerifierContractAutopilot};
