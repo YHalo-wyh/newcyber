@@ -11,8 +11,9 @@ function resolveSubmissionArtifact(rootPath,relativePath){
   if(!normalized.startsWith(`${OUTPUT_DIR}/`))return null;
   const basename=path.basename(normalized);
   if(!basename.startsWith(SUBMISSION_PREFIX))return null;
-  const target=path.resolve(root,normalized);const prefix=root.endsWith(path.sep)?root:`${root}${path.sep}`;
-  if(target===root||!target.startsWith(prefix))return null;
+  const outputRoot=path.resolve(root,OUTPUT_DIR);const target=path.resolve(root,normalized);
+  const prefix=outputRoot.endsWith(path.sep)?outputRoot:`${outputRoot}${path.sep}`;
+  if(target===outputRoot||!target.startsWith(prefix))return null;
   return target;
 }
 function safeSuggestedName(value,fallback='newcyber_submission.txt'){
