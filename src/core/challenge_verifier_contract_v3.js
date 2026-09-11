@@ -1,6 +1,6 @@
 'use strict';
 
-const base=require('./challenge_verifier_contract');
+const base=require('./challenge_verifier_contract_v2');
 
 function list(value){return Array.isArray(value)?value:[];}
 function flagLike(value){return base.flagLike(value);}
