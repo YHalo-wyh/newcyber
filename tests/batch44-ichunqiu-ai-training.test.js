@@ -5,6 +5,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 
 const {
+  ICHUNQIU_OFFICIAL_RISKS,
   ICHUNQIU_STAGE1_CASES,
   ICHUNQIU_EVENT_SIGNALS,
   evaluateFalsePremiseReplay,
@@ -27,9 +28,28 @@ test('i春秋 corpus records public provenance without copying real flags', () =
     assert.equal(item.provenance, 'public-writeup-derived');
     assert.ok(item.sources.some((source) => source.includes('ichunqiu.com/competition/detail/378')));
     assert.ok(item.sources.some((source) => source.includes('integritytech.com.cn/html/News/News_836_1.html')));
+    assert.ok(item.officialRiskTags.length >= 1);
     assert.ok(item.variantCount >= 3);
   }
   assert.doesNotMatch(JSON.stringify(ICHUNQIU_STAGE1_CASES), /flag\{/i);
+});
+
+test('official i春秋 AI risk taxonomy is fully represented by challenge-derived families', () => {
+  assert.deepEqual(
+    ICHUNQIU_OFFICIAL_RISKS.map((item) => item.id),
+    ['prompt-injection', 'sensitive-information-leakage', 'system-prompt-leakage', 'incorrect-information-exposure']
+  );
+  const result = runIchunqiuAiTrainingRegression();
+  assert.equal(result.summary.officialRiskCovered, 4);
+  assert.equal(result.summary.officialRiskTotal, 4);
+  assert.deepEqual(result.summary.officialRiskMissing, []);
+  assert.equal(result.officialRisks.length, 4);
+
+  const byChallenge = new Map(getIchunqiuAiTrainingCorpus().map((item) => [item.challenge, item]));
+  assert.ok(byChallenge.get('越狱的翻译官').officialRiskTags.includes('system-prompt-leakage'));
+  assert.ok(byChallenge.get('健忘的客服').officialRiskTags.includes('sensitive-information-leakage'));
+  assert.ok(byChallenge.get('窥探内心').officialRiskTags.includes('system-prompt-leakage'));
+  assert.deepEqual(byChallenge.get('幻觉诱导').officialRiskTags, ['incorrect-information-exposure']);
 });
 
 test('i春秋 competition replay covers positive evidence and negative controls', () => {
@@ -80,6 +100,7 @@ test('tool router exposes i春秋 corpus, regression and hallucination replay', 
 
   const regression = runTool('ai-ichunqiu-training-regression', {});
   assert.equal(regression.summary.pass, regression.summary.total);
+  assert.equal(regression.summary.officialRiskCovered, regression.summary.officialRiskTotal);
 
   const replay = runTool('ai-false-premise-replay', {
     input: { claimId: 'router-case', groundTruth: false, judgeAccepted: true }
