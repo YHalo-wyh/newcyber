@@ -72,7 +72,7 @@ function collectCases(){
   for(const corpus of CORPORA){
     let rows;try{rows=corpus.get();}catch(error){errors.push({corpus:corpus.id,error:String(error?.message||error)});continue;}
     if(!Array.isArray(rows)){errors.push({corpus:corpus.id,error:'corpus getter did not return array'});continue;}
-    rows.forEach((item,index)=>out.push(normalizeCase(item,corpus,index)));
+    rows.forEach((item,index)=>out.push(normalizeCase(item,corpus,index));
   }
   return{cases:out,errors};
 }
@@ -94,7 +94,7 @@ function getTrainingCurriculum(){
   const challengeKey=(row)=>`${row.event} :: ${row.challenge}`;
   const quality=analyzeTrainingQuality(cases,{directions:TARGET_DIRECTIONS});
   return{
-    schema:'newcyber.ai-training-curriculum.v2',
+    schema:'newcyber.ai-training-curriculum.v1',
     generatedFrom:CORPORA.map(({id,title,kind})=>({id,title,kind})),
     summary:{cases:cases.length,corpora:CORPORA.length,events:uniqueCount(cases,'event'),challenges:uniqueCount(cases,challengeKey),families:uniqueCount(cases,'family'),directions:uniqueCount(cases,'direction'),byCorpus:countBy(cases,'corpus'),byDirection:countBy(cases,'direction'),byCaseType:countBy(cases,'caseType'),byEvidence:countBy(cases,evidenceTier),quality:quality.summary},
     coverageDebt:coverageDebt(cases),
@@ -134,7 +134,7 @@ function runTrainingCurriculumRegression(options={}){
   }
   const curriculum=getTrainingCurriculum();
   return{
-    schema:'newcyber.ai-training-curriculum-regression.v2',
+    schema:'newcyber.ai-training-curriculum-regression.v1',
     variantsPerSeed:variants,
     suites,
     summary:{suites:suites.length,suiteErrors:suites.filter((x)=>!x.ok).length,curriculumCases:curriculum.summary.cases,challenges:curriculum.summary.challenges,events:curriculum.summary.events,quality:curriculum.quality.summary},
