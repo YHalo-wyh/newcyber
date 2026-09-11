@@ -172,23 +172,26 @@ test('Batch42 object-array reader rejects an untrusted pickle global before any 
   await assert.rejects(()=>openNpyRowSource(file),/os\.system.*allowlist/i);
 });
 
-test('Batch42 grouped SCA recovers an unknown-prefix flag as candidate without promoting it to verified',async(t)=>{
+test('Batch42 production compatibility upgrades an unknown-prefix candidate only after contextual hidden verification',async(t)=>{
   const bundle=await makeGroupedBundle();
   t.after(()=>fsp.rm(bundle.root,{recursive:true,force:true}));
   const paths=(await fsp.readdir(bundle.root)).map((name)=>path.join(bundle.root,name));
   const result=await runScaAutopilotPaths(paths,{ort:fakeOrt(),provider:'cpu',version:'fixture'});
-  assert.equal(result.status,'flag-candidate');
-  assert.equal(result.flag,null);
+  assert.equal(result.status,'flag-recovered');
+  assert.equal(result.flag,bundle.target);
   assert.equal(result.flagCandidate,bundle.target);
+  assert.equal(result.verifiedRecovery.method,'contextual-hidden-oracle');
   assert.equal(result.layout.groupsPerToken,2);
   assert.equal(result.layout.hiddenPerGroup,2);
   assert.equal(result.profile.hiddenDim,4);
   assert.equal(result.profile.groupsPerToken,2);
   assert.ok(result.profile.r2>.999999);
   assert.equal(result.freeProbe.text,bundle.target);
+  assert.ok(result.contextualHiddenOracle.positions.every((item)=>item.status==='matched'&&item.cosine>=result.contextualHiddenOracle.threshold));
   assert.ok(result.stages.some((item)=>item.id==='group-layout'&&item.status==='ok'));
   assert.ok(result.stages.some((item)=>item.id==='free-probe'&&item.status==='ok'));
-  assert.ok(result.stages.some((item)=>item.id==='flag-candidate'&&item.status==='ok'));
+  assert.ok(result.stages.some((item)=>item.id==='contextual-hidden-oracle'&&item.status==='ok'));
+  assert.ok(result.stages.some((item)=>item.id==='flag'&&item.status==='ok'));
 });
 
 test('Batch42 Workspace promotion keeps free-probe flags as candidate confidence',()=>{
