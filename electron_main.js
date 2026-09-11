@@ -49,6 +49,12 @@ function applyNativeMaterial(win){
   materialByWindow.set(win,material);
 }
 
+function isolatedChallengeRoot(rootPath){
+  const parent=path.resolve(path.join(app.getPath('temp'),'newcyber-challenge-sessions'));
+  const root=path.resolve(String(rootPath||''));const prefix=parent.endsWith(path.sep)?parent:`${parent}${path.sep}`;
+  return root!==parent&&root.startsWith(prefix)?root:null;
+}
+
 app.on('browser-window-created',(_event,win)=>{
   activeWindow=win;
   applyNativeMaterial(win);
@@ -74,16 +80,12 @@ ipcMain.handle('window:task-progress',(_event,value)=>{
   return true;
 });
 ipcMain.handle('artifact:reveal-path',(_event,rootPath,relativePath)=>{
-  const root=path.resolve(String(rootPath||''));const rel=String(relativePath||'');
-  if(!root||!rel||path.isAbsolute(rel)||rel.includes('\0'))return false;
-  const target=path.resolve(root,rel);const prefix=root.endsWith(path.sep)?root:`${root}${path.sep}`;
-  if(target!==root&&!target.startsWith(prefix))return false;
+  const root=isolatedChallengeRoot(rootPath);if(!root)return false;
+  const target=resolveSubmissionArtifact(root,relativePath);if(!target)return false;
   shell.showItemInFolder(target);return true;
 });
 ipcMain.handle('artifact:export-submission',async(_event,rootPath,relativePath,suggestedName)=>{
-  const parent=path.resolve(path.join(app.getPath('temp'),'newcyber-challenge-sessions'));
-  const root=path.resolve(String(rootPath||''));const parentPrefix=parent.endsWith(path.sep)?parent:`${parent}${path.sep}`;
-  if(root===parent||!root.startsWith(parentPrefix))return{saved:false,reason:'UNAPPROVED_SESSION_ROOT'};
+  const root=isolatedChallengeRoot(rootPath);if(!root)return{saved:false,reason:'UNAPPROVED_SESSION_ROOT'};
   const source=resolveSubmissionArtifact(root,relativePath);if(!source)return{saved:false,reason:'INVALID_SUBMISSION_ARTIFACT'};
   let stat;try{stat=await fs.stat(source);}catch{return{saved:false,reason:'ARTIFACT_NOT_FOUND'};}
   if(!stat.isFile()||stat.size<=0||stat.size>16*1024*1024)return{saved:false,reason:'ARTIFACT_SIZE_INVALID'};
