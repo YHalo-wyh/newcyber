@@ -11,6 +11,7 @@ const {getAiVillageTrainingCorpus,runAiVillageTrainingRegression}=require('./ai_
 const {getPromptCtfTrainingCorpus,runPromptCtfTrainingRegression}=require('./ai_prompt_ctf_training');
 const {getDomesticDetectionTrainingCorpus,runDomesticDetectionTrainingRegression}=require('./ai_domestic_detection_training');
 const {getDomesticBackdoorTrainingCorpus,runDomesticBackdoorTrainingRegression}=require('./ai_domestic_backdoor_training');
+const {analyzeTrainingQuality}=require('./ai_training_quality');
 
 const TARGET_DIRECTIONS=Object.freeze([
   'prompt-llm-security','adversarial-example','model-extraction','privacy-leakage',
@@ -91,15 +92,17 @@ function duplicateGroups(cases){
 function getTrainingCurriculum(){
   const collected=collectCases();const cases=collected.cases;
   const challengeKey=(row)=>`${row.event} :: ${row.challenge}`;
+  const quality=analyzeTrainingQuality(cases,{directions:TARGET_DIRECTIONS});
   return{
-    schema:'newcyber.ai-training-curriculum.v1',
+    schema:'newcyber.ai-training-curriculum.v2',
     generatedFrom:CORPORA.map(({id,title,kind})=>({id,title,kind})),
-    summary:{cases:cases.length,corpora:CORPORA.length,events:uniqueCount(cases,'event'),challenges:uniqueCount(cases,challengeKey),families:uniqueCount(cases,'family'),directions:uniqueCount(cases,'direction'),byCorpus:countBy(cases,'corpus'),byDirection:countBy(cases,'direction'),byCaseType:countBy(cases,'caseType'),byEvidence:countBy(cases,evidenceTier)},
+    summary:{cases:cases.length,corpora:CORPORA.length,events:uniqueCount(cases,'event'),challenges:uniqueCount(cases,challengeKey),families:uniqueCount(cases,'family'),directions:uniqueCount(cases,'direction'),byCorpus:countBy(cases,'corpus'),byDirection:countBy(cases,'direction'),byCaseType:countBy(cases,'caseType'),byEvidence:countBy(cases,evidenceTier),quality:quality.summary},
     coverageDebt:coverageDebt(cases),
+    quality,
     duplicateGroups:duplicateGroups(cases),
     sourceErrors:collected.errors,
     cases,
-    note:'这是赛题驱动的确定性回归 curriculum，不是对底座模型做参数微调。公开赛题只提供题型、证据结构与 provenance；真实 Flag/密钥/答案不得进入 fixture。'
+    note:'这是赛题驱动的确定性回归 curriculum，不是对底座模型做参数微调。raw case 数不再等价于训练覆盖：quality 会按独立 family/event、provenance、重复折损和 cross-event holdout 条件单独评估。'
   };
 }
 
@@ -131,12 +134,13 @@ function runTrainingCurriculumRegression(options={}){
   }
   const curriculum=getTrainingCurriculum();
   return{
-    schema:'newcyber.ai-training-curriculum-regression.v1',
+    schema:'newcyber.ai-training-curriculum-regression.v2',
     variantsPerSeed:variants,
     suites,
-    summary:{suites:suites.length,suiteErrors:suites.filter((x)=>!x.ok).length,curriculumCases:curriculum.summary.cases,challenges:curriculum.summary.challenges,events:curriculum.summary.events},
+    summary:{suites:suites.length,suiteErrors:suites.filter((x)=>!x.ok).length,curriculumCases:curriculum.summary.cases,challenges:curriculum.summary.challenges,events:curriculum.summary.events,quality:curriculum.quality.summary},
     coverageDebt:curriculum.coverageDebt,
-    note:'Full regression 聚合已有 deterministic replay；它不会联网执行原赛题，也不会把 heuristic/candidate 自动提升为 verifier-backed solved。'
+    quality:curriculum.quality,
+    note:'Full regression 聚合已有 deterministic replay；训练质量门禁会额外识别重复样本膨胀、provenance 偏弱与缺少 cross-event holdout 的方向。'
   };
 }
 
