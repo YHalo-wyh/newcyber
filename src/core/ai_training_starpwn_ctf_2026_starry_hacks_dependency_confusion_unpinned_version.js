@@ -1,5 +1,7 @@
 'use strict';
 
+const {auditAiSupplyChain}=require('./ai_supply_chain');
+
 const CORPUS_ENTRY={
   "id": "starpwn-ctf-2026-starry-hacks-dependency-confusion-unpinned-version-synthetic-regression",
   "event": "STARPWN CTF 2026",
@@ -68,7 +70,24 @@ const FIXTURES=[
   }
 ];
 
+function getPath(value,path){return String(path||'').split('.').filter(Boolean).reduce((cur,key)=>cur==null?undefined:cur[key],value);}
+function check(result,a){const actual=getPath(result,a.path);switch(a.op||'eq'){case'eq':return JSON.stringify(actual)===JSON.stringify(a.value);case'neq':return JSON.stringify(actual)!==JSON.stringify(a.value);case'truthy':return Boolean(actual);case'falsy':return !actual;case'exists':return actual!==undefined&&actual!==null;case'not-exists':return actual===undefined||actual===null;case'gt':return Number(actual)>Number(a.value);case'gte':return Number(actual)>=Number(a.value);case'lt':return Number(actual)<Number(a.value);case'lte':return Number(actual)<=Number(a.value);case'includes':return Array.isArray(actual)?actual.some((x)=>JSON.stringify(x)===JSON.stringify(a.value)):String(actual??'').includes(String(a.value??''));case'not-includes':return Array.isArray(actual)?!actual.some((x)=>JSON.stringify(x)===JSON.stringify(a.value)):!String(actual??'').includes(String(a.value??''));case'length-eq':return (actual?.length??-1)===Number(a.value);default:return false;}}
+
 function getTrainingCorpus(){return [CORPUS_ENTRY];}
 function getSyntheticFixtures(){return FIXTURES;}
+function runStarpwnStarryHacksTrainingRegression(){
+  const results=FIXTURES.map((fixture)=>{
+    const output=auditAiSupplyChain(fixture.payload);
+    const assertions=(fixture.expected.assertions||[]).map((assertion)=>({...assertion,pass:check(output,assertion)}));
+    const pass=assertions.length>0&&assertions.every((row)=>row.pass);
+    return{id:fixture.id,seed:fixture.id,role:fixture.role,status:pass?'pass':'fail',recognized:pass,assertions};
+  });
+  return{
+    schema:'newcyber.ai-starpwn-starry-hacks-training-regression.v1',
+    results,
+    summary:{cases:results.length,passed:results.filter((row)=>row.status==='pass').length,failed:results.filter((row)=>row.status!=='pass').length},
+    note:'Synthetic-only deterministic replay of the public Starry hacks dependency-resolution condition; no original challenge secret or exploit payload is retained.'
+  };
+}
 
-module.exports={CORPUS_ENTRY,FIXTURES,getTrainingCorpus,getSyntheticFixtures};
+module.exports={CORPUS_ENTRY,FIXTURES,getTrainingCorpus,getSyntheticFixtures,runStarpwnStarryHacksTrainingRegression};
