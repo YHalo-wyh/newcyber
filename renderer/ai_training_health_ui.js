@@ -75,13 +75,13 @@
   function healthSummary(){
     const quality=curriculumResult?.quality?.summary||{};
     const holdout=curriculumResult?.holdout?.summary||{};
-    const schedule=curriculumResult?.schedule?.summary||{};
+    const orders=curriculumResult?.workOrders?.summary||{};
     const score=Number(quality.overallScore||0);
     return `<div class="stage1-health-summary">
       <div><span>QUALITY</span><b>${(score*100).toFixed(0)}%</b></div>
       <div><span>READY</span><b>${quality.ready||0}/${quality.directions||7}</b></div>
       <div><span>HOLDOUT</span><b>${holdout.eligibleDirections||0}/${holdout.directions||7}</b></div>
-      <div><span>NEXT</span><b>${h(schedule.topDirection||'—')}</b></div>
+      <div><span>WORK ORDER</span><b>${h(orders.topDirection||'—')}</b></div>
     </div>`;
   }
 
@@ -117,19 +117,40 @@
     </div>`;
   }
 
+  function workOrderPanel(){
+    const order=curriculumResult?.workOrders?.orders?.[0];
+    if(!order)return '';
+    const themes=(order.acquisition?.familyThemes||[]).slice(0,4);
+    const evidence=(order.acquisition?.requiredEvidence||[]).slice(0,3);
+    const verifier=(order.regressionDesign?.verifier||[]).slice(0,3);
+    const gates=(order.acceptanceGates||[]).slice(0,5);
+    return `<div class="stage1-work-order">
+      <div class="stage1-work-order-head"><span>ACQUISITION ORDER</span><b>${h(order.id)}</b><em>${h(order.priority)} · ${Number(order.score||0).toFixed(0)}</em></div>
+      <div class="stage1-work-order-grid">
+        <div><small>目标方向</small><b>${h(TITLES[order.direction]||order.direction)}</b><p>${h(GAP_LABELS[order.objective?.nextAction]||order.objective?.nextAction||'—')} · ${h(MODE_LABELS[order.objective?.acquisitionMode]||order.objective?.acquisitionMode||'—')}</p></div>
+        <div><small>候选新 family</small><b>${themes.length?h(themes.join(' · ')):'—'}</b><p>先避开现有 event / family 签名，再收公开证据。</p></div>
+        <div><small>证据要求</small><b>${evidence.length}</b><p>${h(evidence.join(' · '))}</p></div>
+        <div><small>Verifier</small><b>${verifier.length}</b><p>${h(verifier.join(' · '))}</p></div>
+      </div>
+      <div class="stage1-work-order-gates">${gates.map((gate)=>`<span><i>${h(gate.id)}</i>${h(gate.requirement)}</span>`).join('')}</div>
+      <div class="stage1-work-order-policy"><b>硬约束</b><span>只用公开来源元数据 + synthetic fixture；真实 Flag、密钥、私有附件、未公开触发器、臆造赛题机制都不得进入训练集。</span></div>
+    </div>`;
+  }
+
   function healthPanel(){
     const button=curriculumBusy?'加载中':'刷新';
     if (!curriculumResult) {
       return `<section class="stage1-health-panel">
         <div class="stage1-health-head"><div><span>TRAINING HEALTH</span><b>训练覆盖健康度</b></div><button class="button ghost" data-training-health ${curriculumBusy?'disabled':''}>${curriculumBusy?'加载中':'加载'}</button></div>
         ${curriculumError?`<p class="stage1-training-error">${h(curriculumError)}</p>`:''}
-        <div class="stage1-health-empty"><b>不是看样本数量，而是看能不能跨赛事评估。</b><p>读取 Batch95 quality + Batch96 holdout + Batch98 schedule，直接给出下一轮最该补哪一条 track。</p></div>
+        <div class="stage1-health-empty"><b>不是看样本数量，而是看能不能跨赛事评估。</b><p>读取 quality + holdout + schedule + work orders，直接给出下一轮最该补哪条 track、该收什么证据、怎么做 verifier。</p></div>
       </section>`;
     }
     return `<section class="stage1-health-panel">
       <div class="stage1-health-head"><div><span>TRAINING HEALTH</span><b>训练覆盖健康度</b></div><button class="button ghost" data-training-health ${curriculumBusy?'disabled':''}>${button}</button></div>
       ${healthSummary()}
       ${schedulePanel()}
+      ${workOrderPanel()}
       <div class="stage1-health-table">${directionRows()}</div>
       <div class="stage1-health-legend"><span>有效/原始</span><span>E/F = 最弱子轨赛事 / family</span><span>H = clean holdout</span><span>U = unseen-family</span></div>
     </section>`;
@@ -142,7 +163,7 @@
     return html.replace(marker,`${healthPanel()}${marker}`);
   }
 
-  toolView=function batch98TrainingHealthToolView(tool){
+  toolView=function batch99TrainingHealthToolView(tool){
     const html=previousToolView(tool);
     return tool===TOOL?injectHealth(html):html;
   };
