@@ -2,6 +2,7 @@
 
 const {app,BrowserWindow,dialog,ipcMain}=require('electron');
 const fs=require('fs/promises');
+const fsSync=require('fs');
 const path=require('path');
 const {scanWorkspace,inspectFile}=require('../core/finals_analyzer_batch15');
 const {buildChallengeSession}=require('../core/challenge_session_batch51');
@@ -11,6 +12,7 @@ const {runChallengeOnnxAutopilot}=require('../core/challenge_onnx_autopilot');
 const {runAiDetectionBundleAutopilot}=require('../core/ai_detection_bundle_autopilot');
 const {runVerifierContractAutopilot}=require('../core/challenge_verifier_contract');
 const {matchTrainingFamilies}=require('../core/ai_training_family_matcher');
+const {runIChunqiuSimAutopilot}=require('../core/ai_ichunqiu_sim_autopilot');
 const {decodeImageWithElectron}=require('./challenge_image_decoder');
 
 const MAX_INPUT_FILES=64;
@@ -31,10 +33,31 @@ function requireSession(rootPath){
   const root=path.resolve(String(rootPath||''));const session=sessions.get(root);if(!session)throw new Error('当前 Challenge Session 已失效，请重新丢入题目文件');return {root,session};
 }
 
+function walkDirFilesSync(dir, base = '') {
+  const out = [];
+  let entries = [];
+  try { entries = fsSync.readdirSync(dir, { withFileTypes: true }); } catch { return out; }
+  for (const entry of entries) {
+    const abs = path.join(dir, entry.name);
+    const rel = base ? `${base}/${entry.name}` : entry.name;
+    if (entry.isDirectory()) out.push(...walkDirFilesSync(abs, rel));
+    else if (entry.isFile()) out.push({ abs, rel, size: (fsSync.statSync(abs)||{size:0}).size });
+  }
+  return out;
+}
+
 async function validateInputPaths(paths){
   const resolved=[];let total=0;
   for(const raw of [...new Set((paths||[]).map((x)=>path.resolve(String(x||''))).filter(Boolean))].slice(0,MAX_INPUT_FILES)){
-    const stat=await fs.stat(raw);if(!stat.isFile())continue;
+    const stat=await fs.stat(raw);
+    if(stat.isDirectory()){
+      const inner=walkDirFilesSync(raw);
+      const size=inner.reduce((s,x)=>s+x.size,0);
+      total+=size;if(total>MAX_TOTAL_BYTES)throw new Error('补充附件总大小超过 2 GiB Session 上限');
+      if(inner.length)resolved.push({path:raw,size,name:path.basename(raw),isDir:true,inner});
+      continue;
+    }
+    if(!stat.isFile())continue;
     total+=stat.size;if(total>MAX_TOTAL_BYTES)throw new Error('补充附件总大小超过 2 GiB Session 上限');
     resolved.push({path:raw,size:stat.size,name:path.basename(raw)});
   }
@@ -136,6 +159,23 @@ async function writeTrainingFamilyManifest(root,result){
 async function stageFiles(inputFiles,root,session){
   const used=new Set(session.stagedNames.map((x)=>x.toLowerCase()));
   for(const file of inputFiles){
+    if(file.isDir){
+      const prefix=uniqueName(file.name,used);
+      for(const inner of file.inner){
+        const relName=`${prefix}/${inner.rel}`;
+        const target=path.join(root,...relName.split('/'));
+        await fs.mkdir(path.dirname(target),{recursive:true});
+        await fs.copyFile(inner.abs,target);
+        session.sources.push(inner.abs);session.stagedNames.push(relName);
+        try{
+          const ingest=await expandChallengeArchive(target,root);
+          if(ingest.applicable)session.archiveIngest.push(ingest);
+        }catch(error){
+          session.archiveIngest.push({applicable:true,source:relName,kind:null,files:[],archives:[],skipped:[],unsupported:[],totalBytes:0,error:error?.message||String(error)});
+        }
+      }
+      continue;
+    }
     const name=uniqueName(file.name,used);const target=path.join(root,name);
     await fs.copyFile(file.path,target);
     session.sources.push(file.path);session.stagedNames.push(name);
@@ -219,6 +259,18 @@ async function scanSession(root,session){
   catch(error){verifierAuto={schema:'newcyber.challenge-verifier-contract.v1',status:'gap',result:null,summary:{sourceFiles:0,contracts:0,exact:0,hash:0,format:0,candidates:0,verifiedMatches:0,errors:1},contracts:[],verifiedMatches:[],findings:[],errors:[{error:String(error?.message||error).slice(0,500)}],next:'静态 verifier contract 阶段异常，已降级为 GAP。',notes:[]};}
   session.verifierAutopilot=verifierAuto;analysis.verifierContractAutopilot=verifierAuto;await writeVerifierContractManifest(root,verifierAuto);mergeFindings(analysis,verifierAuto.findings);
 
+  let simAuto;
+  try{simAuto=await runIChunqiuSimAutopilot(root,analysis);}
+  catch(error){simAuto={schema:'newcyber.ai-ichunqiu-sim-autopilot.v1',status:'gap',families:[],solvedCount:0,totalDetected:0,steps:[],errors:[String(error?.message||error).slice(0,500)]};}
+  session.simAutopilot=simAuto;analysis.aiSimAutopilot=simAuto;
+  if(simAuto.status!=='not-applicable'){
+    upsertCheck(analysis,{id:'ai-ichunqiu-sim-autopilot',title:'i春秋 AI 仿真题家族识别与确定性求解',hits:Number(simAuto.totalDetected)||0,detail:`命中 ${simAuto.totalDetected} 个家族 · ${simAuto.solvedCount} 个已验证出 Flag`});
+    analysis.autopilot=analysis.autopilot||{};
+    for(const f of simAuto.families.filter(f=>f.flag)){
+      mergeFindings(analysis,[{severity:f.verified?'high':'medium',title:`[${f.id}] ${f.name}`,file:'-',evidence:`Flag: ${f.flag}${f.verified?'（已复刻 verifier 判定确认）':'（候选，未完全闭环）'}`}]);
+    }
+  }
+
   const familyMatch=matchTrainingFamilies(analysis,{limit:10});
   analysis.trainingFamilyMatch=familyMatch;await writeTrainingFamilyManifest(root,familyMatch);
 
@@ -234,6 +286,20 @@ async function scanSession(root,session){
   if(familyMatch.status!=='not-detected')upsertCheck(analysis,{id:'training-family-match',title:'历史赛题家族匹配 / 策略路由',hits:familyMatch.matches.length,detail:familyMatch.next});
   const previous=analysis.challengeSession;
   analysis.challengeSession=preserveChallengeRuntime(previous,buildChallengeSession(analysis));
+  if(simAuto&&simAuto.status!=='not-applicable'&&simAuto.families.some(f=>f.flag)){
+    analysis.autopilot=analysis.autopilot||{};
+    analysis.autopilot.flags=Array.isArray(analysis.autopilot.flags)?analysis.autopilot.flags:[];
+    analysis.candidates=analysis.candidates||{};
+    analysis.candidates.flags=Array.isArray(analysis.candidates.flags)?analysis.candidates.flags:[];
+    const seen=new Set([...analysis.autopilot.flags,...analysis.candidates.flags].map(f=>String(f&&f.value)));
+    for(const f of simAuto.families.filter(f=>f.flag)){
+      if(seen.has(f.flag))continue;seen.add(f.flag);
+      const entry={value:f.flag,verified:Boolean(f.verified),confidence:f.verified?'verified':'candidate',source:`ai-ichunqiu-sim:${f.id}`,file:'ai-ichunqiu-sim-autopilot'};
+      analysis.autopilot.flags.push(entry);analysis.candidates.flags.push(entry);
+    }
+    if(simAuto.solvedCount&&analysis.challengeSession)analysis.challengeSession.status='solved';
+    mergeFindings(analysis,simAuto.families.filter(f=>f.flag).map(f=>({severity:f.verified?'high':'medium',title:`[${f.id}] ${f.name}`,file:'-',evidence:`Flag: ${f.flag}${f.verified?'（已复刻 verifier 判定确认）':'（候选，未完全闭环）'}`})));
+  }
   analysis.challengeSession.archiveIngest=analysis.archiveIngest;
   analysis.challengeSession.recoveredArtifacts=analysis.recoveredArtifacts;
   analysis.challengeSession.onnxContestAutopilot={status:onnxAuto?.status||'not-applicable',mode:onnxAuto?.mode||null,runs:Number(onnxAuto?.runs)||0,gap:onnxAuto?.gap||null};
@@ -265,6 +331,7 @@ async function chooseFiles(title='选择题目文件或压缩包'){
 function registerChallengeSessionIpc(){
   ipcMain.handle('challenge:choose-files',async()=>{const paths=await chooseFiles();return paths?createFromPaths(paths):null;});
   ipcMain.handle('challenge:analyze-dropped',async(_event,paths)=>createFromPaths(paths));
+  ipcMain.handle('challenge:analyze-paths',async(_event,paths)=>createFromPaths(paths));
   ipcMain.handle('challenge:add-files',async(_event,rootPath)=>{
     const {root,session}=requireSession(rootPath);const paths=await chooseFiles('补充当前题目的附件或压缩包');if(!paths)return null;
     const inputs=await validateInputPaths(paths);await stageFiles(inputs,root,session);return scanSession(root,session);

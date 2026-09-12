@@ -5,6 +5,7 @@ contextBridge.exposeInMainWorld('newcyber', {
   scanWorkspace: (rootPath) => ipcRenderer.invoke('workspace:scan', rootPath),
   inspectFile: (rootPath, relativePath) => ipcRenderer.invoke('workspace:inspect', rootPath, relativePath),
   chooseChallengeFiles: () => ipcRenderer.invoke('challenge:choose-files'),
+  analyzeChallengePaths: (paths) => ipcRenderer.invoke('challenge:analyze-paths', paths),
   analyzeDroppedChallenge: (files) => {
     const paths = [...(files || [])].map((file) => webUtils.getPathForFile(file)).filter(Boolean);
     return ipcRenderer.invoke('challenge:analyze-dropped', paths);

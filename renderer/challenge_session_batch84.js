@@ -10,6 +10,8 @@
   function shortened(value,limit=720){const v=text(value);return v.length>limit?`${v.slice(0,limit)} …`:v;}
 
   function effectiveResult(a,s){
+    const sim=a?.aiSimAutopilot;
+    if(sim?.answer?.flag&&(sim.status==='verified'||sim.status==='candidate'))return {value:sim.answer.flag,payload:sim.answer.candidate?JSON.stringify(sim.answer.candidate):'',source:`ai-ichunqiu-sim:${sim.answer.family}`};
     if(s?.result?.value||s?.result?.payload)return s.result;
     const membership=a?.aiMembershipAutopilot;
     if(membership?.status==='candidate'&&membership.result)return membership.result;
@@ -180,6 +182,9 @@
     ].filter(Boolean);
     return `<details class="cs84-details" open><summary><span>分析过程明细</span><small>${ledger.length} 个步骤 · ${findings.length} 个重点 finding</small></summary><div class="cs84-detail-body">
       ${technical.length?`<div class="cs84-tech">${technical.map((item)=>`<span>${esc(item)}</span>`).join('')}</div>`:''}
+      ${(()=>{const sim=a?.aiSimAutopilot;if(!sim||sim.status==='not-applicable')return '';
+        return `<div class="cs84-findings"><b>i春秋 AI 仿真题 · 命中 ${esc(sim.totalDetected)} 个家族 / 已验证 ${esc(sim.solvedCount)} 个</b>${sim.families.map(f=>`<p><strong>[${esc(f.id)}] ${esc(f.name)}</strong><span>${esc(f.flag||'未解出')}${f.verified?' · 已复刻 verifier 判定确认':''}</span></p>`).join('')}</div>
+        <div class="cs84-ledger">${(sim.steps||[]).map((item)=>`<article><i class="${esc(item.status||'done')}"></i><div><b>${esc(item.title)}</b><pre class="cs84-step-detail">${esc(item.detail||'')}</pre></div><em>${esc(String(item.status||'done').toUpperCase())}</em></article>`).join('')}</div>`;})()}
       <div class="cs84-ledger">${ledger.map((item)=>{const tool=stepToolFor(item);
         return `<article><i class="${esc(item.status||'ran')}"></i><div><b>${esc(item.title||item.id||'自动步骤')}</b><pre class="cs84-step-detail">${esc(item.detail||item.result||'（本步骤没有产出细节）')}</pre>${item.result&&item.result!==item.detail?`<pre class="cs84-step-detail cs84-step-output">${esc(item.result)}</pre>`:''}</div><em>${esc(String(item.status||'ran').toUpperCase())}</em>${tool?`<button class="button ghost cs84-step-tool" data-tool="${esc(tool)}" title="在工具箱中打开并深入分析">打开 ${esc(String(tool))}</button>`:''}</article>`;}).join('')||'<p>暂无专项步骤记录。</p>'}</div>
       ${findings.length?`<div class="cs84-findings"><b>重点 Finding</b>${findings.map((item)=>`<p><strong>${esc(item.title||item.id||'Finding')}</strong><span>${esc(item.evidence||item.detail||'')}</span></p>`).join('')}</div>`:''}
