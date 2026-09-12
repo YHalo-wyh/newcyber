@@ -113,8 +113,7 @@ function planIntegration({materialized,cases=[],directions}={}){
   };
   const requested=unique([...(Array.isArray(directions)?directions:[]),...current.map((row)=>row.direction),candidate.direction]).sort();
   const before=metrics(current,requested);
-  const previewCases=[...current,candidate];
-  const after=metrics(previewCases,requested);
+  const after=metrics([...current,candidate],requested);
   const delta=computeDelta(before,after,candidate.direction);
   const bq=byDirection(before.quality.byDirection,candidate.direction)||{};
   const aq=byDirection(after.quality.byDirection,candidate.direction)||{};
@@ -135,19 +134,20 @@ function planIntegration({materialized,cases=[],directions}={}){
   if(!delta.holdoutEligible.before&&delta.holdoutEligible.after)improvements.push('holdout-eligibility');
   if(delta.cleanPlans>0)improvements.push('clean-holdout-plans');
   if(delta.unseenFamilyPlans>0)improvements.push('unseen-family-holdout');
-  const meaningful=improvements.some((id)=>['quality-score','effective-coverage','event-diversity','family-diversity','holdout-eligibility','unseen-family-holdout'].includes(id));
+  const structuralGains=['event-diversity','family-diversity','holdout-eligibility','clean-holdout-plans','unseen-family-holdout'];
+  const meaningful=improvements.some((id)=>structuralGains.includes(id));
   const status=regressions.length?'rejected-regression':!meaningful?'no-meaningful-gain':'ready-to-integrate';
   const ready=status==='ready-to-integrate';
   return{
     schema:'newcyber.ai-training-integration-gate.v1',
     status,readyToIntegrate:ready,
     candidate,
-    checks:{duplicateSignature:true,noMetricRegression:regressions.length===0,meaningfulCoverageGain:meaningful},
+    checks:{duplicateSignature:true,noMetricRegression:regressions.length===0,meaningfulCoverageGain:meaningful,structuralGainRequired:true},
     improvements,regressions,delta,
     before:{quality:byDirection(before.quality.byDirection,candidate.direction),holdout:bh,schedule:before.schedule.queue.find((row)=>row.direction===candidate.direction)||null},
     after:{quality:aq,holdout:ah,schedule:after.schedule.queue.find((row)=>row.direction===candidate.direction)||null},
     patch:ready?integrationPatch(materialized,candidate):null,
-    note:'The integration gate simulates curriculum impact before any registry mutation. ready-to-integrate requires a non-duplicate candidate, no quality/holdout regression, and a meaningful coverage gain; final repository tests still remain mandatory.'
+    note:'The integration gate simulates curriculum impact before any registry mutation. Quality/effective/raw-count increases are reported but cannot alone authorize integration; ready-to-integrate requires a non-duplicate candidate, no quality/holdout regression, and a structural event/family/holdout gain.'
   };
 }
 
