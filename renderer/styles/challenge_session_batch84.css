@@ -16,3 +16,21 @@
 .cs84-ai-nav button{border:0;background:transparent;color:inherit;text-align:left;padding:8px 10px;border-radius:8px;opacity:.66;cursor:pointer}
 .cs84-ai-nav button:hover{background:var(--cs84-soft);opacity:1}
 .cs84-ai-nav button.active{background:var(--cs84-soft);opacity:1;color:#e8f0ff}
+
+/* ── 自动解题卡片：强调主行动 ── */
+.cs84-solve-nav{position:relative;overflow:hidden;border:1px solid rgba(124,111,240,.42);background:linear-gradient(150deg,rgba(124,111,240,.24),rgba(80,66,192,.10) 55%,rgba(13,18,26,.42));border-radius:14px;padding:14px 13px;box-shadow:0 10px 28px rgba(103,88,230,.16),inset 0 1px rgba(255,255,255,.06);transition:transform .18s ease,border-color .18s ease,box-shadow .18s ease}
+.cs84-solve-nav:hover{transform:translateY(-1px);border-color:rgba(168,159,255,.65);box-shadow:0 14px 34px rgba(103,88,230,.3)}
+.cs84-solve-nav>span{width:34px;height:34px;border-radius:10px;background:linear-gradient(145deg,#7c6ff0,#5042c0);color:#fff;font-size:13px;box-shadow:0 6px 18px rgba(103,88,230,.4)}
+.cs84-solve-nav b{font-size:13.5px;letter-spacing:.4px}
+.cs84-solve-nav small{font-size:10px;color:#a9a0ff;margin-top:3px;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cs84-solve-nav::after{content:"";position:absolute;right:-24px;top:-24px;width:68px;height:68px;border-radius:50%;background:radial-gradient(circle,rgba(168,159,255,.28),transparent 70%);pointer-events:none}
+
+/* ── 侧栏：AI 工具列表自身可滚，折叠态收起列表而不是挤成竖条 ── */
+.cs84-sidebar{display:flex;flex-direction:column;overflow:hidden auto;scrollbar-width:thin;scrollbar-color:#343e4d transparent;overscroll-behavior:contain}
+.cs84-ai-nav{display:grid;gap:4px}
+body.sidebar-collapsed .cs84-ai-nav{display:none}
+body.sidebar-collapsed .cs84-solve-nav small{display:none}
+body.sidebar-collapsed .cs84-solve-nav{padding:10px;justify-content:center}
+body.sidebar-collapsed .cs84-solve-nav b{display:none}
+.cs84-solve-nav{justify-content:flex-start}
+body.sidebar-collapsed .cs84-solve-nav{justify-content:center}

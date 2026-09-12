@@ -163,7 +163,7 @@
     })();
     return `<div class="shell challenge-shell cs84-shell">
       <aside class="sidebar cs84-sidebar"><button class="brand" data-view="home"><span class="brand-mark">N</span><span><strong>NewCyber</strong><small>DROP → RESULT</small></span></button>
-        <button class="cs84-solve-nav active" data-session-return><span>▶</span><div><b>自动解题</b><small>${state.workspace?esc(challengeName()):'丢进去就开始'}</small></div></button>
+        <button class="cs84-solve-nav active" data-session-return title="自动解题"><span>▶</span><div><b>自动解题</b><small>${state.workspace?esc(challengeName()):'丢进去就开始'}</small></div></button>
         <nav class="cs84-advanced cs84-ai-nav"><b class="cs84-ai-heading">AI 安全工具</b>${aiNav}<button data-view="knowledge">离线速查</button></nav>
       </aside>
       <main><header class="topbar cs84-topbar"><div><span>NewCyber</span><b>/</b><strong>${esc(title)}</strong></div><div class="top-actions">${primary}</div></header><section class="content cs84-content">${content}</section></main>

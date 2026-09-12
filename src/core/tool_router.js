@@ -55,6 +55,7 @@ const { analyzeSwarmCoordination } = require('./lowalt_swarm');
 const { analyzeCrossBoundaryFlow } = require('./lowalt_cross_boundary');
 const { auditHeTrainingDirectory, solveHeTrainingDirectory } = require('./ai_he_training');
 const { solveLeakageDirectory } = require('./ai_leakage');
+const { inspectLocalTorch } = require('./local_torch_runtime');
 
 function npyBuffer(value) {
   if (!value || typeof value.base64 !== 'string') throw new Error('NPY 输入需要 base64');
@@ -143,6 +144,7 @@ function runTool(tool, payload = {}) {
     const root = typeof input === 'string' ? input : (input?.rootPath || input?.root || payload.rootPath || payload.root);
     return solveHeTrainingDirectory(root);
   }
+  if (tool === 'local-torch-inspect') return inspectLocalTorch(payload.input || payload);
   if (tool === 'ai-leakage-solve') {
     const input = payload.input;
     const root = typeof input === 'string' ? input : (input?.rootPath || input?.root || payload.rootPath || payload.root);

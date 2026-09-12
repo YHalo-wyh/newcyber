@@ -36,3 +36,4 @@ body.sidebar-collapsed .sidebar .nav-item span{display:none}
 
 /* 修复：折叠态侧栏被内容 min-width 撑开，盖住主区（grid 项默认 min-width:auto） */
 body.sidebar-collapsed .sidebar{width:76px;min-width:76px;max-width:76px;overflow:hidden}
+.content{overscroll-behavior:contain}

@@ -6,7 +6,7 @@
     domain:'ai',
     title:'提示词注入训练 / 模板库',
     label:'可选 JSON：category / ids / competitionOnly / marker / canary / tool',
-    placeholder:'{"competitionOnly":true}\n\n留空或输入 {} 可加载全部模板；competitionOnly=true 只看比赛高频 payload。'
+    placeholder:'留空 = 自动列出全部模板；也可输入 {"competitionOnly":true} 只看比赛高频 payload，或 {"ids":["..."]} 指定模板。'
   };
 
   const exists=(DOMAINS.ai.tools||[]).some((x)=>x[0]===tool);

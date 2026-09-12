@@ -33,7 +33,8 @@ const DOMAINS = {
       ['ai-source-scan', 'AI Pipeline 代码审计', '粘贴 Python/JS 等源码，快速定位不可信反序列化、Shell、动态执行、RAG 和 Tool 调用面。'],
       ['ai-he-training-audit', 'HE 密态训练审计', '选择 HETraining 目录，识别 TenSEAL CKKS、量化输出、密态输入批次与可复核解题链。'],
       ['ai-he-training-solve', 'HETraining 分步求解', '逐步拟合明文输出、检查 CKKS 解密条件，并明确显示已解出内容和阻断原因。'],
-      ['ai-leakage-solve', 'leakage 分步求解', '回放功耗→能量→隐藏状态→逐 token 解码链，展示恢复的 ID/手机号和验证结果。']
+      ['ai-leakage-solve', 'leakage 分步求解', '回放功耗→能量→隐藏状态→逐 token 解码链，展示恢复的 ID/手机号和验证结果。'],
+      ['local-torch-inspect', '本地 PyTorch 运行时', '探测本机 python + torch / CUDA：版本、GPU、算力与矩阵乘自检，一键确认能否跑本地推理。']
     ]
   },
   web3: {
@@ -55,6 +56,7 @@ const TOOL_META = {
   'ai-he-training-audit': { domain: 'ai', title: 'HE 密态训练审计', placeholder: '输入 HETraining 目录绝对路径，例如 F:/challenge/HETraining', label: 'HETraining 目录路径' },
   'ai-he-training-solve': { domain: 'ai', title: 'HETraining 分步求解', placeholder: '输入 HETraining 目录绝对路径，例如 F:/challenge/HETraining/HETraining', label: 'HETraining 目录路径' },
   'ai-leakage-solve': { domain: 'ai', title: 'leakage 分步求解', placeholder: '输入 leakage_task 目录绝对路径，例如 F:/challenge/leakage_task/leakage_task', label: 'leakage 目录路径' },
+  'local-torch-inspect': { domain: 'ai', title: '本地 PyTorch 运行时', placeholder: '', label: '无需输入，直接点分析' },
   'evm-calldata': { domain: 'web3', title: 'Calldata 快速拆解', placeholder: '0xa9059cbb000000000000000000000000...', label: 'Calldata' },
   'evm-disasm': { domain: 'web3', title: 'EVM Bytecode 反汇编', placeholder: '0x6080604052...', label: 'EVM Bytecode' },
   'codec': { domain: 'common', title: '编码 / Hash / XOR', placeholder: '输入待处理的数据', label: '输入' },
@@ -144,6 +146,23 @@ function renderResult(tool, result) {
   if (tool === 'ai-he-training-solve' || tool === 'ai-leakage-solve') return renderSolveResult(result);
   if (tool === 'evm-calldata') return `<div class="kv-grid"><div><span>selector</span><strong>${esc(result.selector)}</strong></div><div><span>known signature</span><strong>${esc(result.knownSignature || '未知')}</strong></div></div>${table(['#','uint256','address candidate','hex'], result.words.map(w=>[w.index,w.uint256,w.addressCandidate,w.hex]))}`;
   if (tool === 'evm-disasm') return `<div class="result-stats"><div><b>${result.byteLength}</b><span>字节</span></div><div><b>${result.riskyOpcodes.length}</b><span>风险 opcode</span></div></div>${result.riskyOpcodes.length ? `<div class="risk-strip">${result.riskyOpcodes.map(x=>`<span>${x.pc}: ${x.name}</span>`).join('')}</div>` : ''}${table(['PC','Opcode','指令','Immediate'], result.instructions.slice(0,1000).map(i=>[i.pc,i.opcode,i.name,i.immediate||'']))}`;
+  if (tool === 'local-torch-inspect') {
+    const r = state.toolResult || {};
+    const ok = r.status === 'ok';
+    const rows = [
+      ['Python', r.pythonVersion || r.python || '—'],
+      ['torch', r.torch || '未安装'],
+      ['构建', r.torch ? (String(r.torch).includes('cu') ? `CUDA 构建 (${String(r.torch).split('+')[1] || 'cu'})` : 'CPU 构建') : '—'],
+      ['CUDA 可用', r.cuda ? '是' : '否'],
+      ['CUDA Runtime', r.cudaRuntime || '—'],
+      ['GPU', r.device || (r.cuda ? '—' : '无')],
+      ['算力 (sm)', r.capability ? r.capability.join('.') : '—'],
+      ['GPU 矩阵乘自检', r.gpuMatmulOk == null ? '—' : (r.gpuMatmulOk ? '通过' : '失败')]
+    ];
+    return `<div class="result-stats"><div><b>${esc(r.runtime || r.status || '—')}</b><span>运行时</span></div><div><b>${r.cuda ? 'CUDA' : 'CPU'}</b><span>计算后端</span></div><div><b>${esc(r.torch || '—')}</b><span>torch 版本</span></div></div>
+      <div class="kv-grid">${rows.map(([k, v]) => `<div><span>${esc(k)}</span><strong>${esc(String(v))}</strong></div>`).join('')}</div>
+      ${ok ? `<p class="notice">${r.cuda ? '本机 CUDA PyTorch 可用，可以为本地推理 / 训练类工具提供 GPU 加速。' : '当前是 CPU 版 torch：只能跑轻量前向；需要 GPU 时安装 cu128 构建。'}</p>` : `<div class="error-box">未找到可用的 python + torch：${esc((r.tried || []).map(t => `${t.python} → ${t.status}${t.torch ? ` (${t.torch})` : ''}`).join('；') || '未探测')}</div><p class="notice">设置环境变量 NEWCYBER_PYTHON 指向装有 torch 的 python 后重试。</p>`}`;
+  }
   if (tool === 'knowledge-search') return result.results.length ? `<div class="knowledge-list">${result.results.map(x=>`<article><span>${esc(x.domain)}</span><b>${esc(x.term)}</b><p>${esc(x.text)}</p></article>`).join('')}</div>` : '<div class="result-empty">没有命中，换个关键词。</div>';
   return `<pre class="output-pre">${esc(JSON.stringify(result,null,2))}</pre>`;
 }
@@ -218,7 +237,7 @@ function render() {
   app.innerHTML = shell(content);
   bind();
   const scroller = document.querySelector('.content');
-  if (scroller) scroller.scrollTop = 0;
+  if (scroller) { scroller.scrollTop = 0; scroller.scrollLeft = 0; }
 }
 
 function navigate(view) {
@@ -229,6 +248,8 @@ function navigate(view) {
   render();
 }
 
+const AUTO_RUN_TOOLS = new Set(['ai-prompt-injection-suite', 'local-torch-inspect']);
+
 function openTool(tool) {
   state.tool = tool;
   state.toolResult = null;
@@ -236,6 +257,11 @@ function openTool(tool) {
   if (TOOL_META[tool]?.domain && DOMAINS[TOOL_META[tool].domain]) state.view = TOOL_META[tool].domain;
   else state.view = TOOL_META[tool]?.domain || 'common';
   render();
+  if (AUTO_RUN_TOOLS.has(tool)) {
+    window.newcyber.runTool(tool, {}).then((result) => {
+      if (state.tool === tool) { state.toolResult = result; render(); }
+    }).catch(() => {});
+  }
 }
 
 function toast(message, error = false) {
