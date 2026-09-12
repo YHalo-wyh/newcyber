@@ -217,6 +217,8 @@ function render() {
   else content = homeView();
   app.innerHTML = shell(content);
   bind();
+  const scroller = document.querySelector('.content');
+  if (scroller) scroller.scrollTop = 0;
 }
 
 function navigate(view) {
