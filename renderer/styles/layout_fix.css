@@ -37,3 +37,7 @@ body.sidebar-collapsed .sidebar .nav-item span{display:none}
 /* 修复：折叠态侧栏被内容 min-width 撑开，盖住主区（grid 项默认 min-width:auto） */
 body.sidebar-collapsed .sidebar{width:76px;min-width:76px;max-width:76px;overflow:hidden}
 .content{overscroll-behavior:contain}
+
+/* 修复：workspace-task-mode 的 overflow:hidden 来自废弃三栏布局，
+   会把自动解题结果页锁死不可滚动；cs84 内容区必须恢复滚动 */
+body.workspace-task-mode .cs84-content{overflow-x:hidden;overflow-y:auto;padding:28px 30px 56px}
