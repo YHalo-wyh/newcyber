@@ -30,7 +30,10 @@ const DOMAINS = {
     title: '人工智能安全', icon: 'AI', kicker: 'AI SECURITY',
     desc: 'Prompt / Agent / RAG / 模型供应链 / 对抗样本 / 数据安全。当前先做代码攻击面审计，并保留原有模型文件安全检查。',
     tools: [
-      ['ai-source-scan', 'AI Pipeline 代码审计', '粘贴 Python/JS 等源码，快速定位不可信反序列化、Shell、动态执行、RAG 和 Tool 调用面。']
+      ['ai-source-scan', 'AI Pipeline 代码审计', '粘贴 Python/JS 等源码，快速定位不可信反序列化、Shell、动态执行、RAG 和 Tool 调用面。'],
+      ['ai-he-training-audit', 'HE 密态训练审计', '选择 HETraining 目录，识别 TenSEAL CKKS、量化输出、密态输入批次与可复核解题链。'],
+      ['ai-he-training-solve', 'HETraining 分步求解', '逐步拟合明文输出、检查 CKKS 解密条件，并明确显示已解出内容和阻断原因。'],
+      ['ai-leakage-solve', 'leakage 分步求解', '回放功耗→能量→隐藏状态→逐 token 解码链，展示恢复的 ID/手机号和验证结果。']
     ]
   },
   web3: {
@@ -49,6 +52,9 @@ const TOOL_META = {
   'mavlink-hex': { domain: 'lowalt', title: 'MAVLink 帧分析', placeholder: 'fe0900010100...', label: 'MAVLink 原始十六进制流' },
   'nmea-analyze': { domain: 'lowalt', title: 'GNSS / NMEA 分析', placeholder: '$GPRMC,123519,A,4807.038,N,01131.000,E,...\n$GPGGA,...', label: 'NMEA 文本' },
   'ai-source-scan': { domain: 'ai', title: 'AI Pipeline 代码审计', placeholder: 'model = torch.load(path)\ncontext = retriever.similarity_search(query)\nsubprocess.run(cmd, shell=True)', label: '源码' },
+  'ai-he-training-audit': { domain: 'ai', title: 'HE 密态训练审计', placeholder: '输入 HETraining 目录绝对路径，例如 F:/challenge/HETraining', label: 'HETraining 目录路径' },
+  'ai-he-training-solve': { domain: 'ai', title: 'HETraining 分步求解', placeholder: '输入 HETraining 目录绝对路径，例如 F:/challenge/HETraining/HETraining', label: 'HETraining 目录路径' },
+  'ai-leakage-solve': { domain: 'ai', title: 'leakage 分步求解', placeholder: '输入 leakage_task 目录绝对路径，例如 F:/challenge/leakage_task/leakage_task', label: 'leakage 目录路径' },
   'evm-calldata': { domain: 'web3', title: 'Calldata 快速拆解', placeholder: '0xa9059cbb000000000000000000000000...', label: 'Calldata' },
   'evm-disasm': { domain: 'web3', title: 'EVM Bytecode 反汇编', placeholder: '0x6080604052...', label: 'EVM Bytecode' },
   'codec': { domain: 'common', title: '编码 / Hash / XOR', placeholder: '输入待处理的数据', label: '输入' },
@@ -134,10 +140,19 @@ function renderResult(tool, result) {
   if (tool === 'nmea-analyze') return `<div class="result-stats"><div><b>${result.validPoints}</b><span>有效点</span></div><div><b>${result.distanceM}</b><span>累计距离 m</span></div></div>${result.bounds ? `<pre class="mini-pre">${esc(JSON.stringify(result.bounds,null,2))}</pre>` : ''}${table(['来源','时间','纬度','经度','速度(kn)','高度(m)'], result.points.slice(0,100).map(p=>[p.source,p.time||'—',p.lat.toFixed(6),p.lon.toFixed(6),p.speedKnots ?? '—',p.altitudeM ?? '—']))}`;
   if (tool === 'mavlink-hex') return `<div class="result-stats"><div><b>${result.parsedFrames}</b><span>MAVLink 帧</span></div></div><pre class="mini-pre">${esc(JSON.stringify(result.messageCounts,null,2))}</pre>${table(['版本','SEQ','SYS','COMP','MSGID','消息','Payload'], result.frames.slice(0,150).map(f=>[f.version,f.seq,f.sysid,f.compid,f.msgid,f.name,f.payloadLength]))}<p class="notice">${esc(result.note)}</p>`;
   if (tool === 'ai-source-scan') return `<div class="surface-row">${Object.entries(result.surfaces).map(([k,v])=>`<span class="surface ${v?'on':''}">${k}</span>`).join('')}</div>${result.findings.length ? result.findings.map(f=>`<div class="finding ${f.severity}"><span>${f.severity}</span><div><b>${esc(f.title)}</b><small>${esc(f.id)} · ${f.count} 处</small><pre>${esc(f.evidence.join('\n'))}</pre></div></div>`).join('') : '<div class="result-empty">未命中当前规则。</div>'}<div class="hint-list">${result.hints.map(x=>`<p>${esc(x)}</p>`).join('')}</div>`;
+  if (tool === 'ai-he-training-audit') return `<div class="result-stats"><div><b>${esc(result.status)}</b><span>状态</span></div><div><b>${result.roles?.['encrypted-input']?.length || 0}</b><span>密态输入</span></div><div><b>${result.roles?.['he-context']?.length || 0}</b><span>HE 上下文</span></div><div><b>${result.roles?.['quantized-outputs']?.length || 0}</b><span>量化输出</span></div></div>${(result.findings||[]).map(f=>`<div class="finding ${esc(f.severity)}"><span>${esc(f.severity)}</span><div><b>${esc(f.title)}</b><pre>${esc(JSON.stringify(f.evidence,null,2))}</pre></div></div>`).join('')}<div class="hint-list"><b>解题链</b>${(result.chain||[]).map((x,i)=>`<p>${i+1}. ${esc(x)}</p>`).join('')}<b>下一步</b>${(result.nextActions||[]).map(x=>`<p>${esc(x)}</p>`).join('')}</div>`;
+  if (tool === 'ai-he-training-solve' || tool === 'ai-leakage-solve') return renderSolveResult(result);
   if (tool === 'evm-calldata') return `<div class="kv-grid"><div><span>selector</span><strong>${esc(result.selector)}</strong></div><div><span>known signature</span><strong>${esc(result.knownSignature || '未知')}</strong></div></div>${table(['#','uint256','address candidate','hex'], result.words.map(w=>[w.index,w.uint256,w.addressCandidate,w.hex]))}`;
   if (tool === 'evm-disasm') return `<div class="result-stats"><div><b>${result.byteLength}</b><span>字节</span></div><div><b>${result.riskyOpcodes.length}</b><span>风险 opcode</span></div></div>${result.riskyOpcodes.length ? `<div class="risk-strip">${result.riskyOpcodes.map(x=>`<span>${x.pc}: ${x.name}</span>`).join('')}</div>` : ''}${table(['PC','Opcode','指令','Immediate'], result.instructions.slice(0,1000).map(i=>[i.pc,i.opcode,i.name,i.immediate||'']))}`;
   if (tool === 'knowledge-search') return result.results.length ? `<div class="knowledge-list">${result.results.map(x=>`<article><span>${esc(x.domain)}</span><b>${esc(x.term)}</b><p>${esc(x.text)}</p></article>`).join('')}</div>` : '<div class="result-empty">没有命中，换个关键词。</div>';
   return `<pre class="output-pre">${esc(JSON.stringify(result,null,2))}</pre>`;
+}
+
+function renderSolveResult(result) {
+  const steps = result.steps || result.stages || [];
+  const done = steps.filter((step) => step.state === 'done' || step.state === 'candidate').length;
+  const recovered = result.recovered || result.result;
+  return `<div class="result-stats"><div><b>${esc(result.status || '—')}</b><span>总状态</span></div><div><b>${done}/${steps.length}</b><span>完成步骤</span></div><div><b>${result.flag ? '已解出' : '未生成 flag'}</b><span>最终答案</span></div></div>${recovered ? `<div class="solve-answer"><b>当前解出内容</b><pre>${esc(JSON.stringify(recovered, null, 2))}</pre></div>` : ''}<div class="solve-steps"><b class="solve-heading">解题过程（按执行顺序）</b>${steps.map((step, index) => `<article class="solve-step ${esc(step.state)}"><div class="solve-step-head"><span>${index + 1}</span><b>${esc(step.title)}</b><em>${esc(step.state)}</em></div><p>${esc(step.detail || '')}</p>${step.evidence && Object.keys(step.evidence).length ? `<pre>${esc(JSON.stringify(step.evidence, null, 2))}</pre>` : ''}${step.output != null ? `<div class="solve-output"><small>本步产出</small><pre>${esc(typeof step.output === 'string' ? step.output : JSON.stringify(step.output, null, 2))}</pre></div>` : ''}</article>`).join('')}</div>${result.gap ? `<div class="solve-gap"><b>当前阻断点：${esc(result.gap.code || 'GAP')}</b><p>${esc(result.gap.message || result.gap.detail || '')}</p></div>` : ''}${(result.nextActions || []).length ? `<div class="hint-list"><b>下一步</b>${result.nextActions.map((x) => `<p>${esc(x)}</p>`).join('')}</div>` : ''}`;
 }
 
 function table(headers, rows) {

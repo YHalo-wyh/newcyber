@@ -1,4 +1,5 @@
 main,.content{min-height:0}
+.sca-evidence-grid code{white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word;overflow:visible;text-overflow:clip}
 .tool-home-head-minimal{align-items:center;justify-content:flex-start;margin:0 0 16px;padding:2px 0 13px}
 .tool-home-head-minimal h1{margin:0;font-size:28px;letter-spacing:-.5px}
 

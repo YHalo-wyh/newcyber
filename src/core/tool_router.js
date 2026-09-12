@@ -53,6 +53,8 @@ const { analyzeUavChallengeEvidence, getScenarioCatalog, parseWifiEvidence, anal
 const { buildLowaltAssessment, getLowaltAssessmentCatalog } = require('./lowalt_assessment_mode');
 const { analyzeSwarmCoordination } = require('./lowalt_swarm');
 const { analyzeCrossBoundaryFlow } = require('./lowalt_cross_boundary');
+const { auditHeTrainingDirectory, solveHeTrainingDirectory } = require('./ai_he_training');
+const { solveLeakageDirectory } = require('./ai_leakage');
 
 function npyBuffer(value) {
   if (!value || typeof value.base64 !== 'string') throw new Error('NPY 输入需要 base64');
@@ -131,6 +133,21 @@ function runTool(tool, payload = {}) {
   if (tool === 'ai-real-ctf-regression') return runAiRealCtfRegression();
   if (tool === 'ai-real-ctf-corpus') return { schema:'newcyber.ai-real-ctf-corpus.v1', cases:getAiRealCtfCorpus() };
   if (tool === 'ai-model-arithmetic-auto') return analyzeModelArithmeticBundle(payload.input || payload, payload.options || {});
+  if (tool === 'ai-he-training-audit') {
+    const input = payload.input;
+    const root = typeof input === 'string' ? input : (input?.rootPath || input?.root || payload.rootPath || payload.root);
+    return auditHeTrainingDirectory(root);
+  }
+  if (tool === 'ai-he-training-solve') {
+    const input = payload.input;
+    const root = typeof input === 'string' ? input : (input?.rootPath || input?.root || payload.rootPath || payload.root);
+    return solveHeTrainingDirectory(root);
+  }
+  if (tool === 'ai-leakage-solve') {
+    const input = payload.input;
+    const root = typeof input === 'string' ? input : (input?.rootPath || input?.root || payload.rootPath || payload.root);
+    return solveLeakageDirectory(root);
+  }
   if (tool === 'ai-image-raster-forensics') return analyzeRasterImage(payload.input || payload);
   if (tool === 'ai-image-raster-compare') return compareRasterImages(payload.input || payload);
   if (tool === 'ai-npy-sample-forensics') { const input = payload.input || payload; return analyzeNpySample(npyBuffer(input), input.fileName || 'sample.npy'); }

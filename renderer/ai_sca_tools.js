@@ -51,7 +51,7 @@
   }
 
   function evidenceRows(label, rows) {
-    return `<section><div><b>${label}</b><span>${rows?.length || 0}</span></div>${rows?.length ? rows.slice(0,6).map((item) => `<code>L${item.line} ${esc(item.text)}</code>`).join('') : '<small>none</small>'}</section>`;
+    return `<section><div><b>${label}</b><span>${rows?.length || 0}</span></div>${rows?.length ? rows.map((item) => `<code title="L${item.line} ${esc(item.text)}">L${item.line} ${esc(item.text)}</code>`).join('') : '<small>none</small>'}</section>`;
   }
 
   function sourcePanel() {
