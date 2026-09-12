@@ -26,6 +26,12 @@ const { getTrainingCurriculum, runTrainingCurriculumRegression } = require('./ai
 const { buildTrainingWorkOrders } = require('./ai_training_work_orders');
 const { checkCandidate, buildIntakeTemplate } = require('./ai_training_evidence_intake');
 const { buildRegressionSkeleton } = require('./ai_training_regression_skeleton');
+const { materializeRegression } = require('./ai_training_regression_materializer');
+const { planIntegration } = require('./ai_training_integration_gate');
+const { buildIntegrationWritePlan, verifyIntegratedResult } = require('./ai_training_integration_writer');
+const { buildTransactionManifest } = require('./ai_training_transactional_integration');
+const { buildPromotionManifest, validatePromotionAgainstRepository, buildPromotionPrRequest, authorizePromotionMerge } = require('./ai_training_promotion_gate');
+const { inspectTrainingArtifact } = require('./ai_training_pipeline_status');
 const { matchTrainingFamilies } = require('./ai_training_family_matcher');
 const { runIchunqiuAiTrainingRegression, getIchunqiuAiTrainingCorpus, evaluateFalsePremiseReplay } = require('./ai_ichunqiu_training');
 const { analyzeRasterImage, compareRasterImages, analyzeNpySample, compareNpySamples } = require('./ai_sample_forensics');
@@ -86,6 +92,16 @@ function runTool(tool, payload = {}) {
   if (tool === 'ai-training-evidence-intake') { const curriculum=getTrainingCurriculum(); return checkCandidate(payload.input || payload,{cases:curriculum.cases,workOrders:curriculum.workOrders}); }
   if (tool === 'ai-training-evidence-template') { const curriculum=getTrainingCurriculum(); const options=payload.options || payload.input || payload || {}; const order=(curriculum.workOrders.orders||[]).find((row)=>row.id===options.workOrderId || row.direction===options.direction) || curriculum.workOrders.orders?.[0] || null; return buildIntakeTemplate(order); }
   if (tool === 'ai-training-regression-skeleton') { const curriculum=getTrainingCurriculum(); const input=payload.input || payload; const intake=input?.schema==='newcyber.ai-training-evidence-intake.v1'?input:checkCandidate(input,{cases:curriculum.cases,workOrders:curriculum.workOrders}); return buildRegressionSkeleton(intake); }
+  if (tool === 'ai-training-regression-materialize') return materializeRegression(payload.input || payload,(evaluatorTool,evaluatorPayload)=>runTool(evaluatorTool,evaluatorPayload));
+  if (tool === 'ai-training-integration-gate') { const curriculum=getTrainingCurriculum(); return planIntegration({materialized:payload.input || payload,cases:curriculum.cases}); }
+  if (tool === 'ai-training-integration-writer') return buildIntegrationWritePlan(payload.input || payload);
+  if (tool === 'ai-training-integration-verify') return verifyIntegratedResult(payload.input || payload);
+  if (tool === 'ai-training-transaction-manifest') return buildTransactionManifest(payload.input || payload);
+  if (tool === 'ai-training-promotion-manifest') return buildPromotionManifest(payload.input || payload);
+  if (tool === 'ai-training-promotion-validate') return validatePromotionAgainstRepository(payload.input || payload);
+  if (tool === 'ai-training-promotion-pr-request') return buildPromotionPrRequest(payload.input || payload);
+  if (tool === 'ai-training-promotion-merge-authorize') return authorizePromotionMerge(payload.input || payload);
+  if (tool === 'ai-training-pipeline-status') return inspectTrainingArtifact(payload.input || payload);
   if (tool === 'ai-training-full-regression') return runTrainingCurriculumRegression(payload.options || payload.input || {});
   if (tool === 'ai-training-family-match') return matchTrainingFamilies(payload.input || payload, payload.options || {});
   if (tool === 'ai-stage1-training-regression') return runAiStage1TrainingRegression(payload.options || payload.input || {});
