@@ -1,15 +1,19 @@
 {
   "name": "newcyber",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "面向 CTF 与 AI 安全赛题的本地分析工作台",
   "main": "electron_main.js",
   "scripts": {
     "start": "electron .",
     "test": "node --test tests/*.test.js",
+    "dist:win": "electron-builder --win nsis portable --x64",
+    "dist:dir": "electron-builder --dir --win --x64",
     "runtime:prepare": "node scripts/prepare_onnx_runtime.js",
     "runtime:verify": "node scripts/prepare_onnx_runtime.js --verify"
   },
   "devDependencies": {
-    "electron": "^31.0.0"
+    "electron": "44.3.0",
+    "electron-builder": "26.15.3",
+    "playwright": "1.63.0"
   }
 }

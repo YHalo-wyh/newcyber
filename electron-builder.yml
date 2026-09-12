@@ -1,0 +1,35 @@
+appId: cn.yhalo.newcyber
+productName: NewCyber
+copyright: Copyright © 2026 YHalo-wyh
+directories:
+  output: dist
+  buildResources: build
+files:
+  - "**/*"
+  - "!tests{,/**}"
+  - "!docs{,/**}"
+  - "!scripts{,/**}"
+  - "!ida{,/**}"
+  - "!dist{,/**}"
+  - "!.newcyber-runtime{,/**}"
+asar: true
+extraResources:
+  - from: .newcyber-runtime/win32-x64
+    to: runtime/win32-x64
+    filter:
+      - "**/*"
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+    - target: portable
+      arch: [x64]
+  artifactName: "NewCyber-${version}-${arch}.${ext}"
+  requestedExecutionLevel: asInvoker
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  shortcutName: NewCyber
+portable:
+  artifactName: "NewCyber-${version}-portable.${ext}"
