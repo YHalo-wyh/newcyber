@@ -1,6 +1,6 @@
 const { auditAiChallengeSource } = require('./ai_source_batch9');
 const { analyzeTabularDataset } = require('./ai_tabular');
-const { analyzeBackdoorBehavior } = require('./ai_poison_backdoor_validation');
+const { analyzePoisoningImpact, analyzeBackdoorBehavior } = require('./ai_poison_backdoor_validation');
 const { auditPromptInjectionSource } = require('./ai_prompt_injection');
 const { analyzeNpySample, analyzeRasterImage } = require('./ai_sample_forensics');
 
@@ -26,6 +26,13 @@ function backdoorFixture() {
     rows.push({true_label:truth,clean_pred:truth,triggered_pred:'1',control_pred:truth,target_label:'1'});
   }
   return JSON.stringify({targetLabel:'1',rows});
+}
+
+function easyPoisonFixture() {
+  const rows=[];
+  for(let i=0;i<10;i+=1) rows.push({is_poison:0,original_label:'0',label:'0',text:`normal-${i}`});
+  for(let i=0;i<5;i+=1) rows.push({is_poison:1,original_label:'0',label:'1',target_label:'1',trigger_id:'reverse-trigger',text:`trigger-${i}`});
+  return {rows};
 }
 
 function makeNpyFloat32(shape, values) {
@@ -75,6 +82,24 @@ def check_response(message):
         return "flag-two"
 `;
 
+const SU_EASYLLM_SOURCE=`
+import hashlib
+SYSTEM_PROMPT = "You are a password generator"
+TEMPERATURE = 0.28
+
+def call_glm_once():
+    r = requests.post("https://api.z.ai/api/paas/v4/chat/completions", json={"temperature": TEMPERATURE})
+    return r.json()["choices"][0]["message"]["content"].strip()
+
+def derive_key_from_llm(pw):
+    return hashlib.sha256(pw.encode("utf-8")).digest()[:16]
+
+LLM_PASSWORD = call_glm_once()
+KEY = derive_key_from_llm(LLM_PASSWORD, key_len=16)
+CIPHERTEXT = aes_cbc_encrypt(KEY, IV, FLAG.encode("utf-8"))
+return JSONResponse({"system_prompt": SYSTEM_PROMPT, "temperature": TEMPERATURE})
+`;
+
 const PROMPT_AUDIT_SOURCE=`
 user_input = request.json['query']
 docs = retriever.similarity_search(user_input)
@@ -109,6 +134,23 @@ const CASES=Object.freeze([
     }
   },
   {
+    id:'suctf-2026-su-easyllm',
+    event:'SUCTF 2026',
+    challenge:'SU_easyLLM',
+    aiLabel:'AI / LLM',
+    kind:'LLM output → SHA256 → AES key chain',
+    source:'https://github.com/team-su/SUCTF-2026/tree/3529e65bed41dfc3f836bdeae95307c92d710692/AI/SU_easyLLM',
+    provenance:'official-source-derived',
+    coverage:'partial',
+    limitation:'能静态恢复 LLM 输出进入 SHA256/AES 的密钥派生链和公开 replay 参数；当前不会联网调用题目模型，也不会把“可重放”误报成已恢复真实 LLM password。',
+    run(){
+      const result=auditAiChallengeSource(SU_EASYLLM_SOURCE);
+      const ids=(result.findings||[]).map((x)=>x.id);
+      const recognized=ids.includes('llm-derived-crypto-key')&&ids.includes('llm-replay-parameters-exposed');
+      return {recognized,tool:'ai-source-scan',evidence:`llm→sha256→aes=${recognized} · temperatures=${result.llmCrypto?.temperatures?.join(',')||'n/a'}`,findingIds:ids};
+    }
+  },
+  {
     id:'ccb-ciscn-2025-fraud-backdoor',
     event:'2025 CISCN / 长城杯网数智安全大赛初赛',
     challenge:'欺诈猎手的后门陷阱',
@@ -122,6 +164,34 @@ const CASES=Object.freeze([
       const result=analyzeBackdoorBehavior(backdoorFixture());
       const recognized=Boolean(result.findings?.some((x)=>x.id==='backdoor-target-asr-candidate'));
       return {recognized,tool:'ai-backdoor-behavior',evidence:`target=${result.targetLabel||'1'} · ASR=${result.targetASR??'n/a'}`,findingIds:(result.findings||[]).map((x)=>x.id)};
+    }
+  },
+  {
+    id:'ccb-ciscn-2025-easy-poison',
+    event:'2025 CISCN / 长城杯网数智安全大赛初赛',
+    challenge:'easy_poison',
+    aiLabel:'AI安全 / 数据投毒',
+    kind:'Text poisoning / trigger-target recovery',
+    source:'https://blog.qingchenyou.asia/CTF-WriteUP/ccb_wp/index.html',
+    provenance:'public-writeup-derived',
+    coverage:'partial',
+    limitation:'能从显式污染子集恢复 top trigger 与目标标签候选；尚未在原题训练/推理 oracle 上重训或复验，因此只到 Candidate，不升级为 Verified。',
+    run(){
+      const result=analyzePoisoningImpact(easyPoisonFixture());
+      const ids=(result.findings||[]).map((x)=>x.id);
+      const recognized=ids.includes('poisoning-label-flip-candidate')&&ids.includes('poisoning-target-concentration');
+      const candidate=Boolean(recognized&&result.topTrigger?.trigger&&result.targetConcentration?.label);
+      const candidateObject=candidate?{kind:'trigger-target',trigger:result.topTrigger.trigger,targetLabel:result.targetConcentration.label,verifier:'ai-backdoor-behavior'}:null;
+      return {
+        recognized,
+        candidate,
+        verified:false,
+        candidateObject,
+        candidateEvidence:candidate?`trigger=${candidateObject.trigger} · target=${candidateObject.targetLabel}`:'',
+        tool:'ai-poisoning-impact',
+        evidence:`poison=${result.marked?.poison||0} · topTrigger=${result.topTrigger?.trigger||'n/a'} · target=${result.targetConcentration?.label||'n/a'}`,
+        findingIds:ids
+      };
     }
   },
   {
@@ -250,13 +320,33 @@ function runAiRealCtfRegression(){
   const results=CASES.map((item)=>{
     let execution;
     try{execution=item.run();}
-    catch(error){execution={recognized:false,error:error?.message||String(error),tool:null,evidence:'regression execution failed',findingIds:[]};}
-    const status=item.coverage==='gap'?'gap':execution.recognized?'pass':'miss';
-    return {...publicCase(item),status,...execution};
+    catch(error){execution={recognized:false,candidate:false,verified:false,error:error?.message||String(error),tool:null,evidence:'regression execution failed',findingIds:[]};}
+    const recognized=execution.recognized===true;
+    const candidate=recognized&&execution.candidate===true;
+    const verified=candidate&&execution.verified===true;
+    const maturityStage=verified?'verified':candidate?'candidate':recognized?'recognized':'unrecognized';
+    const status=item.coverage==='gap'?'gap':recognized?'pass':'miss';
+    return {...publicCase(item),status,...execution,recognized,candidate,verified,maturityStage};
   });
+  const total=results.length;
+  const recognitionPass=results.filter((x)=>x.recognized).length;
+  const candidatePass=results.filter((x)=>x.candidate).length;
+  const verifiedPass=results.filter((x)=>x.verified).length;
   const summary={
-    total:results.length,
-    recognitionPass:results.filter((x)=>x.status==='pass').length,
+    total,
+    recognitionPass,
+    candidatePass,
+    verifiedPass,
+    recognitionRate:total?recognitionPass/total:0,
+    candidateRate:total?candidatePass/total:0,
+    verifiedRate:total?verifiedPass/total:0,
+    maturityFunnel:{
+      recognized:recognitionPass,
+      candidate:candidatePass,
+      verified:verifiedPass,
+      recognizedToCandidate:recognitionPass?candidatePass/recognitionPass:0,
+      candidateToVerified:candidatePass?verifiedPass/candidatePass:0
+    },
     miss:results.filter((x)=>x.status==='miss').length,
     coverageFull:results.filter((x)=>x.coverage==='full').length,
     coveragePartial:results.filter((x)=>x.coverage==='partial').length,
@@ -265,10 +355,11 @@ function runAiRealCtfRegression(){
   };
   return {
     schema:'newcyber.ai-real-ctf-regression.v1',
+    maturitySchema:'newcyber.ai-real-ctf-maturity.v1',
     generatedAt:new Date().toISOString(),
     summary,
     results,
-    note:'真题回归使用公开题面/官方题解提炼的最小可复现输入，不把描述中未公开的附件细节当成事实。PASS 表示 NewCyber 能识别对应证据模式，不等于已自动解出原题；PARTIAL/GAP 用于暴露下一轮建设方向。'
+    note:'真题回归使用公开题面、官方源码或公开题解提炼的最小可复现输入，不把未公开附件细节当成事实。PASS/Recognized 只表示核心证据模式被识别；Candidate 必须实际产出可继续验证的具体对象；Verified 还要求 oracle 或确定性验证闭环。三层状态互不混淆。'
   };
 }
 
