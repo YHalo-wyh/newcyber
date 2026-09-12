@@ -1,5 +1,7 @@
 'use strict';
 
+const {resolveStaticIntegerAssignments}=require('./sca_static_integer_evidence');
+
 const MAX_WINDOWS=128;
 const MAX_WINDOW_LENGTH=4096;
 
@@ -49,8 +51,14 @@ function normalizeExplicitWindows(windows,rawCols,defaults={}){
 }
 
 function constantMap(sourceText){
-  const out={};
-  for(const match of String(sourceText||'').matchAll(/^\s*([A-Z][A-Z0-9_]{1,63})\s*=\s*(\d+)\s*(?:#.*)?$/gmi))out[match[1]]=Number(match[2]);
+  const resolved=resolveStaticIntegerAssignments(sourceText);const out={};
+  for(const item of resolved.assignments){
+    const name=String(item.name||'');
+    if(!/^[A-Z][A-Z0-9_]{1,63}$/.test(name))continue;
+    if(resolved.conflicts.has(name.toUpperCase()))continue;
+    const value=resolved.env[name];
+    if(Number.isSafeInteger(value)&&value>=0)out[name]=value;
+  }
   return out;
 }
 
@@ -211,4 +219,4 @@ function wrapStreamingFeatureSource(rowSource,recipe){
   };
 }
 
-module.exports={hannWeight,normalizeMetric,sourceRecipe,manifestRecipe,declaredFeatureMismatch,resolveGroupedFeatureRecipe,featureValue,transformRow,wrapStreamingFeatureSource};
+module.exports={hannWeight,normalizeMetric,constantMap,sourceRecipe,manifestRecipe,declaredFeatureMismatch,resolveGroupedFeatureRecipe,featureValue,transformRow,wrapStreamingFeatureSource};

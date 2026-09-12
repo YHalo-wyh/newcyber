@@ -116,6 +116,28 @@ function scanPythonSource(text) {
   return findings;
 }
 
+function parseRequirementLine(line) {
+  const value=String(line||'').trim();
+  if (!value || value.startsWith('#') || value.startsWith('-')) return null;
+  // Python/code syntax must never be reinterpreted as a package requirement.
+  if (/^(?:import|from|def|class|return|if|elif|else|for|while|with|try|except|finally|raise|assert|print)\b/.test(value)) return null;
+  if (/[(){}\\]/.test(value)) return null;
+  if (/\s=\s|(?<![<>=!~])=(?!=)/.test(value)) return null;
+  const match=value.match(/^([A-Za-z0-9][A-Za-z0-9_.-]*)(?:\[([A-Za-z0-9_.-]+(?:\s*,\s*[A-Za-z0-9_.-]+)*)\])?\s*(.*)$/);
+  if (!match) return null;
+  const name=match[1],tail=match[3].trim();
+  if (!tail) return {name,extras:match[2]||null,constraint:'',marker:null,hashLocked:false,exactPinned:false};
+  if (/^@\s*(?:git\+|https?:\/\/|file:)/i.test(tail)) return {name,extras:match[2]||null,constraint:tail,marker:null,hashLocked:false,exactPinned:false,direct:true};
+  const pieces=tail.split(/\s*;\s*/,2);const constraint=pieces[0].trim(),marker=pieces.length>1?pieces[1].trim():null;
+  const hashLocked=/--hash=sha256:[0-9a-f]{16,}/i.test(constraint)||/--hash=sha256:[0-9a-f]{16,}/i.test(marker||'');
+  const stripped=constraint.replace(/\s+--hash=sha256:[0-9a-f]+/ig,'').trim();
+  if (!stripped && hashLocked) return {name,extras:match[2]||null,constraint:'',marker,hashLocked,exactPinned:false};
+  const spec=/^(?:===|==|~=|!=|<=|>=|<|>)\s*[A-Za-z0-9*+_.!-]+(?:\s*,\s*(?:===|==|~=|!=|<=|>=|<|>)\s*[A-Za-z0-9*+_.!-]+)*$/;
+  if (!spec.test(stripped)) return null;
+  const exactPinned=/^==\s*[^,;\s]+$/.test(stripped);
+  return {name,extras:match[2]||null,constraint:stripped,marker,hashLocked,exactPinned};
+}
+
 function scanPackaging(text) {
   const findings=[];
   const lines=String(text||'').split(/\r?\n/);
@@ -127,20 +149,19 @@ function scanPackaging(text) {
       meaning:'requirements 中存在自定义 index/extra-index；多源解析时应检查同名包优先级和依赖混淆。',
       fix:{target:`line ${index+1}`,action:'使用受控单一源或显式锁定直接 URL/hash；检查内部包名是否可能被公开源抢占。',regression:'构造同名更高版本包时，解析结果不得切换到非预期源。'}
     });
-    if (/^(?:git\+|https?:\/\/|file:|\.\.?\/|[A-Za-z]:\\)/i.test(line) || /\s@\s(?:git\+|https?:\/\/|file:)/i.test(line)) findings.push({
+    const direct=/^(?:git\+|https?:\/\/|file:|\.\.?\/|[A-Za-z]:\\)/i.test(line) || /\s@\s(?:git\+|https?:\/\/|file:)/i.test(line);
+    if (direct) findings.push({
       id:'direct-dependency-reference',severity:'info',title:'直接 URL/VCS/本地依赖',line:index+1,evidence:line,
       meaning:'依赖不是普通版本解析；应固定 commit/digest 并确认本地路径是否可被赛题输入覆盖。',
       fix:{target:`line ${index+1}`,action:'VCS 固定 commit SHA，文件依赖固定 hash/只读路径。',regression:'改变分支 HEAD 或工作目录同名文件不能改变最终依赖内容。'}
     });
-    const req=line.match(/^([A-Za-z0-9_.-]+)(?:\[[^\]]+\])?\s*(.*)$/);
-    if (req && !/^[-.]/.test(line)) {
-      const constraint=req[2].trim();
-      if (!constraint || (!/^==[^,;\s]+(?:\s*;.*)?$/.test(constraint) && !/--hash=sha256:/i.test(line))) findings.push({
-        id:'dependency-not-locked',severity:'info',title:'依赖版本未完全锁定',line:index+1,evidence:line,
-        meaning:'版本范围或未指定版本会让解析结果随时间变化；这本身不是漏洞，但会扩大供应链不确定性。',
-        fix:{target:`line ${index+1}`,action:'比赛复现/关键环境固定已验证版本，必要时附 hash lock。',regression:'重新安装时依赖版本与 hash 应保持一致。'}
-      });
-    }
+    const req=parseRequirementLine(line);
+    if (!req || req.direct) continue;
+    if (!req.constraint || (!req.exactPinned && !req.hashLocked)) findings.push({
+      id:'dependency-not-locked',severity:'info',title:'依赖版本未完全锁定',line:index+1,evidence:line,
+      meaning:'版本范围或未指定版本会让解析结果随时间变化；这本身不是漏洞，但会扩大供应链不确定性。',
+      fix:{target:`line ${index+1}`,action:'比赛复现/关键环境固定已验证版本，必要时附 hash lock。',regression:'重新安装时依赖版本与 hash 应保持一致。'}
+    });
   }
   return findings;
 }
@@ -167,4 +188,4 @@ function auditAiSupplyChain(input) {
   };
 }
 
-module.exports={ scanPythonSource, scanPackaging, auditAiSupplyChain };
+module.exports={ scanPythonSource, parseRequirementLine, scanPackaging, auditAiSupplyChain };
