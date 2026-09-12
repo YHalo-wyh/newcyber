@@ -11,7 +11,7 @@ const {getAiVillageTrainingCorpus,runAiVillageTrainingRegression}=require('./ai_
 const {getPromptCtfTrainingCorpus,runPromptCtfTrainingRegression}=require('./ai_prompt_ctf_training');
 const {getDomesticDetectionTrainingCorpus,runDomesticDetectionTrainingRegression}=require('./ai_domestic_detection_training');
 const {getDomesticBackdoorTrainingCorpus,runDomesticBackdoorTrainingRegression}=require('./ai_domestic_backdoor_training');
-const {getTrainingCorpus:getStarpwnStarryHacksTrainingCorpus}=require('./ai_training_starpwn_ctf_2026_starry_hacks_dependency_confusion_unpinned_version');
+const {getTrainingCorpus:getStarpwnStarryHacksTrainingCorpus,runStarpwnStarryHacksTrainingRegression}=require('./ai_training_starpwn_ctf_2026_starry_hacks_dependency_confusion_unpinned_version');
 const {analyzeTrainingQuality}=require('./ai_training_quality');
 const {analyzeCrossEventHoldout}=require('./ai_training_holdout');
 const {buildTrainingSchedule}=require('./ai_training_scheduler');
@@ -128,7 +128,8 @@ const SUITES=Object.freeze([
   {id:'aivillage-defcon-30-31',run:(options)=>runAiVillageTrainingRegression(options)},
   {id:'prompt-agent-ctf',run:(options)=>runPromptCtfTrainingRegression(options)},
   {id:'domestic-detection-ranges-2025',run:(options)=>runDomesticDetectionTrainingRegression(options)},
-  {id:'domestic-backdoor-poisoning-2025-2026',run:()=>runDomesticBackdoorTrainingRegression()}
+  {id:'domestic-backdoor-poisoning-2025-2026',run:()=>runDomesticBackdoorTrainingRegression()},
+  {id:'starpwn-2026-starry-hacks',run:()=>runStarpwnStarryHacksTrainingRegression()}
 ]);
 function summarizeSuite(result){
   const summary=result&&typeof result.summary==='object'?result.summary:null;
