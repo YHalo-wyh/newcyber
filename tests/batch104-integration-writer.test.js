@@ -34,7 +34,7 @@ test('writer creates deterministic artifacts plus exact registry patch',()=>{
   const registryWrite=plan.writes.find((row)=>row.path==='src/core/ai_training_curriculum.js');
   assert.ok(registryWrite.content.includes(plan.descriptor.importSymbol));
   assert.ok(registryWrite.content.includes(plan.descriptor.registryId));
-  assert.ok(registryWrite.content.includes("require('./ai_training_event_d_c4')"));
+  assert.match(registryWrite.content,/require\(['"]\.\/ai_training_event_d_c4['"]\)/);
 });
 
 test('writer rejects existing artifact path collisions',()=>{
