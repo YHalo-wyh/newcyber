@@ -39,10 +39,10 @@
   knowledgeView = function structuredKnowledgeView() {
     const base = previousKnowledgeView();
     return base
-      .replace('离线速查', '赛题知识库')
-      .replace('为断网赛场准备。先放最常用的 UDS、MAVLink、AI 安全和 EVM 条目，后续持续扩充。', '按能力族组织车联网、低空、AI、Web3 与通用解码知识；条目包含触发证据、成立前提、误判边界和下一步验证。')
-      .replace('搜索离线知识库', '搜索赛题 Playbook')
-      .replace('SecurityAccess / MAVLink 76 / DELEGATECALL / Prompt Injection', 'SecurityAccess / MAVLink FTP / ECDSA / oracle / model serialization');
+      .replace('离线速查', 'AI 安全知识库')
+      .replace('为断网赛场准备。收录 AI 安全速查条目：提示词注入、模型加载反序列化等，后续持续扩充。', '按 AI 安全能力族组织速查知识；条目包含触发证据、成立前提、误判边界和下一步验证。')
+      .replace('搜索离线知识库', '搜索 AI 安全 Playbook')
+      .replace('Prompt Injection / torch.load', 'Prompt Injection / torch.load / RAG 工具调用');
   };
 
   shell = function professionalShell(content) {

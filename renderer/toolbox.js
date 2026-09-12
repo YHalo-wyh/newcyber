@@ -58,7 +58,7 @@ const TOOL_META = {
   'evm-calldata': { domain: 'web3', title: 'Calldata 快速拆解', placeholder: '0xa9059cbb000000000000000000000000...', label: 'Calldata' },
   'evm-disasm': { domain: 'web3', title: 'EVM Bytecode 反汇编', placeholder: '0x6080604052...', label: 'EVM Bytecode' },
   'codec': { domain: 'common', title: '编码 / Hash / XOR', placeholder: '输入待处理的数据', label: '输入' },
-  'knowledge-search': { domain: 'knowledge', title: '离线速查', placeholder: '例如：SecurityAccess / MAVLink 76 / 0xa9059cbb', label: '关键字' }
+  'knowledge-search': { domain: 'knowledge', title: '离线速查', placeholder: '例如：Prompt Injection / torch.load', label: '关键字' }
 };
 
 const CODEC_OPS = [
@@ -113,7 +113,7 @@ function shell(content) {
 function homeView() {
   return `<div class="hero"><span class="kicker">BAY AREA CUP · OFFLINE TOOLBOX</span><h1>四赛道，<em>一台机器解决重复劳动。</em></h1><p>面向线下断网决赛准备。车联网、低空经济、人工智能、区块链彼此独立；每个工具只做确定、可复核的自动化，把时间留给真正的漏洞理解。</p></div>
     <div class="domain-grid">${Object.entries(DOMAINS).map(([id, item]) => `<button class="domain-card" data-view="${id}"><span class="domain-icon">${item.icon}</span><span class="domain-kicker">${item.kicker}</span><strong>${item.title}</strong><p>${item.desc}</p><em>进入工具箱 →</em></button>`).join('')}</div>
-    <div class="quick-grid"><button class="quick-card" data-tool="codec"><b>编码 / Hash / XOR</b><span>Hex、Base64、URL、SHA-256、XOR 一页完成</span></button><button class="quick-card" data-view="workspace"><b>赛题目录分析</b><span>文件类型、字符串、Flag、模型/WAV/PCAP 基础检查</span></button><button class="quick-card" data-tool="knowledge-search"><b>离线速查</b><span>UDS、MAVLink、EVM、AI 常用知识无需联网</span></button></div>`;
+    <div class="quick-grid"><button class="quick-card" data-tool="codec"><b>编码 / Hash / XOR</b><span>Hex、Base64、URL、SHA-256、XOR 一页完成</span></button><button class="quick-card" data-view="workspace"><b>赛题目录分析</b><span>文件类型、字符串、Flag、模型/WAV/PCAP 基础检查</span></button><button class="quick-card" data-tool="knowledge-search"><b>离线速查</b><span>AI 安全速查条目离线可用</span></button></div>`;
 }
 
 function domainView(id) {
@@ -128,7 +128,7 @@ function commonView() {
 function toolView(tool) {
   const meta = TOOL_META[tool];
   const codecOptions = tool === 'codec' ? `<div class="field"><label>操作</label><select id="tool-operation">${CODEC_OPS.map(([id, label]) => `<option value="${id}">${label}</option>`).join('')}</select></div><div class="field hidden" id="xor-key-field"><label>XOR Key（Hex）</label><input id="tool-key" placeholder="例如 1337" /></div>` : '';
-  const domainFilter = tool === 'knowledge-search' ? `<div class="field"><label>赛道过滤</label><select id="knowledge-domain"><option value="">全部</option><option>车联网</option><option>低空经济</option><option>人工智能</option><option>区块链</option></select></div>` : '';
+  const domainFilter = tool === 'knowledge-search' ? `<div class="field"><label>赛道过滤</label><select id="knowledge-domain"><option value="">全部</option><option>人工智能</option></select></div>` : '';
   return `<div class="page-head tool-head"><div><span class="kicker">OFFLINE TOOL</span><h1>${meta.title}</h1></div><button class="button ghost" data-view="${meta.domain}">返回</button></div>
     <div class="workbench"><article class="panel input-panel">${codecOptions}${domainFilter}<div class="field grow"><label>${meta.label}</label><textarea id="tool-input" spellcheck="false" placeholder="${esc(meta.placeholder)}"></textarea></div><div class="run-row"><span>只在本机处理输入</span><button class="button primary" data-action="run-tool">运行分析</button></div></article><article class="panel result-panel"><div class="result-title"><b>结果</b><button class="text-button" data-action="copy-result">复制</button></div><div id="tool-result">${state.toolError ? `<div class="error-box">${esc(state.toolError)}</div>` : state.toolResult ? renderResult(tool, state.toolResult) : '<div class="result-empty">等待输入。</div>'}</div></article></div>`;
 }
@@ -160,7 +160,7 @@ function table(headers, rows) {
 }
 
 function knowledgeView() {
-  return `<div class="page-head"><span class="kicker">OFFLINE REFERENCE</span><h1>离线速查</h1><p>为断网赛场准备。先放最常用的 UDS、MAVLink、AI 安全和 EVM 条目，后续持续扩充。</p></div><button class="search-launch" data-tool="knowledge-search"><span>⌕</span><div><b>搜索离线知识库</b><small>SecurityAccess / MAVLink 76 / DELEGATECALL / Prompt Injection</small></div><em>打开 →</em></button>`;
+  return `<div class="page-head"><span class="kicker">OFFLINE REFERENCE</span><h1>离线速查</h1><p>为断网赛场准备。收录 AI 安全速查条目：提示词注入、模型加载反序列化等，后续持续扩充。</p></div><button class="search-launch" data-tool="knowledge-search"><span>⌕</span><div><b>搜索离线知识库</b><small>Prompt Injection / torch.load</small></div><em>打开 →</em></button>`;
 }
 
 function workspaceView() {

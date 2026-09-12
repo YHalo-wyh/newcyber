@@ -154,10 +154,17 @@
     else if(state.workspace&&isFileSession())primary='<button class="button primary" data-session-add-files>补充材料</button><button class="button ghost" data-session-open-file>新题目</button>';
     else if(state.workspace)primary='<button class="button primary" data-action="rescan-workspace">重新分析</button><button class="button ghost" data-session-open-file>新题目</button>';
     else primary='<button class="button primary" data-session-open-file>选择题目</button>';
+    const aiNav=(()=>{
+      const seen=new Set();const items=[];
+      const push=(id,label)=>{if(!id||seen.has(id))return;seen.add(id);const title=String(label||id);items.push(`<button class="cs84-ai-item${state.tool===id?' active':''}" data-tool="${esc(id)}" title="${esc(title)}">${esc(title)}</button>`);};
+      for(const row of ((typeof DOMAINS!=='undefined'&&DOMAINS.ai&&DOMAINS.ai.tools)||[]))push(row[0],row[1]);
+      for(const [id,meta] of Object.entries(typeof TOOL_META!=='undefined'?TOOL_META:{})){if(meta&&meta.domain==='ai')push(id,meta.title);}
+      return items.join('');
+    })();
     return `<div class="shell challenge-shell cs84-shell">
       <aside class="sidebar cs84-sidebar"><button class="brand" data-view="home"><span class="brand-mark">N</span><span><strong>NewCyber</strong><small>DROP → RESULT</small></span></button>
         <button class="cs84-solve-nav active" data-session-return><span>▶</span><div><b>自动解题</b><small>${state.workspace?esc(challengeName()):'丢进去就开始'}</small></div></button>
-        <details class="cs84-advanced"><summary>高级工具</summary><div><button data-view="ai">AI 安全</button><button data-view="vehicle">车联网</button><button data-view="lowalt">低空 / UAV</button><button data-view="web3">Web3</button><button data-view="common">通用工具</button><button data-view="knowledge">离线速查</button></div></details>
+        <nav class="cs84-advanced cs84-ai-nav"><b class="cs84-ai-heading">AI 安全工具</b>${aiNav}<button data-view="knowledge">离线速查</button></nav>
       </aside>
       <main><header class="topbar cs84-topbar"><div><span>NewCyber</span><b>/</b><strong>${esc(title)}</strong></div><div class="top-actions">${primary}</div></header><section class="content cs84-content">${content}</section></main>
     </div><div id="toast"></div>`;

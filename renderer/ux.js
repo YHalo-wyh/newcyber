@@ -192,12 +192,8 @@
       { type: 'view', id: 'home', icon: 'H', title: '首页', hint: '比赛模式入口', group: '页面' },
       { type: 'workspace', id: 'workspace-open', icon: 'F', title: '选择赛题目录', hint: '离线扫描整个赛题目录', group: '动作' },
       { type: 'view', id: 'workspace', icon: 'W', title: '赛题分析结果', hint: state.workspace?.workspaceName || '打开 Workspace 页面', group: '页面' },
-      { type: 'view', id: 'vehicle', icon: 'V', title: '车联网安全', hint: 'CAN / UDS / ISO-TP / MQTT', group: '赛道' },
-      { type: 'view', id: 'lowalt', icon: 'U', title: '低空经济安全', hint: 'MAVLink / GNSS / 固件 / 飞行日志', group: '赛道' },
       { type: 'view', id: 'ai', icon: 'A', title: '人工智能安全', hint: 'Pipeline / 模型 / 对抗 / 隐私 / 供应链', group: '赛道' },
-      { type: 'view', id: 'web3', icon: 'B', title: '区块链安全', hint: 'EVM / Solidity / ABI / Proxy', group: '赛道' },
-      { type: 'view', id: 'common', icon: 'C', title: '通用工具', hint: '编码 / Hash / XOR / 自动试解', group: '页面' },
-      { type: 'view', id: 'knowledge', icon: 'K', title: '离线速查', hint: '协议、selector 与常用知识', group: '页面' }
+      { type: 'view', id: 'knowledge', icon: 'K', title: '离线速查', hint: 'AI 安全速查条目', group: '页面' }
     ];
     const recents = recentTools().map((id) => ({
       type: 'tool', id, icon: 'R', title: TOOL_META[id].title || id,

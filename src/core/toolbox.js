@@ -65,19 +65,8 @@ const EVM_OPCODES = (() => {
 })();
 
 const KNOWLEDGE = [
-  ['UDS 0x27', '车联网', 'SecurityAccess：奇数子功能通常请求 seed，偶数子功能提交 key。常见失败 NRC：0x35 invalidKey、0x36 exceedNumberOfAttempts、0x37 requiredTimeDelayNotExpired。'],
-  ['UDS 0x22', '车联网', 'ReadDataByIdentifier：后接 2 字节 DID，例如 22 F1 90 常用于读取 VIN。'],
-  ['UDS 0x36', '车联网', 'TransferData：常见于 ECU 下载/刷写流量，按 blockSequenceCounter 重组数据可恢复固件片段。'],
-  ['ISO-TP', '车联网', 'PCI 高半字节：0=Single Frame，1=First Frame，2=Consecutive Frame，3=Flow Control。'],
-  ['MAVLink 0', '低空经济', 'MSGID 0 = HEARTBEAT，用于识别飞控/地面站活性、类型与模式。'],
-  ['MAVLink 76', '低空经济', 'MSGID 76 = COMMAND_LONG，常承载 ARM/DISARM、TAKEOFF 等命令。'],
-  ['NMEA RMC', '低空经济', 'RMC 提供时间、状态、经纬度、地速与日期；A=有效定位，V=无效。'],
   ['Prompt Injection', '人工智能', '检查不可信输入是否直接进入 system/user prompt、RAG context 或工具参数；重点追踪模型输出到 shell/文件/网络等敏感 sink。'],
   ['torch.load', '人工智能', '对不可信 .pt/.pth 直接 torch.load 可能触发 pickle 反序列化。静态检查 ZIP/pickle 结构优先。'],
-  ['EVM 0xf4', '区块链', 'DELEGATECALL 在调用方上下文执行目标代码，重点检查可控 target、代理升级权限和 storage collision。'],
-  ['EVM 0xf1', '区块链', 'CALL：外部调用。审计时关注重入、返回值检查、可控 target/value/data。'],
-  ['0xa9059cbb', '区块链', 'ERC-20 transfer(address,uint256) 常见函数选择器。'],
-  ['0x23b872dd', '区块链', 'ERC-20 transferFrom(address,address,uint256) 常见函数选择器。']
 ].map(([term, domain, text]) => ({ term, domain, text }));
 
 function cleanHex(input) {

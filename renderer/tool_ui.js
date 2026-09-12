@@ -23,7 +23,7 @@
     'evm-calldata': ['EVM Calldata', '按 selector 和 32 字节 word 拆解 calldata。'],
     'evm-disasm': ['EVM 反汇编', '离线反汇编 bytecode，并标出调用、存储和代理相关指令。'],
     'codec': ['编码 / Hash / XOR', 'Hex、Base64、URL、Hash 和 XOR。'],
-    'knowledge-search': ['协议速查', '离线查询 UDS、MAVLink、EVM 和常用检查项。'],
+    'knowledge-search': ['AI 安全速查', '离线查询提示词注入、模型加载与常用 AI 检查项。'],
     'firmware-unpack': ['固件分析', '识别镜像结构、文件系统和可恢复段；支持导出和 Binwalk 解包。']
   };
 
@@ -49,7 +49,7 @@
     html = html.replace(/进入工具箱 →/g, '打开');
     html = html.replace(/Hex、Base64、URL、SHA-256、XOR 一页完成/g, 'Hex / Base64 / URL / Hash / XOR');
     html = html.replace(/文件类型、字符串、Flag、模型\/WAV\/PCAP 基础检查/g, '扫描附件、候选结果和可导出产物');
-    html = html.replace(/UDS、MAVLink、EVM、AI 常用知识无需联网/g, '协议字段、常用值和检查项');
+    html = html.replace(/AI 安全速查条目离线可用/g, 'AI 安全速查条目离线可用');
     return html;
   };
 
