@@ -16,9 +16,11 @@ The candidate is accepted as `ready-to-integrate` only when all of the following
 4. Quality score does not decrease.
 5. Duplicate ratio does not increase.
 6. Existing holdout eligibility and clean/unseen-family plans do not regress.
-7. At least one meaningful coverage dimension improves: quality score, effective coverage, event diversity, family diversity, holdout eligibility, or unseen-family holdout coverage.
+7. At least one **structural** coverage dimension improves: event diversity, family diversity, holdout eligibility, clean holdout plans, or unseen-family holdout coverage.
 
-A unique challenge that only increases raw count without improving those dimensions returns `no-meaningful-gain` and produces no patch.
+Quality score, provenance-weighted effective coverage, raw cases and challenge count are still reported in the before/after delta, but none of them can authorize integration by themselves. This prevents a unique challenge inside an already represented event/family from being treated as meaningful progress merely because the scalar quality score moved upward.
+
+A unique challenge that only increases raw/effective/challenge counts returns `no-meaningful-gain` and produces no patch.
 
 When accepted, the planner returns a patch plan containing the already validated corpus/test/doc artifacts and a separate registry action for `src/core/ai_training_curriculum.js`. Registry mutation intentionally remains a later step because repository tests and curriculum recomputation must happen after the files are written.
 
