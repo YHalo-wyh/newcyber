@@ -14,6 +14,7 @@ const {getDomesticBackdoorTrainingCorpus,runDomesticBackdoorTrainingRegression}=
 const {analyzeTrainingQuality}=require('./ai_training_quality');
 const {analyzeCrossEventHoldout}=require('./ai_training_holdout');
 const {buildTrainingSchedule}=require('./ai_training_scheduler');
+const {buildTrainingWorkOrders}=require('./ai_training_work_orders');
 
 const TARGET_DIRECTIONS=Object.freeze([
   'prompt-llm-security','adversarial-example','model-extraction','privacy-leakage',
@@ -97,18 +98,20 @@ function getTrainingCurriculum(){
   const quality=analyzeTrainingQuality(cases,{directions:TARGET_DIRECTIONS});
   const holdout=analyzeCrossEventHoldout(cases,{directions:TARGET_DIRECTIONS,minTrainEvents:2});
   const schedule=buildTrainingSchedule({cases,quality,holdout},{directions:TARGET_DIRECTIONS});
+  const workOrders=buildTrainingWorkOrders({schedule,cases},{limit:5});
   return{
     schema:'newcyber.ai-training-curriculum.v1',
     generatedFrom:CORPORA.map(({id,title,kind})=>({id,title,kind})),
-    summary:{cases:cases.length,corpora:CORPORA.length,events:uniqueCount(cases,'event'),challenges:uniqueCount(cases,challengeKey),families:uniqueCount(cases,'family'),directions:uniqueCount(cases,'direction'),byCorpus:countBy(cases,'corpus'),byDirection:countBy(cases,'direction'),byCaseType:countBy(cases,'caseType'),byEvidence:countBy(cases,evidenceTier),quality:quality.summary,holdout:holdout.summary,schedule:schedule.summary},
+    summary:{cases:cases.length,corpora:CORPORA.length,events:uniqueCount(cases,'event'),challenges:uniqueCount(cases,challengeKey),families:uniqueCount(cases,'family'),directions:uniqueCount(cases,'direction'),byCorpus:countBy(cases,'corpus'),byDirection:countBy(cases,'direction'),byCaseType:countBy(cases,'caseType'),byEvidence:countBy(cases,evidenceTier),quality:quality.summary,holdout:holdout.summary,schedule:schedule.summary,workOrders:workOrders.summary},
     coverageDebt:coverageDebt(cases),
     quality,
     holdout,
     schedule,
+    workOrders,
     duplicateGroups:duplicateGroups(cases),
     sourceErrors:collected.errors,
     cases,
-    note:'这是赛题驱动的确定性回归 curriculum，不是对底座模型做参数微调。raw case 数不再等价于训练覆盖；quality 评估覆盖结构，holdout 按完整 event 隔离生成跨赛事泛化评估计划，schedule 再据此排序下一轮应优先补齐的公开证据与回归缺口。'
+    note:'这是赛题驱动的确定性回归 curriculum，不是对底座模型做参数微调。raw case 数不再等价于训练覆盖；quality 评估覆盖结构，holdout 按完整 event 隔离生成跨赛事泛化评估计划，schedule 排序下一轮缺口，workOrders 再把高优先级缺口转成带证据、verifier 与验收门禁的采集任务单。'
   };
 }
 
@@ -143,12 +146,13 @@ function runTrainingCurriculumRegression(options={}){
     schema:'newcyber.ai-training-curriculum-regression.v1',
     variantsPerSeed:variants,
     suites,
-    summary:{suites:suites.length,suiteErrors:suites.filter((x)=>!x.ok).length,curriculumCases:curriculum.summary.cases,challenges:curriculum.summary.challenges,events:curriculum.summary.events,quality:curriculum.quality.summary,holdout:curriculum.holdout.summary,schedule:curriculum.schedule.summary},
+    summary:{suites:suites.length,suiteErrors:suites.filter((x)=>!x.ok).length,curriculumCases:curriculum.summary.cases,challenges:curriculum.summary.challenges,events:curriculum.summary.events,quality:curriculum.quality.summary,holdout:curriculum.holdout.summary,schedule:curriculum.schedule.summary,workOrders:curriculum.workOrders.summary},
     coverageDebt:curriculum.coverageDebt,
     quality:curriculum.quality,
     holdout:curriculum.holdout,
     schedule:curriculum.schedule,
-    note:'Full regression 聚合已有 deterministic replay；quality 检查语料结构，holdout 生成按 event 隔离的跨赛事评估计划，schedule 将这些缺口转成下一轮训练队列。'
+    workOrders:curriculum.workOrders,
+    note:'Full regression 聚合已有 deterministic replay；quality 检查语料结构，holdout 生成按 event 隔离的跨赛事评估计划，schedule 排队，workOrders 则定义下一轮公开证据采集与 synthetic verifier 的完成条件。'
   };
 }
 
