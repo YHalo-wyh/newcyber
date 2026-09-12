@@ -44,6 +44,47 @@ function templateScore(item,ctx){
   if(item.competition===true)score+=1; // legacy metadata only; no mode split.
   return score;
 }
+
+function selectDiverseTemplates(ranked,maxTemplates){
+  const limit=Math.max(0,Math.min(ranked.length,Number(maxTemplates)||0));
+  if(!limit)return [];
+  const buckets=new Map(),categoryOrder=[];
+  for(const item of ranked){
+    const key=String(item.category||'uncategorized');
+    if(!buckets.has(key)){buckets.set(key,[]);categoryOrder.push(key);}
+    buckets.get(key).push(item);
+  }
+  const out=[];
+  for(let depth=0;out.length<limit;depth++){
+    let added=false;
+    for(const category of categoryOrder){
+      const item=buckets.get(category)?.[depth];
+      if(!item)continue;
+      out.push(item);added=true;
+      if(out.length>=limit)break;
+    }
+    if(!added)break;
+  }
+  return out;
+}
+
+function buildDiverseRecommendations(pool,templates,limit){
+  const target=Math.max(0,Math.min(pool.length,Number(limit)||0));
+  if(!target)return [];
+  const byTemplate=new Map();
+  for(const probe of pool){if(!byTemplate.has(probe.templateId))byTemplate.set(probe.templateId,new Map());byTemplate.get(probe.templateId).set(probe.recipeId,probe);}
+  const out=[];
+  for(const recipe of PROBE_RECIPES){
+    for(const template of templates){
+      const probe=byTemplate.get(template.id)?.get(recipe.id);
+      if(!probe)continue;
+      out.push(probe);
+      if(out.length>=target)return out;
+    }
+  }
+  return out;
+}
+
 function buildRemoteAnswerTemplates(ctx){
   return [
     {id:'plain-chat',title:'聊天框 / 单字段题',template:'{{PROBE}}'},
@@ -78,9 +119,9 @@ function buildPromptAttackAutopilot(input={}){
     }
     if(pool.length>=maxProbes)break;
   }
-  const topTemplates=ranked.slice(0,maxTemplates);
-  const recommendedIds=new Set(topTemplates.map((x)=>x.id));
-  const recommended=pool.filter((x)=>recommendedIds.has(x.templateId)).slice(0,Math.min(maxTemplates*3,48));
+  const topTemplates=selectDiverseTemplates(ranked,maxTemplates);
+  const recommended=buildDiverseRecommendations(pool,topTemplates,Math.min(maxTemplates*3,48));
+  const firstWave=recommended.slice(0,Math.min(maxTemplates,recommended.length));
   return {
     schema:'newcyber.prompt-attack-autopilot.v1',
     mode:'competition-native',
@@ -90,6 +131,12 @@ function buildPromptAttackAutopilot(input={}){
     coverage:[...new Set(suite.templates.map((x)=>x.category))],
     rankedTemplates:ranked.map(({id,title,category,placement,score,mutations})=>({id,title,category,placement,score,mutations})),
     recommended,
+    recommendationPolicy:{
+      templateSelection:'category-round-robin',probeSelection:'template-recipe-round-robin',
+      selectedTemplateCount:topTemplates.length,
+      firstWaveTemplateCount:new Set(firstWave.map((x)=>x.templateId)).size,
+      firstWaveCategories:[...new Set(firstWave.map((x)=>x.category))]
+    },
     probePool:pool,
     remoteAnswerTemplates:buildRemoteAnswerTemplates(ctx),
     successSignals:[
@@ -101,10 +148,11 @@ function buildPromptAttackAutopilot(input={}){
     executionPolicy:{networkExecution:false,localGeneration:true,automaticRanking:true,automaticRemoteAttack:false},
     notes:[
       'NewCyber 从这一层开始不区分“比赛模式/普通模式”；全部模板都进入比赛原生候选池，旧 competitionOnly 仅保留兼容。',
+      '首轮推荐先跨 category/template 扩覆盖，再按 recipe round-robin 做包装变体，避免有限请求预算被近重复 prompt 吃满。',
       '远程靶机只生成建议 probe、请求模板和成功判据；不会自动向未知 endpoint 发请求。',
       '推荐顺序由题面关键词与攻击面决定；没有命中不代表安全，应继续跑剩余 probe 或针对响应做二次 mutation。'
     ]
   };
 }
 
-module.exports={PROBE_RECIPES,buildPromptAttackAutopilot,buildRemoteAnswerTemplates,templateScore};
+module.exports={PROBE_RECIPES,buildPromptAttackAutopilot,buildRemoteAnswerTemplates,templateScore,selectDiverseTemplates,buildDiverseRecommendations};

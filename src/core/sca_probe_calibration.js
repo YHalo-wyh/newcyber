@@ -130,8 +130,11 @@ function fitProbeCalibration({hiddenStates,profileTokenSequences,probeMatrix,pro
   const cosineGain=best.evaluation.calibratedCosine-best.evaluation.rawCosine;
   const mseImproved=!Number.isFinite(best.evaluation.rawMse)||best.evaluation.calibratedMse<best.evaluation.rawMse;
   if(!(cosineGain>=minGain&&mseImproved))return {status:'not-beneficial',coverage,rows:rows.length,trainingRows:split.training.length,validationRows:split.validation.length,mode:best.model.mode,evaluation:best.evaluation,cosineGain};
-  const summary={schema:'newcyber.sca-probe-calibration.v1',status:'accepted',mode:best.model.mode,coverage,rows:rows.length,trainingRows:split.training.length,validationRows:split.validation.length,hiddenDim,cosineGain,evaluation:best.evaluation,candidates:candidates.map((item)=>({mode:item.model.mode,evaluation:item.evaluation}))};
-  return {status:'ok',summary,project:best.model.project};
+  const rerankTelemetry={schema:'newcyber.sca-calibrated-rerank-telemetry.v1',status:'not-run'};
+  const summary={schema:'newcyber.sca-probe-calibration.v1',status:'accepted',mode:best.model.mode,coverage,rows:rows.length,trainingRows:split.training.length,validationRows:split.validation.length,hiddenDim,cosineGain,evaluation:best.evaluation,candidates:candidates.map((item)=>({mode:item.model.mode,evaluation:item.evaluation})),rerankTelemetry};
+  const project=best.model.project;
+  project.rerankTelemetry=rerankTelemetry;
+  return {status:'ok',summary,project};
 }
 
 function probeShape(probeMatrix,orientation){
@@ -163,31 +166,80 @@ function rankProjectedFullProbe(projected,probeMatrix,probeOptions){
   return {status:'ok',top:ranked.slice(0,topK),candidates:shape.candidateCount,hiddenDim:shape.hiddenDim};
 }
 
-function rerankCandidateShortlists({hiddenStates,candidates,project,probeMatrix,probeOptions,options={}}={}){
-  const hidden=list(hiddenStates),rows=list(candidates),candidateIds=list(probeOptions?.candidateIds).map(Number);
-  if(hidden.length!==rows.length||typeof project!=='function')return {status:'not-applicable',reason:'target hidden/candidate rows unavailable'};
-  const shape=probeShape(probeMatrix,probeOptions?.orientation);if(!shape||shape.hiddenDim!==(hidden[0]?.length||0)||candidateIds.length!==shape.candidateCount)return {status:'not-applicable',reason:'probe/candidate dimensions unavailable'};
-  const workPerRow=shape.candidateCount*shape.hiddenDim;const requestedFullRows=Math.max(0,Math.min(hidden.length,Number(options.fullProbeRows??hidden.length)));
-  const fullScanRows=workPerRow>0?Math.min(requestedFullRows,Math.floor(MAX_CALIBRATED_SCORE_OPS/workPerRow)):0;
-  const idToIndex=new Map();candidateIds.forEach((id,index)=>{if(!idToIndex.has(Number(id)))idToIndex.set(Number(id),index);});
-  const reranked=[];let fullProbeRecovered=0;
-  for(let rowIndex=0;rowIndex<rows.length;rowIndex++){
-    const projected=project(hidden[rowIndex]);
-    if(rowIndex<fullScanRows){
-      const full=rankProjectedFullProbe(projected,probeMatrix,probeOptions);
-      if(full.status==='ok'){
-        const prior=new Set(list(rows[rowIndex]).map((item)=>Number(item?.tokenId)));
-        if(full.top.some((item)=>!prior.has(Number(item.tokenId))))fullProbeRecovered+=1;
-        reranked.push(full.top);continue;
-      }
-    }
-    const ids=list(rows[rowIndex]).map((item)=>Number(item?.tokenId)).filter((id)=>idToIndex.has(id));
-    if(!ids.length){reranked.push(rows[rowIndex]);continue;}
-    const vectors=ids.map((id)=>probeVector(probeMatrix,probeOptions.orientation,idToIndex.get(id)));
-    const ranking=rankProbeCandidates(projected,vectors,{orientation:'candidate-rows',metric:probeOptions.metric,candidateIds:ids,topK:Math.min(ids.length,Number(probeOptions.topK)||ids.length)});
-    reranked.push(ranking.status==='ok'?ranking.top:rows[rowIndex]);
-  }
-  return {schema:'newcyber.sca-calibrated-shortlist.v2',status:'ok',rows:reranked.length,candidates:reranked,fullScanRows,fullProbeRecovered,workBudget:MAX_CALIBRATED_SCORE_OPS};
+function shortlistConfidence(row,index){
+  const values=list(row);const first=Number(values[0]?.score),second=Number(values[1]?.score);
+  if(!Number.isFinite(first)||!Number.isFinite(second))return {index,scored:false,relativeMargin:null};
+  const denominator=Math.max(1e-12,Math.abs(first)+Math.abs(second));
+  return {index,scored:true,relativeMargin:Math.max(0,(first-second)/denominator)};
 }
 
-module.exports={MAX_CALIBRATED_SCORE_OPS,probeVector,applyLinearProfile,fitProbeCalibration,rankProjectedFullProbe,rerankCandidateShortlists};
+function selectFullProbeRowIndices(rows,limit){
+  const count=Math.max(0,Math.min(list(rows).length,Number(limit)||0));
+  if(!count)return [];
+  return list(rows).map((row,index)=>shortlistConfidence(row,index)).sort((a,b)=>{
+    if(a.scored!==b.scored)return a.scored?1:-1;
+    if(a.scored&&b.scored&&a.relativeMargin!==b.relativeMargin)return a.relativeMargin-b.relativeMargin;
+    return a.index-b.index;
+  }).slice(0,count).map((item)=>item.index);
+}
+
+function publishRerankTelemetry(project,value){
+  const telemetry={schema:'newcyber.sca-calibrated-rerank-telemetry.v1',...value};
+  if(project?.rerankTelemetry&&typeof project.rerankTelemetry==='object')Object.assign(project.rerankTelemetry,telemetry);
+  return telemetry;
+}
+
+function rerankCandidateShortlists({hiddenStates,candidates,project,probeMatrix,probeOptions,options={}}={}){
+  const hidden=list(hiddenStates),rows=list(candidates),candidateIds=list(probeOptions?.candidateIds).map(Number);
+  if(hidden.length!==rows.length||typeof project!=='function'){
+    const reason='target hidden/candidate rows unavailable';publishRerankTelemetry(project,{status:'not-applicable',reason});return {status:'not-applicable',reason};
+  }
+  const shape=probeShape(probeMatrix,probeOptions?.orientation);
+  if(!shape||shape.hiddenDim!==(hidden[0]?.length||0)||candidateIds.length!==shape.candidateCount){
+    const reason='probe/candidate dimensions unavailable';publishRerankTelemetry(project,{status:'not-applicable',reason});return {status:'not-applicable',reason};
+  }
+  const workPerRow=shape.candidateCount*shape.hiddenDim;
+  const requestedFullRows=Math.max(0,Math.min(hidden.length,Number(options.fullProbeRows??hidden.length)));
+  const fullScanRows=workPerRow>0?Math.min(requestedFullRows,Math.floor(MAX_CALIBRATED_SCORE_OPS/workPerRow)):0;
+  const fullScanIndices=selectFullProbeRowIndices(rows,fullScanRows),fullScanSet=new Set(fullScanIndices);
+  const unscoredPriorityRows=fullScanIndices.filter((index)=>!shortlistConfidence(rows[index],index).scored).length;
+  const idToIndex=new Map();candidateIds.forEach((id,index)=>{if(!idToIndex.has(Number(id)))idToIndex.set(Number(id),index);});
+  const reranked=[];
+  let fullScanAttemptedRows=0,fullScanSucceededRows=0,fullProbeExpandedRows=0,top1ChangedRows=0;
+  for(let rowIndex=0;rowIndex<rows.length;rowIndex++){
+    const projected=project(hidden[rowIndex]);
+    let finalRow=null;
+    if(fullScanSet.has(rowIndex)){
+      fullScanAttemptedRows+=1;
+      const full=rankProjectedFullProbe(projected,probeMatrix,probeOptions);
+      if(full.status==='ok'){
+        fullScanSucceededRows+=1;
+        const prior=new Set(list(rows[rowIndex]).map((item)=>Number(item?.tokenId)));
+        if(full.top.some((item)=>!prior.has(Number(item.tokenId))))fullProbeExpandedRows+=1;
+        finalRow=full.top;
+      }
+    }
+    if(!finalRow){
+      const ids=list(rows[rowIndex]).map((item)=>Number(item?.tokenId)).filter((id)=>idToIndex.has(id));
+      if(!ids.length)finalRow=rows[rowIndex];
+      else{
+        const vectors=ids.map((id)=>probeVector(probeMatrix,probeOptions.orientation,idToIndex.get(id)));
+        const ranking=rankProbeCandidates(projected,vectors,{orientation:'candidate-rows',metric:probeOptions.metric,candidateIds:ids,topK:Math.min(ids.length,Number(probeOptions.topK)||ids.length)});
+        finalRow=ranking.status==='ok'?ranking.top:rows[rowIndex];
+      }
+    }
+    const priorTop1=Number(list(rows[rowIndex])[0]?.tokenId),nextTop1=Number(list(finalRow)[0]?.tokenId);
+    if(Number.isFinite(priorTop1)&&Number.isFinite(nextTop1)&&priorTop1!==nextTop1)top1ChangedRows+=1;
+    reranked.push(finalRow);
+  }
+  const telemetry=publishRerankTelemetry(project,{
+    status:'ok',rows:reranked.length,selectionMode:'uncertainty-margin',requestedFullRows,fullScanRows,fullScanAttemptedRows,fullScanSucceededRows,
+    fullScanFailedRows:Math.max(0,fullScanAttemptedRows-fullScanSucceededRows),fallbackRows:Math.max(0,reranked.length-fullScanSucceededRows),unscoredPriorityRows,
+    fullProbeExpandedRows,fullProbeRecovered:fullProbeExpandedRows,top1ChangedRows,top1StableRows:Math.max(0,reranked.length-top1ChangedRows),
+    candidateCount:shape.candidateCount,hiddenDim:shape.hiddenDim,workPerRow,workBudget:MAX_CALIBRATED_SCORE_OPS,
+    estimatedFullScanOps:fullScanAttemptedRows*workPerRow,budgetLimited:fullScanRows<requestedFullRows
+  });
+  return {schema:'newcyber.sca-calibrated-shortlist.v2',status:'ok',rows:reranked.length,candidates:reranked,...telemetry};
+}
+
+module.exports={MAX_CALIBRATED_SCORE_OPS,probeVector,applyLinearProfile,fitProbeCalibration,rankProjectedFullProbe,shortlistConfidence,selectFullProbeRowIndices,rerankCandidateShortlists,publishRerankTelemetry};
