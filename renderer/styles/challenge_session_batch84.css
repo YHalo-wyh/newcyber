@@ -34,3 +34,15 @@ body.sidebar-collapsed .cs84-solve-nav{padding:10px;justify-content:center}
 body.sidebar-collapsed .cs84-solve-nav b{display:none}
 .cs84-solve-nav{justify-content:flex-start}
 body.sidebar-collapsed .cs84-solve-nav{justify-content:center}
+
+/* ── 分析明细：默认展开、全文显示、可跳工具 ── */
+.cs84-details[open] .cs84-detail-body{animation:cs84-fade .18s ease}
+@keyframes cs84-fade{from{opacity:0}to{opacity:1}}
+.cs84-ledger article{display:grid;grid-template-columns:14px 1fr auto;gap:10px;align-items:start;padding:10px 8px;border-bottom:1px solid rgba(255,255,255,.05)}
+.cs84-ledger article:last-child{border-bottom:0}
+.cs84-step-detail{white-space:pre-wrap;word-break:break-word;overflow-wrap:anywhere;background:#0a1016;border:1px solid rgba(255,255,255,.05);border-radius:6px;padding:8px;margin:7px 0 0;color:#b9c6d4;font:10px/1.6 Consolas,'SFMono-Regular',monospace;max-height:none}
+.cs84-step-output{border-color:#2b4a63;color:#cfe3f5}
+.cs84-step-tool{grid-column:2/-1;justify-self:start;margin-top:8px;font-size:10px}
+.cs84-drop{cursor:pointer}
+.cs84-drop:hover .cs84-drop-mark{transform:scale(1.06)}
+.cs84-drop .cs84-drop-mark{transition:transform .18s ease}

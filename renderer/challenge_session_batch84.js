@@ -73,12 +73,11 @@
   }
 
   function emptyHome(){
-    return `<div class="cs84-home"><section class="cs84-drop" data-session-drop tabindex="0">
+    return `<div class="cs84-home"><section class="cs84-drop" data-session-drop data-session-open-file tabindex="0" title="点击选择文件，或直接把文件拖进来">
       <div class="cs84-drop-mark">＋</div>
-      <span>自动解题</span><h1>把压缩包 / 附件丢进来</h1>
-      <p>自动展开、识别题型、跑确定性分析、模型推理与 checker 复核。能出结果就直接显示；缺材料只告诉你下一步唯一需要补什么。</p>
-      <div class="cs84-home-actions"><button class="button primary" data-session-open-file>选择题目文件</button><button class="button ghost" data-action="choose-workspace">打开赛题目录</button></div>
-      <small>ZIP / TAR / TGZ 会安全展开；普通附件直接进入隔离 Session。默认不执行不可信题目脚本。</small>
+      <span>自动解题</span><h1>把压缩包 / 附件拖进来</h1>
+      <p>松手即自动分析：安全展开压缩包、识别题型、跑全部确定性分析、模型推理与 checker 复核。能出结果就直接显示；解不出来会给出可直接丢给其他 AI 的具体交接建议。</p>
+      <small>点击卡片也可以选择文件 · ZIP / TAR / TGZ 安全展开 · 默认不执行不可信题目脚本</small>
     </section></div>`;
   }
 
@@ -103,7 +102,7 @@
       ${provide.length?`<div class="cs84-next-row"><strong>提供</strong><div>${provide.map((item)=>`<span>${esc(item)}</span>`).join('')}</div></div>`:''}
       ${next.format?`<div class="cs84-next-row"><strong>格式</strong><p>${esc(next.format)}</p></div>`:''}
       <div class="cs84-next-row"><strong>放哪里</strong><p>${esc(next.where||placement())}</p></div>
-      <div class="cs84-next-actions">${action}<button class="button ghost" data-cs84-copy-next>复制要求</button></div>${drop}
+      <div class="cs84-next-actions">${action}<button class="button ghost" data-cs84-copy-next>复制要求</button><button class="button primary" data-cs84-copy-ai>丢给其他 AI 解</button></div>${drop}
     </section>`;
   }
 
@@ -118,6 +117,59 @@
     </div>`;
   }
 
+  function stepToolFor(item){
+    if(item.tool&&typeof TOOL_META!=='undefined'&&TOOL_META[item.tool])return item.tool;
+    const hay=`${item.title||''} ${item.id||''} ${item.detail||''}`;
+    const map=[
+      [/模型算术|hidden[- ]?head/i,'ai-model-arithmetic-auto'],
+      [/提示词攻击|提示词注入|prompt/i,'ai-prompt-injection-suite'],
+      [/supply|供应链/i,'ai-supply-chain-audit'],
+      [/onnx|对抗样本/i,'ai-adversarial-batch'],
+      [/表格|tabular|candidate/i,'ai-tabular-candidate'],
+      [/泄漏|leakage|功耗/i,'ai-leakage-solve'],
+      [/pytorch|cuda|运行时/i,'local-torch-inspect']
+    ];
+    for(const [re,tool] of map){if(re.test(hay)&&typeof TOOL_META!=='undefined'&&TOOL_META[tool])return tool;}
+    return null;
+  }
+
+  function writeupMarkdown(a,s){
+    const ledger=list(s?.solverLedger);const findings=list(a?.findings);const result=effectiveResult(a,s);const verified=isVerified(a,s);
+    const L=[];
+    L.push(`# ${challengeName()} — WriteUp 素材`,'');
+    L.push(`- 状态：${verified?'已验证':result?'有候选':'未闭环'}`);
+    L.push(`- 附件：${Number(s?.stats?.files||0)} 文件 / ${Number(s?.stats?.templatesRun||ledger.length)||0} 项自动分析`,'');
+    if(result){L.push('## 结果',`- ${verified?'VERIFIED':'CANDIDATE'}: ${result.value||result.display||''}`,`- 产出链路：${text(result.source||'workspace')}`,'');}
+    L.push('## 分析过程');
+    for(const [i,item] of ledger.entries()){
+      L.push(`### ${i+1}. ${item.title||item.id||'步骤'} [${String(item.status||'ran').toUpperCase()}]`);
+      if(item.detail)L.push(item.detail);
+      if(item.result&&item.result!==item.detail)L.push(`- 输出：${item.result}`);
+      if(item.tool)L.push(`- 工具：${item.tool}`);
+      L.push('');
+    }
+    if(findings.length){L.push('## 关键 Finding');for(const f of findings)L.push(`- [${String(f.severity||'info').toUpperCase()}] ${f.title||f.id}${f.file?` (${f.file})`:''}\n  - ${f.evidence||f.detail||''}`);L.push('');}
+    const next=genericNext(a,s);
+    if(next){L.push('## 下一步',`- ${next.title||''}：${next.why||''}`,next.format?`- 期望格式：${next.format}`:'');}
+    return L.join('\n');
+  }
+
+  function aiHandoffText(a,s){
+    const existing=s?.aiHandoff?.markdown;
+    if(existing)return existing;
+    const ledger=list(s?.solverLedger);const findings=list(a?.findings);const result=effectiveResult(a,s);const next=genericNext(a,s);
+    const L=[`我在用确定性分析工具链解一道 CTF 题，自动分析没有完全闭环，请你基于以下事实继续推理。`,'',
+      `## 题目`, `- 名称：${challengeName()}`,`- 文件数：${list(a?.files).length}`,'',
+      '## 已经跑过的分析（不要重复）'];
+    for(const item of ledger)L.push(`- ${item.title||item.id}：${String(item.status||'ran').toUpperCase()}${item.detail?` · ${String(item.detail).slice(0,300)}`:''}`);
+    L.push('','## 当前结果');
+    if(result)L.push(`- ${isVerified(a,s)?'VERIFIED':'CANDIDATE'}: ${result.value||result.display||''}`);else L.push('- 尚无候选 Flag');
+    if(findings.length){L.push('','## 关键 Finding');for(const f of findings.slice(0,12))L.push(`- [${String(f.severity||'info').toUpperCase()}] ${f.title||f.id}：${String(f.evidence||f.detail||'').slice(0,300)}`);}
+    if(next){L.push('','## NewCyber 判断的下一步',`- ${next.title||''}：${next.why||''}`,next.provide?`- 需要提供：${list(next.provide).join(' / ')}`:'');}
+    L.push('','## 请你做的事','1. 基于以上事实给出最可能的题型与解法路径，不要从零开始猜。','2. 给出我可以直接复制执行的具体步骤（命令 / 脚本 / 参数）。','3. 如果还缺材料，精确说明只缺什么、去哪里拿。','4. 得到 Flag 时说明验证方式。');
+    return L.join('\n');
+  }
+
   function detailPanel(a,s){
     const ledger=list(s?.solverLedger).slice(0,24);const tools=list(s?.toolFallbacks).slice(0,10);const findings=list(a?.findings).slice(0,12);
     const onnx=a?.onnxContestAutopilot;const membership=a?.aiMembershipAutopilot;
@@ -126,12 +178,13 @@
       onnx&&onnx.status!=='not-applicable'?`ONNX: ${onnx.status}${onnx.runs!=null?` · ${onnx.runs} runs`:''}`:null,
       a?.verifierContractAutopilot?.status&&a.verifierContractAutopilot.status!=='not-applicable'?`Verifier: ${a.verifierContractAutopilot.status}`:null
     ].filter(Boolean);
-    return `<details class="cs84-details"><summary><span>查看分析细节</span><small>${ledger.length} 个步骤 · ${findings.length} 个重点 finding</small></summary><div class="cs84-detail-body">
+    return `<details class="cs84-details" open><summary><span>分析过程明细</span><small>${ledger.length} 个步骤 · ${findings.length} 个重点 finding</small></summary><div class="cs84-detail-body">
       ${technical.length?`<div class="cs84-tech">${technical.map((item)=>`<span>${esc(item)}</span>`).join('')}</div>`:''}
-      <div class="cs84-ledger">${ledger.map((item)=>`<article><i class="${esc(item.status||'ran')}"></i><div><b>${esc(item.title||item.id||'自动步骤')}</b><small>${esc(shortened(item.detail||item.result||'',180))}</small></div><em>${esc(String(item.status||'ran').toUpperCase())}</em></article>`).join('')||'<p>暂无专项步骤记录。</p>'}</div>
-      ${findings.length?`<div class="cs84-findings"><b>重点 Finding</b>${findings.map((item)=>`<p><strong>${esc(item.title||item.id||'Finding')}</strong><span>${esc(shortened(item.evidence||item.detail||'',220))}</span></p>`).join('')}</div>`:''}
+      <div class="cs84-ledger">${ledger.map((item)=>{const tool=stepToolFor(item);
+        return `<article><i class="${esc(item.status||'ran')}"></i><div><b>${esc(item.title||item.id||'自动步骤')}</b><pre class="cs84-step-detail">${esc(item.detail||item.result||'（本步骤没有产出细节）')}</pre>${item.result&&item.result!==item.detail?`<pre class="cs84-step-detail cs84-step-output">${esc(item.result)}</pre>`:''}</div><em>${esc(String(item.status||'ran').toUpperCase())}</em>${tool?`<button class="button ghost cs84-step-tool" data-tool="${esc(tool)}" title="在工具箱中打开并深入分析">打开 ${esc(String(tool))}</button>`:''}</article>`;}).join('')||'<p>暂无专项步骤记录。</p>'}</div>
+      ${findings.length?`<div class="cs84-findings"><b>重点 Finding</b>${findings.map((item)=>`<p><strong>${esc(item.title||item.id||'Finding')}</strong><span>${esc(item.evidence||item.detail||'')}</span></p>`).join('')}</div>`:''}
       ${tools.length?`<div class="cs84-tools"><b>需要手工复核时再打开</b>${tools.map((item)=>`<button class="button ghost" data-tool="${esc(item.tool)}">${esc(item.title||'专业工具')}</button>`).join('')}</div>`:''}
-      <div class="cs84-detail-actions"><button class="button ghost" data-action="export-report">导出完整报告</button>${s?.aiHandoff?.ready?'<button class="button ghost" data-session-copy-handoff>复制本地 AI 接管包</button>':''}</div>
+      <div class="cs84-detail-actions"><button class="button ghost" data-action="export-report">导出完整报告</button><button class="button ghost" data-cs84-copy-wp>复制 WriteUp 素材（Markdown）</button><button class="button primary" data-cs84-copy-ai>复制给其他 AI 继续解</button></div>
     </div></details>`;
   }
 
@@ -153,7 +206,7 @@
     if(state.tool&&state.workspace)primary='<button class="button primary" data-session-return>返回结果</button>';
     else if(state.workspace&&isFileSession())primary='<button class="button primary" data-session-add-files>补充材料</button><button class="button ghost" data-session-open-file>新题目</button>';
     else if(state.workspace)primary='<button class="button primary" data-action="rescan-workspace">重新分析</button><button class="button ghost" data-session-open-file>新题目</button>';
-    else primary='<button class="button primary" data-session-open-file>选择题目</button>';
+    else if(state.tool)primary='';
     const aiNav=(()=>{
       const seen=new Set();const items=[];
       const push=(id,label)=>{if(!id||seen.has(id))return;seen.add(id);const title=String(label||id);items.push(`<button class="cs84-ai-item${state.tool===id?' active':''}" data-tool="${esc(id)}" title="${esc(title)}">${esc(title)}</button>`);};
@@ -173,9 +226,17 @@
   document.addEventListener('click',async(event)=>{
     const copyResult=event.target.closest?.('[data-cs84-copy-result]');
     const copyNext=event.target.closest?.('[data-cs84-copy-next]');
+    const copyWp=event.target.closest?.('[data-cs84-copy-wp]');
+    const copyAi=event.target.closest?.('[data-cs84-copy-ai]');
     if(copyResult){
       const value=resultPayload(state.workspace,currentSession());if(!value)return;
       try{await navigator.clipboard.writeText(value);toast('结果已复制');}catch{toast('复制失败',true);}return;
+    }
+    if(copyWp){
+      try{await navigator.clipboard.writeText(writeupMarkdown(state.workspace,currentSession()));toast('WriteUp 素材已复制（Markdown）');}catch{toast('复制失败',true);}return;
+    }
+    if(copyAi){
+      try{await navigator.clipboard.writeText(aiHandoffText(state.workspace,currentSession()));toast('交接包已复制：粘贴给其他 AI 即可继续');}catch{toast('复制失败',true);}return;
     }
     if(copyNext){
       const next=genericNext(state.workspace,currentSession());if(!next)return;
