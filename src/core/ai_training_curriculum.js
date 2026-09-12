@@ -11,6 +11,7 @@ const {getAiVillageTrainingCorpus,runAiVillageTrainingRegression}=require('./ai_
 const {getPromptCtfTrainingCorpus,runPromptCtfTrainingRegression}=require('./ai_prompt_ctf_training');
 const {getDomesticDetectionTrainingCorpus,runDomesticDetectionTrainingRegression}=require('./ai_domestic_detection_training');
 const {getDomesticBackdoorTrainingCorpus,runDomesticBackdoorTrainingRegression}=require('./ai_domestic_backdoor_training');
+const {getTrainingCorpus:getStarpwnStarryHacksTrainingCorpus}=require('./ai_training_starpwn_ctf_2026_starry_hacks_dependency_confusion_unpinned_version');
 const {analyzeTrainingQuality}=require('./ai_training_quality');
 const {analyzeCrossEventHoldout}=require('./ai_training_holdout');
 const {buildTrainingSchedule}=require('./ai_training_scheduler');
@@ -32,7 +33,8 @@ const CORPORA=Object.freeze([
   {id:'aivillage-defcon-30-31',title:'AI Village DEFCON 30/31 challenge replay',kind:'ctf-derived',get:getAiVillageTrainingCorpus},
   {id:'prompt-agent-ctf',title:'Prompt / Agent CTF challenge replay',kind:'ctf-derived',get:getPromptCtfTrainingCorpus},
   {id:'domestic-detection-ranges-2025',title:'2025 domestic AI detection ranges',kind:'ctf-derived',get:getDomesticDetectionTrainingCorpus},
-  {id:'domestic-backdoor-poisoning-2025-2026',title:'2025-2026 domestic backdoor / poisoning replay',kind:'ctf-derived',get:getDomesticBackdoorTrainingCorpus}
+  {id:'domestic-backdoor-poisoning-2025-2026',title:'2025-2026 domestic backdoor / poisoning replay',kind:'ctf-derived',get:getDomesticBackdoorTrainingCorpus},
+  {id:'starpwn-2026-starry-hacks',title:'STARPWN CTF 2026 — Starry hacks',kind:'ctf-derived',get:getStarpwnStarryHacksTrainingCorpus}
 ]);
 
 function text(value){return value==null?'':String(value).trim();}
