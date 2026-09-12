@@ -24,6 +24,7 @@ const { runPromptCtfTrainingRegression, getPromptCtfTrainingCorpus } = require('
 const { runDomesticDetectionTrainingRegression, getDomesticDetectionTrainingCorpus, evaluateBinaryDetectionReplay, evaluateLossHistoryPoisonReplay } = require('./ai_domestic_detection_training');
 const { getTrainingCurriculum, runTrainingCurriculumRegression } = require('./ai_training_curriculum');
 const { buildTrainingWorkOrders } = require('./ai_training_work_orders');
+const { checkCandidate, buildIntakeTemplate } = require('./ai_training_evidence_intake');
 const { matchTrainingFamilies } = require('./ai_training_family_matcher');
 const { runIchunqiuAiTrainingRegression, getIchunqiuAiTrainingCorpus, evaluateFalsePremiseReplay } = require('./ai_ichunqiu_training');
 const { analyzeRasterImage, compareRasterImages, analyzeNpySample, compareNpySamples } = require('./ai_sample_forensics');
@@ -81,6 +82,8 @@ function runTool(tool, payload = {}) {
   if (tool === 'ai-training-curriculum') return getTrainingCurriculum();
   if (tool === 'ai-training-schedule') return getTrainingCurriculum().schedule;
   if (tool === 'ai-training-work-orders') { const curriculum=getTrainingCurriculum(); return buildTrainingWorkOrders({schedule:curriculum.schedule,cases:curriculum.cases},payload.options || payload.input || payload || {}); }
+  if (tool === 'ai-training-evidence-intake') { const curriculum=getTrainingCurriculum(); return checkCandidate(payload.input || payload,{cases:curriculum.cases,workOrders:curriculum.workOrders}); }
+  if (tool === 'ai-training-evidence-template') { const curriculum=getTrainingCurriculum(); const options=payload.options || payload.input || payload || {}; const order=(curriculum.workOrders.orders||[]).find((row)=>row.id===options.workOrderId || row.direction===options.direction) || curriculum.workOrders.orders?.[0] || null; return buildIntakeTemplate(order); }
   if (tool === 'ai-training-full-regression') return runTrainingCurriculumRegression(payload.options || payload.input || {});
   if (tool === 'ai-training-family-match') return matchTrainingFamilies(payload.input || payload, payload.options || {});
   if (tool === 'ai-stage1-training-regression') return runAiStage1TrainingRegression(payload.options || payload.input || {});
